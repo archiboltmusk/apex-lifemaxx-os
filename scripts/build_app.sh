@@ -90,6 +90,12 @@ if [ -d "public/models" ]; then
     cp -R public/models/* "$APP_BUNDLE/Contents/Resources/models/"
 fi
 
+# Embed WASM binaries into Resources
+if [ -d "public/wasm" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/wasm"
+    cp -R public/wasm/* "$APP_BUNDLE/Contents/Resources/wasm/"
+fi
+
 APP_SIZE=$(du -sh "$APP_BUNDLE" | awk '{print $1}')
 echo -e "${COLOR_GREEN}  ✓ Complete Standalone App Bundle assembled: $APP_SIZE${COLOR_RESET}"
 

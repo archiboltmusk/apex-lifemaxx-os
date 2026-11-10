@@ -419,6 +419,101 @@ export default function App() {
               </div>
             </div>
 
+            {/* WHAT TO DO RIGHT NOW — PROACTIVE AI EXECUTIVE DIRECTIVE */}
+            <div className="mt-6 p-5 rounded-[24px] bg-gradient-to-r from-black/80 via-[#0A0D14]/90 to-black/80 border border-white/20 shadow-[0_15px_40px_rgba(0,0,0,0.8)] relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-32 bg-[#E5FE40]/10 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-ping" />
+                  <span className="text-[11px] font-mono font-black text-[#E5FE40] uppercase tracking-wider">
+                    PROACTIVE AI DIRECTIVE // WHAT TO DO RIGHT NOW
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40">
+                  AUTONOMIC RECOVERY 94% · GREEN LIGHT TO PUSH
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono mb-4">
+                <div className="p-3 rounded-[14px] bg-white/[0.04] border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#FA114F] font-bold block">1. PHYSICAL STRAIN DIRECTIVE</span>
+                  <p className="text-white font-bold text-sm">Hit 18.0 Day Strain (+1.2 needed)</p>
+                  <p className="text-[11px] text-[#A1A1AA]">
+                    Execute 3 sets of 15 bodyweight squats using FaceTime AI Kinematics. Verify 90° depth.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-white/[0.04] border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#00F0FF] font-bold block">2. NUTRITION & ANABOLISM</span>
+                  <p className="text-white font-bold text-sm">320 kcal & 14g Protein Remaining</p>
+                  <p className="text-[11px] text-[#A1A1AA]">
+                    Consume grass-fed whey or Greek yogurt with 5g creatine before 7:30 PM.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-white/[0.04] border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#38BDF8] font-bold block">3. CIRCADIAN SLEEP ARCHITECTURE</span>
+                  <p className="text-white font-bold text-sm">Target Bedtime: 10:30 PM (8.2h Goal)</p>
+                  <p className="text-[11px] text-[#A1A1AA]">
+                    Digital sunset at 9:30 PM. 144mg Magnesium L-Threonate + palatal tongue posture.
+                  </p>
+                </div>
+              </div>
+
+              {/* Actionable Launchers */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10 text-xs font-mono">
+                <span className="text-[#8A8A8A] text-[11px] mr-1">EXECUTE NOW:</span>
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('fitness');
+                    setFitnessSubTab('camera');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-[#FA114F]/20 text-[#FA114F] hover:bg-[#FA114F]/30 border border-[#FA114F]/40 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>START CAMERA SQUATS</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('looks');
+                    setLooksSubTab('lidar');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-[#00F0FF]/20 text-[#00F0FF] hover:bg-[#00F0FF]/30 border border-[#00F0FF]/40 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>RUN CRANIOFACIAL LIDAR MESH</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('looks');
+                    setLooksSubTab('voice');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-[#E5FE40]/20 text-[#E5FE40] hover:bg-[#E5FE40]/30 border border-[#E5FE40]/40 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>VOICE RESONANCE TEST</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('bio');
+                    setBioSubTab('consigliere');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>OPEN AI COACH BRIEFING</span>
+                </button>
+              </div>
+            </div>
+
             {/* Quick Action Matrix */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-6">
               <button

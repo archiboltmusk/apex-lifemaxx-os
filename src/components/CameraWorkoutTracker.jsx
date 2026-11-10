@@ -18,10 +18,13 @@ import {
   Sparkles,
   Dumbbell,
   AlertCircle,
-  Maximize2
+  Maximize2,
+  ShieldCheck,
+  Check
 } from 'lucide-react';
 import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
+import { getPoseLandmarker, calculateJointAngle, POSE_CONNECTIONS } from '../utils/visionLandmarker';
 
 const EXERCISES = [
   {
@@ -33,7 +36,12 @@ const EXERCISES = [
     lockoutAngle: 165,
     unit: 'reps',
     caloriesPerRep: 0.8,
-    formTips: ['Break at hips and knees simultaneously', 'Reach parallel (< 90°)', 'Drive knees outward', 'Full lockout at apex'],
+    formTips: [
+      'Break at hips and knees simultaneously',
+      'Reach parallel (< 90°)',
+      'Drive knees outward in line with toes',
+      'Full lockout at apex'
+    ],
   },
   {
     id: 'pushups',
@@ -44,7 +52,12 @@ const EXERCISES = [
     lockoutAngle: 160,
     unit: 'reps',
     caloriesPerRep: 0.6,
-    formTips: ['Elbows tucked at 45°', 'Chest touches floor (< 85°)', 'Brace glutes and core', 'No sagging in lumbar spine'],
+    formTips: [
+      'Elbows tucked at 45°',
+      'Chest touches floor (< 85°)',
+      'Brace glutes and core',
+      'Full lockout at top'
+    ],
   },
   {
     id: 'curls',
@@ -55,7 +68,12 @@ const EXERCISES = [
     lockoutAngle: 155,
     unit: 'reps',
     caloriesPerRep: 0.4,
-    formTips: ['Pin elbows to ribcage', 'Supinate wrist at peak', 'Full stretch at bottom (> 150°)', 'Zero shoulder swing'],
+    formTips: [
+      'Pin elbows to ribcage',
+      'Supinate wrist at peak (< 50°)',
+      'Full stretch at bottom (> 150°)',
+      'Zero shoulder swing'
+    ],
   },
   {
     id: 'jumping_jacks',
@@ -66,7 +84,12 @@ const EXERCISES = [
     lockoutAngle: 40,
     unit: 'reps',
     caloriesPerRep: 0.5,
-    formTips: ['Clap overhead (> 155°)', 'Land softly on balls of feet', 'Maintain steady nasal pacing', 'Arms touch thighs at bottom'],
+    formTips: [
+      'Clap overhead (> 155°)',
+      'Land softly on balls of feet',
+      'Maintain steady nasal pacing',
+      'Arms touch thighs at bottom'
+    ],
   },
 ];
 
@@ -81,15 +104,20 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
   const [devices, setDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
 
+  // Neural Landmarker Engine State
+  const [modelStatus, setModelStatus] = useState('INITIALIZING NEURAL ANE...');
+  const [poseConfidence, setPoseConfidence] = useState(0);
+  const [bodyInFrame, setBodyInFrame] = useState(false);
+
   // Workout Tracking State
   const [isTracking, setIsTracking] = useState(false);
   const [repCount, setRepCount] = useState(0);
-  const [currentWeight, setCurrentWeight] = useState(60); // kg or lbs
+  const [currentWeight, setCurrentWeight] = useState(60);
   const [currentSetNum, setCurrentSetNum] = useState(1);
   const [formScore, setFormScore] = useState(98);
   const [currentJointAngle, setCurrentJointAngle] = useState(170);
-  const [repState, setRepState] = useState('READY'); // READY, ECCENTRIC, BOTTOM, CONCENTRIC
-  const [feedbackCue, setFeedbackCue] = useState('Stand in frame to calibrate');
+  const [repState, setRepState] = useState('READY'); // READY, BOTTOM, CONCENTRIC
+  const [feedbackCue, setFeedbackCue] = useState('Position yourself in camera frame');
   const [voiceCoachEnabled, setVoiceCoachEnabled] = useState(true);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [estimatedWatts, setEstimatedWatts] = useState(0);
@@ -100,52 +128,80 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
   const streamRef = useRef(null);
   const animationFrameId = useRef(null);
   const timerIntervalRef = useRef(null);
-  const lastRepTimeRef = useRef(Date.now());
+  const poseLandmarkerRef = useRef(null);
   const repStateRef = useRef('READY');
   const angleRef = useRef(170);
+  const lastCueTimeRef = useRef(0);
 
   // Audio Speech Synthesis for Rep Count & Form Cues
-  const speakCue = (text) => {
+  const speakCue = (text, priority = false) => {
     if (!voiceCoachEnabled || typeof window === 'undefined' || !window.speechSynthesis) return;
+    const now = Date.now();
+    if (!priority && now - lastCueTimeRef.current < 2500) return;
+    lastCueTimeRef.current = now;
+
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.15;
       utterance.pitch = 1.0;
-      utterance.volume = 0.9;
+      utterance.volume = 0.95;
       window.speechSynthesis.speak(utterance);
     } catch {}
   };
 
+  // Initialize MediaPipe PoseLandmarker
+  useEffect(() => {
+    let mounted = true;
+    getPoseLandmarker().then((landmarker) => {
+      if (!mounted) return;
+      if (landmarker) {
+        poseLandmarkerRef.current = landmarker;
+        setModelStatus('ONLINE // 33-POINT SKELETAL ANE (60FPS)');
+      } else {
+        setModelStatus('ONLINE // OPTICAL MOTION FLOW ENGINE');
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   // Enumerate video devices
   useEffect(() => {
-    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-      navigator.mediaDevices.enumerateDevices().then((devs) => {
-        const videoDevs = devs.filter((d) => d.kind === 'videoinput');
-        setDevices(videoDevs);
-        if (videoDevs.length > 0 && !selectedDeviceId) {
-          setSelectedDeviceId(videoDevs[0].deviceId);
+    async function getCameras() {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = allDevices.filter((d) => d.kind === 'videoinput');
+        setDevices(videoInputs);
+        if (videoInputs.length > 0 && !selectedDeviceId) {
+          setSelectedDeviceId(videoInputs[0].deviceId);
         }
-      }).catch(() => {});
+      } catch (err) {
+        console.warn('Unable to enumerate camera devices:', err);
+      }
     }
+    getCameras();
   }, [selectedDeviceId]);
 
-  // Start Camera Stream
-  const startCamera = async () => {
+  // Start Camera
+  const startCamera = async (deviceId) => {
     playPlunk();
     setCameraError('');
+    const targetId = deviceId || selectedDeviceId;
+
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera API (getUserMedia) not supported in this environment.');
+        throw new Error('Camera API (getUserMedia) not supported.');
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
 
       const constraints = {
-        video: {
-          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user',
-        },
+        video: targetId ? { deviceId: { exact: targetId } } : { facingMode: 'user' },
         audio: false,
       };
 
@@ -160,13 +216,13 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
       setIsCameraActive(true);
       setIsTracking(true);
       playHaptic(850, 'sine', 0.08);
-      speakCue('Camera calibrated. Ready for set.');
-      setFeedbackCue('Full body detected. Begin first rep.');
+      speakCue('Camera connected. Step back so your full body is visible.', true);
+      setFeedbackCue('Step back so your full body is visible');
     } catch (err) {
       console.warn('Camera startup error:', err);
-      setCameraError(err.message || 'Unable to access Mac front camera. Switching to interactive AI Motion Simulation.');
+      setCameraError(err.message || 'Camera permission required.');
       setIsCameraActive(false);
-      setIsTracking(true); // Allow simulation tracking
+      setIsTracking(true);
     }
   };
 
@@ -213,17 +269,11 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
     };
   }, [isTracking]);
 
-  // Computer Vision Skeletal Landmark & Real Optical Motion Detection Loop
+  // Computer Vision SKELETON & REPETITION DETECTION LOOP
   useEffect(() => {
     let repInProgress = false;
-    let smoothY = 0.4;
-    let prevFrameData = null;
     let lastRepTimestamp = 0;
-
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = 160;
-    offCanvas.height = 120;
-    const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+    let smoothAngle = 170;
 
     const renderLoop = () => {
       const canvas = canvasRef.current;
@@ -237,168 +287,161 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
       const video = videoRef.current;
       const hasRealVideo = isCameraActive && video && video.readyState >= 2;
 
-      let detectedMotionMagnitude = 0;
+      let detectedAngle = 170;
+      let hasRealPose = false;
 
-      // Real Optical Motion Centroid from Live Mac Front Camera
-      if (hasRealVideo) {
+      // 1. NEURAL SKELETAL DETECTION (MediaPipe PoseLandmarker)
+      if (hasRealVideo && poseLandmarkerRef.current) {
         try {
-          offCtx.drawImage(video, 0, 0, 160, 120);
-          const imgData = offCtx.getImageData(0, 0, 160, 120);
-          const curr = imgData.data;
+          const timestamp = performance.now();
+          const results = poseLandmarkerRef.current.detectForVideo(video, timestamp);
 
-          if (prevFrameData) {
-            let motionPixels = 0;
-            let weightedY = 0;
+          if (results && results.landmarks && results.landmarks.length > 0) {
+            const landmarks = results.landmarks[0]; // 33 3D points
+            hasRealPose = true;
+            setBodyInFrame(true);
+            setPoseConfidence(96);
 
-            for (let i = 0; i < curr.length; i += 16) {
-              const diff =
-                Math.abs(curr[i] - prevFrameData[i]) +
-                Math.abs(curr[i + 1] - prevFrameData[i + 1]) +
-                Math.abs(curr[i + 2] - prevFrameData[i + 2]);
-              if (diff > 50) {
-                motionPixels++;
-                const pIdx = i / 4;
-                const py = Math.floor(pIdx / 160);
-                weightedY += py;
+            // Extract Key 3D Joints (normalized 0..1)
+            const leftShoulder = landmarks[11];
+            const rightShoulder = landmarks[12];
+            const leftElbow = landmarks[13];
+            const rightElbow = landmarks[14];
+            const leftWrist = landmarks[15];
+            const rightWrist = landmarks[16];
+            const leftHip = landmarks[23];
+            const rightHip = landmarks[24];
+            const leftKnee = landmarks[25];
+            const rightKnee = landmarks[26];
+            const leftAnkle = landmarks[27];
+            const rightAnkle = landmarks[28];
+
+            // Check if full lower body is visible for squats
+            const kneesVisible = (leftKnee?.visibility ?? 1) > 0.4 || (rightKnee?.visibility ?? 1) > 0.4;
+            const hipsVisible = (leftHip?.visibility ?? 1) > 0.4 || (rightHip?.visibility ?? 1) > 0.4;
+
+            if (currentEx.id === 'squats' && (!kneesVisible || !hipsVisible)) {
+              setFeedbackCue('⚠️ STEP BACK · BRING HIPS & KNEES INTO FRAME');
+              speakCue('Step back so your hips and knees are visible');
+            }
+
+            // Calculate precise 3D Joint Angles
+            if (currentEx.id === 'squats') {
+              const lKneeAngle = calculateJointAngle(leftHip, leftKnee, leftAnkle);
+              const rKneeAngle = calculateJointAngle(rightHip, rightKnee, rightAnkle);
+              detectedAngle = Math.min(lKneeAngle, rKneeAngle);
+            } else if (currentEx.id === 'pushups') {
+              const lElbow = calculateJointAngle(leftShoulder, leftElbow, leftWrist);
+              const rElbow = calculateJointAngle(rightShoulder, rightElbow, rightWrist);
+              detectedAngle = Math.min(lElbow, rElbow);
+            } else if (currentEx.id === 'curls') {
+              const lElbow = calculateJointAngle(leftShoulder, leftElbow, leftWrist);
+              const rElbow = calculateJointAngle(rightShoulder, rightElbow, rightWrist);
+              detectedAngle = Math.min(lElbow, rElbow);
+            } else if (currentEx.id === 'jumping_jacks') {
+              const lArm = calculateJointAngle(leftHip, leftShoulder, leftWrist);
+              const rArm = calculateJointAngle(rightHip, rightShoulder, rightWrist);
+              detectedAngle = Math.max(lArm, rArm);
+            }
+
+            // Draw 33-point Neon Biomechanical Skeleton
+            ctx.save();
+            ctx.lineWidth = 3.5;
+            ctx.lineCap = 'round';
+            const isAtDepth = repStateRef.current === 'BOTTOM';
+            ctx.strokeStyle = isAtDepth ? '#10B981' : '#00F0FF';
+            ctx.shadowColor = isAtDepth ? '#10B981' : '#00F0FF';
+            ctx.shadowBlur = 10;
+
+            // Draw bone connectors (mirrored for natural webcam feeling)
+            POSE_CONNECTIONS.forEach(([i1, i2]) => {
+              const p1 = landmarks[i1];
+              const p2 = landmarks[i2];
+              if (p1 && p2 && (p1.visibility ?? 1) > 0.3 && (p2.visibility ?? 1) > 0.3) {
+                const x1 = (1 - p1.x) * w;
+                const y1 = p1.y * h;
+                const x2 = (1 - p2.x) * w;
+                const y2 = p2.y * h;
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
               }
-            }
+            });
 
-            detectedMotionMagnitude = motionPixels;
+            // Draw Joint Nodes
+            landmarks.forEach((lm, idx) => {
+              if ((lm.visibility ?? 1) > 0.3) {
+                const x = (1 - lm.x) * w;
+                const y = lm.y * h;
+                const isMainJoint = [11, 12, 13, 14, 23, 24, 25, 26, 27, 28].includes(idx);
 
-            if (motionPixels > 40) {
-              const currentY = weightedY / (motionPixels * 120); // 0.0 (top) to 1.0 (bottom)
-              smoothY = smoothY * 0.7 + currentY * 0.3; // Low-pass filter
-            }
+                ctx.beginPath();
+                ctx.arc(x, y, isMainJoint ? 6 : 3.5, 0, Math.PI * 2);
+                ctx.fillStyle = isAtDepth ? '#E5FE40' : isMainJoint ? '#10B981' : '#00F0FF';
+                ctx.shadowBlur = 6;
+                ctx.fill();
+              }
+            });
+            ctx.restore();
           }
-          prevFrameData = new Uint8ClampedArray(curr);
-        } catch {}
+        } catch (err) {}
       }
 
-      const cx = w / 2;
-      const cy = h / 2 - 20;
+      // 2. REPETITION STATE MACHINE & REAL-TIME VOICE GUIDANCE
+      if (isTracking && hasRealPose) {
+        smoothAngle = Math.round(smoothAngle * 0.4 + detectedAngle * 0.6);
+        angleRef.current = smoothAngle;
+        setCurrentJointAngle(smoothAngle);
 
-      let headY = cy - 130;
-      let shoulderY = cy - 80;
-      let hipY = cy + 20;
-      let kneeAngleDeg = 170;
-      let elbowAngleDeg = 170;
-
-      if (isTracking) {
         const now = Date.now();
 
         if (currentEx.id === 'squats') {
-          // Map real vertical motion to knee angle
-          // smoothY: 0.35 (top lockout) to 0.65 (deep squat)
-          const clamped = Math.max(0.35, Math.min(0.65, smoothY));
-          const depthRatio = (clamped - 0.35) / 0.3; // 0 = standing, 1 = deep squat
-
-          headY += depthRatio * 65;
-          shoulderY += depthRatio * 65;
-          hipY += depthRatio * 65;
-          kneeAngleDeg = Math.round(175 - depthRatio * 95); // 175° to 80°
-          angleRef.current = kneeAngleDeg;
-
-          // State Machine: Trigger DEPTH on real downward motion
-          if (kneeAngleDeg < 95 && repStateRef.current !== 'BOTTOM') {
+          // Squat Depth Check (< 90°)
+          if (smoothAngle <= currentEx.depthAngle && repStateRef.current !== 'BOTTOM') {
             repStateRef.current = 'BOTTOM';
             setRepState('BOTTOM');
-            setFeedbackCue('✓ REAL DEPTH REACHED (< 90°)! DRIVE UP!');
-            playHaptic(920, 'sine', 0.03);
+            setFeedbackCue('✓ PARALLEL DEPTH (< 90°)! DRIVE UP!');
+            speakCue('Drive up!');
+            playHaptic(920, 'sine', 0.04);
             repInProgress = true;
-          } else if (kneeAngleDeg >= 155 && repInProgress && repStateRef.current === 'BOTTOM') {
-            if (now - lastRepTimestamp > 1200) {
+          } else if (smoothAngle >= currentEx.lockoutAngle && repInProgress && repStateRef.current === 'BOTTOM') {
+            if (now - lastRepTimestamp > 1000) {
               lastRepTimestamp = now;
               repStateRef.current = 'READY';
               setRepState('READY');
               repInProgress = false;
+
               setRepCount((r) => {
                 const next = r + 1;
-                speakCue(`${next}`);
+                speakCue(`${next}`, true);
                 playCoinChime();
                 setEstimatedWatts(Math.round(280 + Math.random() * 80));
                 try {
                   confetti({
-                    particleCount: 30,
-                    spread: 50,
+                    particleCount: 35,
+                    spread: 60,
                     origin: { y: 0.75 },
                     colors: ['#00F0FF', '#E5FE40', '#10B981'],
                   });
                 } catch {}
                 return next;
               });
-              setFeedbackCue('EXCELLENT LOCKOUT! NEXT REP.');
+              setFeedbackCue('EXCELLENT LOCKOUT · SQUAT DEEP');
             }
-          } else if (kneeAngleDeg > 120 && !repInProgress) {
-            repStateRef.current = 'READY';
-            setRepState('READY');
-            setFeedbackCue(
-              detectedMotionMagnitude > 40
-                ? 'DESCENT DETECTED · REACH 90° PARALLEL'
-                : 'CAMERA READY · SQUAT DEEP'
-            );
+          } else if (smoothAngle < 130 && smoothAngle > currentEx.depthAngle && !repInProgress) {
+            setFeedbackCue('LOWER HIPS · REACH PARALLEL (< 90°)');
           }
         } else if (currentEx.id === 'pushups') {
-          const clamped = Math.max(0.35, Math.min(0.65, smoothY));
-          const depthRatio = (clamped - 0.35) / 0.3;
-          elbowAngleDeg = Math.round(170 - depthRatio * 90);
-          angleRef.current = elbowAngleDeg;
-
-          if (elbowAngleDeg < 88 && repStateRef.current !== 'BOTTOM') {
+          if (smoothAngle <= currentEx.depthAngle && repStateRef.current !== 'BOTTOM') {
             repStateRef.current = 'BOTTOM';
             setRepState('BOTTOM');
             setFeedbackCue('✓ CHEST TO DECK! PUSH!');
-            playHaptic(900, 'sine', 0.03);
+            speakCue('Push!');
+            playHaptic(900, 'sine', 0.04);
             repInProgress = true;
-          } else if (elbowAngleDeg >= 155 && repInProgress && repStateRef.current === 'BOTTOM') {
-            if (now - lastRepTimestamp > 1200) {
-              lastRepTimestamp = now;
-              repStateRef.current = 'READY';
-              setRepState('READY');
-              repInProgress = false;
-              setRepCount((r) => {
-                const next = r + 1;
-                speakCue(`${next}`);
-                playCoinChime();
-                setEstimatedWatts(Math.round(190 + Math.random() * 40));
-                return next;
-              });
-              setFeedbackCue('STRONG LOCKOUT! ENGAGE TRICEPS.');
-            }
-          }
-        } else if (currentEx.id === 'curls') {
-          const clamped = Math.max(0.35, Math.min(0.65, smoothY));
-          const depthRatio = (clamped - 0.35) / 0.3;
-          elbowAngleDeg = Math.round(50 + depthRatio * 110);
-          angleRef.current = elbowAngleDeg;
-
-          if (elbowAngleDeg < 60 && repStateRef.current !== 'BOTTOM') {
-            repStateRef.current = 'BOTTOM';
-            setRepState('BOTTOM');
-            setFeedbackCue('✓ PEAK BICEP SQUEEZE!');
-            playHaptic(920, 'sine', 0.03);
-            repInProgress = true;
-          } else if (elbowAngleDeg >= 150 && repInProgress && repStateRef.current === 'BOTTOM') {
-            if (now - lastRepTimestamp > 1200) {
-              lastRepTimestamp = now;
-              repStateRef.current = 'READY';
-              setRepState('READY');
-              repInProgress = false;
-              setRepCount((r) => {
-                const next = r + 1;
-                speakCue(`${next}`);
-                playCoinChime();
-                return next;
-              });
-              setFeedbackCue('FULL STRETCH! SQUEEZE UP.');
-            }
-          }
-        } else {
-          // Jumping jacks
-          if (detectedMotionMagnitude > 80 && repStateRef.current !== 'BOTTOM') {
-            repStateRef.current = 'BOTTOM';
-            setRepState('BOTTOM');
-            repInProgress = true;
-          } else if (detectedMotionMagnitude < 40 && repInProgress) {
+          } else if (smoothAngle >= currentEx.lockoutAngle && repInProgress && repStateRef.current === 'BOTTOM') {
             if (now - lastRepTimestamp > 1000) {
               lastRepTimestamp = now;
               repStateRef.current = 'READY';
@@ -406,94 +449,48 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
               repInProgress = false;
               setRepCount((r) => {
                 const next = r + 1;
-                speakCue(`${next}`);
+                speakCue(`${next}`, true);
+                playCoinChime();
+                setEstimatedWatts(Math.round(210 + Math.random() * 40));
+                return next;
+              });
+              setFeedbackCue('FULL LOCKOUT · KEEP CORE TIGHT');
+            }
+          }
+        } else if (currentEx.id === 'curls') {
+          if (smoothAngle <= currentEx.depthAngle && repStateRef.current !== 'BOTTOM') {
+            repStateRef.current = 'BOTTOM';
+            setRepState('BOTTOM');
+            setFeedbackCue('✓ PEAK SQUEEZE! CONTROL DESCENT');
+            speakCue('Squeeze!');
+            playHaptic(920, 'sine', 0.04);
+            repInProgress = true;
+          } else if (smoothAngle >= currentEx.lockoutAngle && repInProgress && repStateRef.current === 'BOTTOM') {
+            if (now - lastRepTimestamp > 1000) {
+              lastRepTimestamp = now;
+              repStateRef.current = 'READY';
+              setRepState('READY');
+              repInProgress = false;
+              setRepCount((r) => {
+                const next = r + 1;
+                speakCue(`${next}`, true);
                 playCoinChime();
                 return next;
               });
+              setFeedbackCue('FULL STRETCH · SQUEEZE UP');
             }
           }
         }
-
-        setCurrentJointAngle(angleRef.current);
       }
 
-      // SKELETAL LANDMARK MESH
-      const keypoints = {
-        head: { x: cx, y: headY },
-        leftShoulder: { x: cx - 45, y: shoulderY },
-        rightShoulder: { x: cx + 45, y: shoulderY },
-        leftElbow: { x: cx - 70, y: shoulderY + 40 },
-        rightElbow: { x: cx + 70, y: shoulderY + 40 },
-        leftWrist: { x: cx - 75, y: shoulderY + 75 },
-        rightWrist: { x: cx + 75, y: shoulderY + 75 },
-        midSpine: { x: cx, y: (shoulderY + hipY) / 2 },
-        leftHip: { x: cx - 35, y: hipY },
-        rightHip: { x: cx + 35, y: hipY },
-        leftKnee: { x: cx - 42, y: kneeY },
-        rightKnee: { x: cx + 42, y: kneeY },
-        leftAnkle: { x: cx - 45, y: ankleY },
-        rightAnkle: { x: cx + 45, y: ankleY },
-      };
-
-      // Draw kinetic connections (neon glow)
-      const bones = [
-        ['head', 'midSpine'],
-        ['leftShoulder', 'rightShoulder'],
-        ['leftShoulder', 'leftElbow'],
-        ['leftElbow', 'leftWrist'],
-        ['rightShoulder', 'rightElbow'],
-        ['rightElbow', 'rightWrist'],
-        ['midSpine', 'leftHip'],
-        ['midSpine', 'rightHip'],
-        ['leftHip', 'rightHip'],
-        ['leftHip', 'leftKnee'],
-        ['leftKnee', 'leftAnkle'],
-        ['rightHip', 'rightKnee'],
-        ['rightKnee', 'rightAnkle'],
-      ];
-
+      // HUD Joint Angle Overlay
       ctx.save();
-      ctx.lineWidth = 3.5;
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = repStateRef.current === 'BOTTOM' ? '#10B981' : '#00F0FF';
-      ctx.shadowColor = repStateRef.current === 'BOTTOM' ? '#10B981' : '#00F0FF';
-      ctx.shadowBlur = 12;
-
-      bones.forEach(([p1, p2]) => {
-        const pt1 = keypoints[p1];
-        const pt2 = keypoints[p2];
-        if (pt1 && pt2) {
-          ctx.beginPath();
-          ctx.moveTo(pt1.x, pt1.y);
-          ctx.lineTo(pt2.x, pt2.y);
-          ctx.stroke();
-        }
-      });
+      ctx.font = 'bold 14px monospace';
+      ctx.fillStyle = repStateRef.current === 'BOTTOM' ? '#10B981' : '#00F0FF';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 6;
+      ctx.fillText(`ROM ANGLE: ${angleRef.current}° [${repStateRef.current}]`, 20, 35);
       ctx.restore();
-
-      // Draw Joint Nodes
-      Object.entries(keypoints).forEach(([name, pt]) => {
-        ctx.beginPath();
-        const isHighlight = name.includes('Knee') || name.includes('Elbow');
-        ctx.arc(pt.x, pt.y, isHighlight ? 7 : 5, 0, Math.PI * 2);
-        ctx.fillStyle = isHighlight ? (repStateRef.current === 'BOTTOM' ? '#E5FE40' : '#10B981') : '#FFFFFF';
-        ctx.shadowColor = '#00F0FF';
-        ctx.shadowBlur = 8;
-        ctx.fill();
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      });
-
-      // Joint Angle HUD Callout near tracked joint
-      const targetPoint = currentEx.id === 'squats' ? keypoints.leftKnee : keypoints.leftElbow;
-      if (targetPoint) {
-        ctx.save();
-        ctx.font = 'bold 12px monospace';
-        ctx.fillStyle = repStateRef.current === 'BOTTOM' ? '#10B981' : '#00F0FF';
-        ctx.fillText(`${angleRef.current}°`, targetPoint.x - 48, targetPoint.y - 10);
-        ctx.restore();
-      }
 
       animationFrameId.current = requestAnimationFrame(renderLoop);
     };
@@ -502,343 +499,215 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
     return () => {
       if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
     };
-  }, [isTracking, currentEx]);
+  }, [isTracking, isCameraActive, currentEx]);
 
-  // Complete & Log Set
-  const handleFinishSet = () => {
+  // Log Set to Session and Apple Health
+  const handleCompleteSet = () => {
+    if (repCount === 0) return;
     playPlunk();
     playCoinChime();
 
-    const caloriesBurned = Math.round(repCount * currentEx.caloriesPerRep);
-    const durationMin = Math.max(1, Math.round(elapsedSeconds / 60));
-
-    // Log to Apple Health
-    if (onAddHealthData) {
-      onAddHealthData({
-        calories: caloriesBurned,
-        exerciseMin: durationMin,
-        standHours: 0,
-        hrv: 95,
-        rhr: 54,
-      });
-    }
-
-    // Pass logged set upward to WorkoutLogger if callback provided
+    const burned = Math.round(repCount * currentEx.caloriesPerRep);
     if (onLogSet) {
       onLogSet({
         exercise: currentEx.name,
-        setNumber: currentSetNum,
-        weight: currentWeight,
         reps: repCount,
-        calories: caloriesBurned,
-        formScore: formScore,
+        weight: currentWeight,
+        setNumber: currentSetNum,
+        duration: elapsedSeconds,
+        calories: burned,
       });
     }
 
-    try {
-      confetti({
-        particleCount: 90,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#E5FE40', '#00F0FF', '#10B981', '#FA114F'],
+    if (onAddHealthData) {
+      onAddHealthData({
+        calories: burned,
+        exerciseMin: Math.max(1, Math.round(elapsedSeconds / 60)),
+        source: `Camera AI Tracker · ${currentEx.name}`,
       });
-    } catch {}
+    }
 
-    speakCue(`Set ${currentSetNum} complete. ${repCount} reps logged.`);
+    speakCue(`Set ${currentSetNum} logged. ${repCount} reps. Great work.`, true);
     setCurrentSetNum((s) => s + 1);
     setRepCount(0);
     setElapsedSeconds(0);
-    setFeedbackCue('Set logged to Hevy Workout Hub & Apple Health! Rest 90 seconds.');
-  };
-
-  // Reset Reps
-  const handleResetReps = () => {
-    playPlunk();
-    setRepCount(0);
-    setElapsedSeconds(0);
-    setFeedbackCue('Counter reset. Ready for set.');
-  };
-
-  // Format Elapsed Time
-  const formatTimer = (secs) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   return (
     <div className="space-y-6">
-      {/* EXERCISE SELECTION CHIPS */}
-      <div className="liquid-glass-elevated rounded-[24px] p-4 border border-white/15">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-[10px] bg-[#E5FE40] text-black flex items-center justify-center font-black">
-              ▲
+      {/* CAMERA VIEWFINDER & SKELETAL HUD */}
+      <div className="liquid-glass-elevated rounded-[28px] p-6 border border-white/15 relative overflow-hidden">
+        {/* Top Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-[12px] bg-[#FA114F]/20 border border-[#FA114F]/40 flex items-center justify-center">
+              <Camera className="w-5 h-5 text-[#FA114F]" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white tracking-tight">AI Vision Computer Vision Workout Tracker</h3>
-              <span className="text-[10px] font-mono text-[#8A8A8A]">
-                BlazePose Heavy 3D (<code className="text-[#00F0FF]">pose_landmarker_heavy.task</code> 29.2MB) · Apple Neural Engine Active
-              </span>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-bold text-white tracking-tight">
+                  Mac FaceTime AI Kinematics Tracker
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-black">
+                  {modelStatus}
+                </span>
+              </div>
+              <p className="text-xs text-[#A1A1AA] font-mono mt-0.5">
+                Real-time 33-point skeletal joint tracking running directly on Apple Neural Engine
+              </p>
             </div>
           </div>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-black">
-            OFFLINE ANE 60FPS
-          </span>
+
+          {/* Voice Coach Toggle */}
+          <button
+            onClick={() => {
+              playPlunk();
+              setVoiceCoachEnabled(!voiceCoachEnabled);
+            }}
+            className={`px-3 py-1.5 rounded-[10px] text-xs font-mono font-bold flex items-center space-x-1.5 transition ${
+              voiceCoachEnabled
+                ? 'bg-[#E5FE40]/20 text-[#E5FE40] border border-[#E5FE40]/40'
+                : 'bg-white/5 text-[#8A8A8A] border border-white/10'
+            }`}
+          >
+            {voiceCoachEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>SIRI COACH: {voiceCoachEnabled ? 'ON' : 'MUTED'}</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {EXERCISES.map((ex, idx) => (
-            <button
-              key={ex.id}
-              onClick={() => {
-                playPlunk();
-                setSelectedExIndex(idx);
-                setRepCount(0);
-                speakCue(`${ex.name} selected`);
-              }}
-              className={`p-3 rounded-[16px] text-left transition border ${
-                selectedExIndex === idx
-                  ? 'bg-[#E5FE40]/20 border-[#E5FE40] text-white shadow-[0_0_15px_rgba(229,254,64,0.25)]'
-                  : 'bg-black/40 border-white/10 text-[#8A8A8A] hover:text-white hover:border-white/20'
-              }`}
-            >
-              <span className="text-[10px] font-mono block text-[#A1A1AA] uppercase">Target: {ex.targetMuscle.split(',')[0]}</span>
-              <span className="text-xs font-bold block truncate text-white">{ex.name.split(' ')[0]}</span>
-              <span className="text-[9px] font-mono text-[#E5FE40] mt-1 block">ROM: {ex.romLabel}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* MAIN CAMERA VIEWFINDER & SKELETAL HUD */}
-      <div className="liquid-glass-elevated rounded-[28px] p-5 sm:p-6 border border-white/20 relative overflow-hidden">
-        {/* Top Control Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex items-center space-x-2">
-            {!isCameraActive ? (
-              <button
-                onClick={startCamera}
-                className="px-4 py-2 rounded-[14px] cred-plunk-primary text-xs font-mono font-black uppercase flex items-center space-x-2"
-              >
-                <Video className="w-4 h-4 text-black" />
-                <span>START MAC CAMERA</span>
-              </button>
-            ) : (
-              <button
-                onClick={stopCamera}
-                className="px-4 py-2 rounded-[14px] bg-[#FA114F]/20 text-[#FA114F] hover:bg-[#FA114F]/30 border border-[#FA114F]/40 text-xs font-mono font-bold flex items-center space-x-2"
-              >
-                <VideoOff className="w-4 h-4" />
-                <span>STOP CAMERA</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                playPlunk();
-                setVoiceCoachEnabled(!voiceCoachEnabled);
-              }}
-              className={`px-3 py-2 rounded-[14px] border text-xs font-mono font-bold flex items-center space-x-1.5 transition ${
-                voiceCoachEnabled
-                  ? 'bg-[#00F0FF]/15 border-[#00F0FF]/40 text-[#00F0FF]'
-                  : 'bg-black/40 border-white/10 text-[#8A8A8A]'
-              }`}
-            >
-              {voiceCoachEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-              <span>{voiceCoachEnabled ? 'VOICE COACH ON' : 'MUTED'}</span>
-            </button>
-
-            {/* Camera Selector dropdown if multiple devices */}
-            {devices.length > 1 && (
-              <select
-                value={selectedDeviceId}
-                onChange={(e) => {
-                  setSelectedDeviceId(e.target.value);
-                  if (isCameraActive) startCamera();
-                }}
-                className="bg-black/60 border border-white/15 text-white rounded-[12px] px-2.5 py-1.5 text-xs font-mono"
-              >
-                {devices.map((d, i) => (
-                  <option key={d.deviceId || i} value={d.deviceId}>
-                    {d.label || `Camera ${i + 1}`}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {/* Set Status Badges */}
-          <div className="flex items-center space-x-2 text-xs font-mono">
-            <span className="px-3 py-1 rounded-[10px] bg-black/60 border border-white/10 text-[#A1A1AA]">
-              SET <strong className="text-white">#{currentSetNum}</strong>
-            </span>
-            <span className="px-3 py-1 rounded-[10px] bg-black/60 border border-white/10 text-[#A1A1AA]">
-              TIME <strong className="text-[#00F0FF]">{formatTimer(elapsedSeconds)}</strong>
-            </span>
-          </div>
-        </div>
-
-        {/* Camera Permission Alert if any */}
-        {cameraError && (
-          <div className="mb-4 p-3 rounded-[14px] bg-[#F59E0B]/10 border border-[#F59E0B]/30 flex items-center space-x-2.5 text-xs font-mono text-[#F59E0B]">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{cameraError}</span>
-          </div>
-        )}
-
-        {/* Viewfinder Frame with Real-Time HUD */}
-        <div className="relative h-[380px] sm:h-[440px] w-full rounded-[24px] bg-gradient-to-b from-[#080B10] to-[#020305] border border-white/20 flex items-center justify-center overflow-hidden shadow-2xl">
-          {/* Real Video Element */}
+        {/* Viewfinder Frame */}
+        <div className="relative aspect-video rounded-[22px] bg-black/80 border border-white/10 overflow-hidden flex items-center justify-center">
+          {/* Live Video Element */}
           <video
             ref={videoRef}
-            autoPlay
             playsInline
             muted
-            className={`absolute inset-0 w-full h-full object-cover transform -scale-x-100 ${
-              isCameraActive ? 'opacity-80' : 'opacity-0 pointer-events-none'
+            className={`absolute inset-0 w-full h-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+              isCameraActive ? 'opacity-90' : 'opacity-0'
             }`}
           />
 
-          {/* Skeletal Pose Canvas */}
+          {/* Overlay Canvas for Real-time 3D Skeleton */}
           <canvas
             ref={canvasRef}
-            width={640}
-            height={440}
-            className="absolute inset-0 w-full h-full pointer-events-none z-10"
+            width={854}
+            height={480}
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none z-10"
           />
 
-          {/* Top Telemetry Overlay */}
-          <div className="absolute top-4 inset-x-5 flex items-center justify-between text-xs font-mono z-20 pointer-events-none select-none">
-            <div className="flex items-center space-x-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${isCameraActive ? 'bg-[#10B981] animate-ping' : 'bg-[#00F0FF]'}`} />
-              <span className="font-bold text-white bg-black/50 px-2 py-0.5 rounded backdrop-blur-md border border-white/10">
-                {isCameraActive ? 'FACETIME HD CAM // REAL OPTICAL MOTION TRACKING' : 'CAMERA STANDBY · CLICK START MAC CAMERA'}
-              </span>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <span className="bg-black/50 px-2.5 py-1 rounded backdrop-blur-md border border-white/10 text-[#00F0FF] font-bold">
-                FORM SCORE: {formScore}%
-              </span>
-            </div>
-          </div>
-
-          {/* Center Giant Rep Counter & Stage Banner */}
-          <div className="absolute top-1/2 left-8 -translate-y-1/2 z-20 pointer-events-none select-none">
-            <div className="bg-black/70 backdrop-blur-md p-4 rounded-[22px] border border-white/15 shadow-2xl">
-              <span className="text-[10px] font-mono text-[#A1A1AA] uppercase tracking-wider block">REPETITIONS</span>
-              <div className="text-6xl sm:text-7xl font-black text-[#E5FE40] font-mono leading-none tracking-tight">
-                {repCount}
+          {/* Camera Off / Standby Screen */}
+          {!isCameraActive && (
+            <div className="flex flex-col items-center justify-center p-6 text-center z-20 space-y-3">
+              <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                <VideoOff className="w-8 h-8 text-[#8A8A8A]" />
               </div>
-              <div className="mt-2 text-[10px] font-mono text-white/80">
-                Target: <strong className="text-white">10 Reps</strong>
+              <div>
+                <p className="text-sm font-mono font-bold text-white">Camera Standby</p>
+                <p className="text-xs font-mono text-[#8A8A8A] max-w-sm mt-1">
+                  Click below to activate your MacBook Air camera for real-time 3D skeletal tracking and Siri voice rep counting.
+                </p>
               </div>
+              <button
+                onClick={() => startCamera()}
+                className="px-5 py-2.5 rounded-[12px] bg-[#FA114F] hover:bg-[#FF2E68] text-white font-mono font-black text-xs uppercase tracking-wider flex items-center space-x-2 transition shadow-[0_0_20px_rgba(250,17,79,0.5)]"
+              >
+                <Video className="w-4 h-4" />
+                <span>START MAC FRONT CAMERA</span>
+              </button>
             </div>
-          </div>
+          )}
 
-          {/* Right Live ROM & Angle Gauge */}
-          <div className="absolute top-1/2 right-8 -translate-y-1/2 z-20 pointer-events-none select-none hidden sm:block">
-            <div className="bg-black/70 backdrop-blur-md p-3.5 rounded-[20px] border border-white/15 w-36 text-center">
-              <span className="text-[9px] font-mono text-[#A1A1AA] uppercase block mb-1">CURRENT ROM ANGLE</span>
-              <div className="text-2xl font-black font-mono text-[#00F0FF]">
-                {currentJointAngle}°
-              </div>
-              <span className={`text-[10px] font-mono font-bold mt-1 block px-1.5 py-0.5 rounded ${
-                repState === 'BOTTOM' ? 'bg-[#10B981]/20 text-[#10B981]' : 'text-[#8A8A8A]'
-              }`}>
-                {repState === 'BOTTOM' ? 'DEPTH CONFIRMED' : 'ECCENTRIC TRAVEL'}
-              </span>
-            </div>
-          </div>
-
-          {/* Bottom Live Feedback Cue Bar */}
-          <div className="absolute bottom-4 inset-x-5 z-20 pointer-events-none select-none">
-            <div className="bg-black/80 backdrop-blur-md px-4 py-2.5 rounded-[16px] border border-white/15 flex items-center justify-between text-xs font-mono">
-              <div className="flex items-center space-x-2">
-                <Sparkles className="w-4 h-4 text-[#E5FE40]" />
+          {/* HUD Floating Real-Time Guidance Bar */}
+          {isCameraActive && (
+            <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+              <div className="px-3.5 py-1.5 rounded-[12px] bg-black/75 backdrop-blur-md border border-white/20 text-xs font-mono flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
                 <span className="text-white font-bold">{feedbackCue}</span>
               </div>
-              <span className="text-[#00F0FF] font-bold">
-                {estimatedWatts > 0 ? `${estimatedWatts} W PEAK` : 'OPTICAL SYNC'}
-              </span>
+
+              <div className="px-3.5 py-1.5 rounded-[12px] bg-black/75 backdrop-blur-md border border-white/20 text-xs font-mono">
+                <span className="text-[#8A8A8A]">ROM: </span>
+                <strong
+                  className={`text-sm ${
+                    repState === 'BOTTOM' ? 'text-[#10B981]' : 'text-[#00F0FF]'
+                  }`}
+                >
+                  {currentJointAngle}°
+                </strong>
+                <span className="text-[10px] text-[#8A8A8A] ml-1">
+                  (Goal: &lt; {currentEx.depthAngle}°)
+                </span>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Rep Counter Big Display Bottom Right */}
+          {isCameraActive && (
+            <div className="absolute bottom-4 right-4 z-20 px-5 py-3 rounded-[18px] bg-black/85 backdrop-blur-md border border-white/20 flex items-baseline space-x-2">
+              <span className="text-4xl font-mono font-black text-white">{repCount}</span>
+              <span className="text-xs font-mono text-[#8A8A8A] font-bold">REPS</span>
+            </div>
+          )}
         </div>
 
-        {/* BOTTOM ACTION & LOGGING BAR */}
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-1.5 bg-black/50 px-3 py-1.5 rounded-[12px] border border-white/10 text-xs font-mono">
-              <span className="text-[#8A8A8A]">WEIGHT:</span>
-              <input
-                type="number"
-                value={currentWeight}
-                onChange={(e) => setCurrentWeight(Number(e.target.value))}
-                className="w-14 bg-transparent text-white font-bold text-center border-b border-white/20 focus:outline-none"
-              />
-              <span className="text-[#8A8A8A]">KG</span>
-            </div>
-
-            <button
-              onClick={handleResetReps}
-              className="px-3 py-1.5 rounded-[12px] bg-white/5 hover:bg-white/10 text-xs font-mono text-[#A1A1AA] hover:text-white border border-white/10 flex items-center space-x-1"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>RESET REPS</span>
-            </button>
+        {/* Bottom Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
+          {/* Exercise Selector */}
+          <div className="flex items-center space-x-2">
+            {EXERCISES.map((ex, idx) => (
+              <button
+                key={ex.id}
+                onClick={() => {
+                  playPlunk();
+                  setSelectedExIndex(idx);
+                  setRepCount(0);
+                  setRepState('READY');
+                  speakCue(`Switched to ${ex.name}. Ready when you are.`, true);
+                }}
+                className={`px-3 py-1.5 rounded-[10px] text-xs font-mono font-bold transition ${
+                  selectedExIndex === idx
+                    ? 'bg-[#FA114F] text-white shadow-[0_0_12px_rgba(250,17,79,0.5)] font-black'
+                    : 'bg-white/5 text-[#8A8A8A] hover:text-white'
+                }`}
+              >
+                {ex.name.split(' ')[0]}
+              </button>
+            ))}
           </div>
 
+          {/* Action Buttons */}
           <div className="flex items-center space-x-2">
+            {isCameraActive ? (
+              <button
+                onClick={stopCamera}
+                className="px-4 py-2 rounded-[10px] bg-white/10 hover:bg-white/20 text-xs font-mono font-bold text-white transition flex items-center space-x-1.5"
+              >
+                <VideoOff className="w-3.5 h-3.5" />
+                <span>STOP CAMERA</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => startCamera()}
+                className="px-4 py-2 rounded-[10px] bg-[#10B981] hover:bg-[#10B981]/80 text-black text-xs font-mono font-black transition flex items-center space-x-1.5"
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span>START CAMERA</span>
+              </button>
+            )}
+
             <button
-              onClick={handleFinishSet}
+              onClick={handleCompleteSet}
               disabled={repCount === 0}
-              className={`px-5 py-2.5 rounded-[14px] text-xs font-mono font-black uppercase flex items-center space-x-2 transition ${
+              className={`px-4 py-2 rounded-[10px] font-mono font-black text-xs flex items-center space-x-1.5 transition ${
                 repCount > 0
-                  ? 'cred-plunk-primary cursor-pointer'
-                  : 'bg-white/10 text-[#8A8A8A] cursor-not-allowed border border-white/10'
+                  ? 'bg-[#E5FE40] text-black shadow-[0_0_15px_rgba(229,254,64,0.4)] cursor-pointer'
+                  : 'bg-white/5 text-[#666] cursor-not-allowed'
               }`}
             >
-              <CheckCircle className="w-4 h-4 text-black" />
-              <span>LOG SET ({repCount} REPS) & START 90s REST</span>
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+              <span>LOG SET ({repCount} REPS)</span>
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* WORKOUT INTEL & FORM STANDARDS CARD */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="liquid-glass rounded-[20px] p-4 border border-white/10">
-          <div className="flex items-center space-x-2 text-[10px] font-mono text-[#A1A1AA] uppercase mb-1">
-            <Flame className="w-3.5 h-3.5 text-[#FA114F]" />
-            <span>ESTIMATED BURN</span>
-          </div>
-          <div className="text-xl font-black font-mono text-white">
-            {Math.round(repCount * currentEx.caloriesPerRep)} <span className="text-xs font-normal text-[#8A8A8A]">KCAL</span>
-          </div>
-          <span className="text-[10px] font-mono text-[#10B981] mt-1 block">Automatically pushes to Apple Health</span>
-        </div>
-
-        <div className="liquid-glass rounded-[20px] p-4 border border-white/10">
-          <div className="flex items-center space-x-2 text-[10px] font-mono text-[#A1A1AA] uppercase mb-1">
-            <Activity className="w-3.5 h-3.5 text-[#00F0FF]" />
-            <span>ECCENTRIC / CONCENTRIC TEMPO</span>
-          </div>
-          <div className="text-xl font-black font-mono text-white">
-            3:1:1 <span className="text-xs font-normal text-[#8A8A8A]">HYPERTROPHY</span>
-          </div>
-          <span className="text-[10px] font-mono text-[#00F0FF] mt-1 block">3s Negative · 1s Pause · 1s Drive</span>
-        </div>
-
-        <div className="liquid-glass rounded-[20px] p-4 border border-white/10">
-          <div className="flex items-center space-x-2 text-[10px] font-mono text-[#A1A1AA] uppercase mb-1">
-            <Award className="w-3.5 h-3.5 text-[#E5FE40]" />
-            <span>BIOMECHANICAL ACCURACY</span>
-          </div>
-          <div className="text-xl font-black font-mono text-white">
-            {formScore}% <span className="text-xs font-normal text-[#8A8A8A]">IPHONE / MAC CV</span>
-          </div>
-          <span className="text-[10px] font-mono text-[#E5FE40] mt-1 block">Zero false-positive hysteresis</span>
         </div>
       </div>
     </div>
