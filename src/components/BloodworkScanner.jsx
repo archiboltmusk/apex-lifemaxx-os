@@ -37,7 +37,15 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
     }
   });
 
-  const [activeFileName, setActiveFileName] = useState('Anupam_Mahato_Comprehensive_Metabolic_Panel.pdf');
+  const [activeFileName, setActiveFileName] = useState(() => {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem('apex_user_profile') || '{}');
+      const name = (savedUser.name || 'Comprehensive').replace(/\s+/g, '_');
+      return `${name}_Metabolic_Panel.pdf`;
+    } catch {
+      return 'Comprehensive_Metabolic_Panel.pdf';
+    }
+  });
   const [fileSize, setFileSize] = useState('2.4 MB');
   const [isParsing, setIsParsing] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -109,7 +117,7 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
       val: Number(newVal) || newVal,
       unit: newUnit,
       ref: newRef,
-      status: 'VERIFIED LAB SAMPLE',
+      status: 'CLINICAL LAB RECORD',
       tier: 'ideal',
     };
     const updated = [newEntry, ...biomarkers];

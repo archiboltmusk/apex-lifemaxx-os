@@ -23,11 +23,26 @@ body {
   color: #F3F4F6;
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow-x: hidden;
+  max-width: 100vw;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Universal word wrapping and mobile iPhone typography protection */
+p, span, h1, h2, h3, h4, h5, h6, div, a, button, label, strong, code {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+/* Prevent image/media blown layouts */
+img, video, canvas, svg {
+  max-width: 100%;
 }
 
 .font-mono {
   font-family: 'JetBrains Mono', monospace;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 /* ============================================================== */

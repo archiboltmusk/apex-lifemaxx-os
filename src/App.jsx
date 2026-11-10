@@ -833,7 +833,7 @@ export default function App() {
       {/* ============================================================== */}
       {activeTab === 'looks' && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-[10px] font-mono text-[#00F0FF] font-black uppercase tracking-widest">
                 CRANIOFACIAL & MORPHOLOGY
@@ -841,13 +841,13 @@ export default function App() {
               <h2 className="text-xl font-bold text-white tracking-tight">Looksmaxxing Studio</h2>
             </div>
             {/* Sub-nav */}
-            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10">
+            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10 overflow-x-auto max-w-full no-scrollbar">
               <button
                 onClick={() => {
                   playPlunk();
                   setLooksSubTab('mewing');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   looksSubTab === 'mewing' ? 'bg-[#00F0FF] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -858,7 +858,7 @@ export default function App() {
                   playPlunk();
                   setLooksSubTab('lidar');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   looksSubTab === 'lidar' ? 'bg-[#00F0FF] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -869,7 +869,7 @@ export default function App() {
                   playPlunk();
                   setLooksSubTab('voice');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   looksSubTab === 'voice' ? 'bg-[#00F0FF] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -974,7 +974,7 @@ export default function App() {
       {/* ============================================================== */}
       {activeTab === 'bio' && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-[10px] font-mono text-[#10B981] font-black uppercase tracking-widest">
                 EPIGENETICS & BIOMARKERS
@@ -982,13 +982,13 @@ export default function App() {
               <h2 className="text-xl font-bold text-white tracking-tight">Biomaxxing Index</h2>
             </div>
             {/* Sub-nav */}
-            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10">
+            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10 overflow-x-auto max-w-full no-scrollbar">
               <button
                 onClick={() => {
                   playPlunk();
                   setBioSubTab('overview');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   bioSubTab === 'overview' ? 'bg-[#10B981] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -999,7 +999,7 @@ export default function App() {
                   playPlunk();
                   setBioSubTab('consigliere');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   bioSubTab === 'consigliere' ? 'bg-[#10B981] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1010,7 +1010,7 @@ export default function App() {
                   playPlunk();
                   setBioSubTab('phenoage');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   bioSubTab === 'phenoage' ? 'bg-[#10B981] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1021,7 +1021,7 @@ export default function App() {
                   playPlunk();
                   setBioSubTab('ocr');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   bioSubTab === 'ocr' ? 'bg-[#10B981] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1085,7 +1085,7 @@ export default function App() {
       {/* ============================================================== */}
       {activeTab === 'brain' && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-[10px] font-mono text-[#8B5CF6] font-black uppercase tracking-widest">
                 NEURAL VELOCITY & FLOW STATE
@@ -1093,13 +1093,13 @@ export default function App() {
               <h2 className="text-xl font-bold text-white tracking-tight">Brainmaxxing Engine</h2>
             </div>
             {/* Sub-nav */}
-            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10">
+            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10 overflow-x-auto max-w-full no-scrollbar">
               <button
                 onClick={() => {
                   playPlunk();
                   setBrainSubTab('sprint');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   brainSubTab === 'sprint' ? 'bg-[#8B5CF6] text-white font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1110,7 +1110,7 @@ export default function App() {
                   playPlunk();
                   setBrainSubTab('soundengine');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   brainSubTab === 'soundengine' ? 'bg-[#8B5CF6] text-white font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1121,7 +1121,7 @@ export default function App() {
                   playPlunk();
                   setBrainSubTab('dopamine');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   brainSubTab === 'dopamine' ? 'bg-[#8B5CF6] text-white font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1230,7 +1230,7 @@ export default function App() {
       {/* ============================================================== */}
       {activeTab === 'nutrition' && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-[10px] font-mono text-[#00D6E6] font-black uppercase tracking-widest">
                 METABOLIC NUTRITION & DISPENSARY
@@ -1238,13 +1238,13 @@ export default function App() {
               <h2 className="text-xl font-bold text-white tracking-tight">Precision Fuel & AI Scanner</h2>
             </div>
             {/* Sub-nav */}
-            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10">
+            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10 overflow-x-auto max-w-full no-scrollbar">
               <button
                 onClick={() => {
                   playPlunk();
                   setNutritionSubTab('macros');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   nutritionSubTab === 'macros' ? 'bg-[#00D6E6] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1255,7 +1255,7 @@ export default function App() {
                   playPlunk();
                   setNutritionSubTab('scanner');
                 }}
-                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                   nutritionSubTab === 'scanner' ? 'bg-[#00D6E6] text-black font-black' : 'text-[#8A8A8A]'
                 }`}
               >
@@ -1273,7 +1273,7 @@ export default function App() {
       {/* ============================================================== */}
       {activeTab === 'garage' && (
         <div className="space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-[10px] font-mono text-[#E5FE40] font-black uppercase tracking-widest">
                 APEX HARDWARE & STAKING VAULT
@@ -1281,10 +1281,10 @@ export default function App() {
               <h2 className="text-xl font-bold text-white tracking-tight">Vault & Clan Ecosystem</h2>
             </div>
             {/* Sub-nav */}
-            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10">
+            <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10 overflow-x-auto max-w-full no-scrollbar">
               {[
                 { id: 'hardware', label: 'Garage & Drops' },
-                { id: 'models', label: 'Offline AI Models (139MB)' },
+                { id: 'models', label: 'Offline Models (139MB)' },
                 { id: 'burnvault', label: 'The Burn Vault' },
                 { id: 'ios18', label: 'iOS 18 Widgets' },
               ].map((sub) => (
@@ -1294,7 +1294,7 @@ export default function App() {
                     playPlunk();
                     setGarageSubTab(sub.id);
                   }}
-                  className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition ${
+                  className={`px-3 py-1 rounded-[8px] text-xs font-mono font-bold transition shrink-0 ${
                     garageSubTab === sub.id ? 'bg-[#E5FE40] text-black font-black' : 'text-[#8A8A8A]'
                   }`}
                 >

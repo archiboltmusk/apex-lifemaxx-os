@@ -20,7 +20,14 @@ import confetti from 'canvas-confetti';
 
 export default function PhenoAgeCalculator() {
   const [activeEngine, setActiveEngine] = useState('livity_fitness'); // 'livity_fitness' | 'morgan_levine'
-  const [chronoAge, setChronoAge] = useState(29);
+  const [chronoAge, setChronoAge] = useState(() => {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem('apex_user_profile') || '{}');
+      return savedUser.age || 26;
+    } catch {
+      return 26;
+    }
+  });
 
   // Livity 8 Key Metrics State
   const [vo2Max, setVo2Max] = useState(54.2); // mL/kg/min (Top 1%)

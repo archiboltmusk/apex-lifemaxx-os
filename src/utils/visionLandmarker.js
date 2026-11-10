@@ -17,19 +17,33 @@ export async function getPoseLandmarker() {
     isInitializingPose = true;
     const wasmPath = `${window.location.origin}/wasm`;
     const vision = await FilesetResolver.forVisionTasks(wasmPath);
-    
-    cachedPoseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: `${window.location.origin}/models/pose_landmarker_full.task`,
-        delegate: 'GPU',
-      },
-      runningMode: 'VIDEO',
-      numPoses: 1,
-      minPoseDetectionConfidence: 0.5,
-      minPosePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-    return cachedPoseLandmarker;
+
+    // Try GPU delegate first, fallback to CPU if WebGL fails
+    try {
+      cachedPoseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: `${window.location.origin}/models/pose_landmarker_full.task`,
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        numPoses: 1,
+        minPoseDetectionConfidence: 0.5,
+        minPosePresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+      return cachedPoseLandmarker;
+    } catch (gpuErr) {
+      console.warn('GPU delegate failed for PoseLandmarker, falling back to CPU:', gpuErr);
+      cachedPoseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: `${window.location.origin}/models/pose_landmarker_full.task`,
+          delegate: 'CPU',
+        },
+        runningMode: 'VIDEO',
+        numPoses: 1,
+      });
+      return cachedPoseLandmarker;
+    }
   } catch (err) {
     console.warn('Local WASM init failed, attempting CDN fallback:', err);
     try {
@@ -39,7 +53,7 @@ export async function getPoseLandmarker() {
       cachedPoseLandmarker = await PoseLandmarker.createFromOptions(visionCDN, {
         baseOptions: {
           modelAssetPath: `${window.location.origin}/models/pose_landmarker_full.task`,
-          delegate: 'GPU',
+          delegate: 'CPU',
         },
         runningMode: 'VIDEO',
         numPoses: 1,
@@ -54,7 +68,7 @@ export async function getPoseLandmarker() {
   }
 }
 
-// 2. Initialize 478-Point 3D Face Landmarker
+// 2. Initialize 478-Point 3D Face Landmarker (Offline + GPU/CPU resilient)
 export async function getFaceLandmarker() {
   if (cachedFaceLandmarker) return cachedFaceLandmarker;
   if (isInitializingFace) return null;
@@ -64,20 +78,35 @@ export async function getFaceLandmarker() {
     const wasmPath = `${window.location.origin}/wasm`;
     const vision = await FilesetResolver.forVisionTasks(wasmPath);
 
-    cachedFaceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: `${window.location.origin}/models/face_landmarker.task`,
-        delegate: 'GPU',
-      },
-      runningMode: 'VIDEO',
-      numFaces: 1,
-      minFaceDetectionConfidence: 0.5,
-      minFacePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-      outputFaceBlendshapes: true,
-      outputFacialTransformationMatrixes: true,
-    });
-    return cachedFaceLandmarker;
+    // Try GPU delegate first, fallback to CPU
+    try {
+      cachedFaceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: `${window.location.origin}/models/face_landmarker.task`,
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.5,
+        minFacePresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+      return cachedFaceLandmarker;
+    } catch (gpuErr) {
+      console.warn('GPU delegate failed for FaceLandmarker, falling back to CPU:', gpuErr);
+      cachedFaceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: `${window.location.origin}/models/face_landmarker.task`,
+          delegate: 'CPU',
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        minFaceDetectionConfidence: 0.5,
+        minFacePresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+      return cachedFaceLandmarker;
+    }
   } catch (err) {
     console.warn('Local WASM face init failed, attempting CDN fallback:', err);
     try {
@@ -87,7 +116,7 @@ export async function getFaceLandmarker() {
       cachedFaceLandmarker = await FaceLandmarker.createFromOptions(visionCDN, {
         baseOptions: {
           modelAssetPath: `${window.location.origin}/models/face_landmarker.task`,
-          delegate: 'GPU',
+          delegate: 'CPU',
         },
         runningMode: 'VIDEO',
         numFaces: 1,

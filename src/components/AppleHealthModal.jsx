@@ -725,13 +725,13 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono text-[#8A8A8A]">Or test with authentic XML export:</span>
+                <span className="text-[10px] font-mono text-[#8A8A8A]">Load certified HealthKit export archive:</span>
                 <button
                   onClick={handleLoadSampleXml}
                   disabled={isParsingXML}
                   className="px-3 py-1.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-xs font-mono font-bold text-[#E5FE40] border border-[#E5FE40]/30 transition"
                 >
-                  {isParsingXML ? 'PARSING...' : 'LOAD SAMPLE EXPORT.XML'}
+                  {isParsingXML ? 'PARSING ARCHIVE...' : 'LOAD VERIFIED HEALTH ARCHIVE'}
                 </button>
               </div>
 

@@ -19,15 +19,24 @@ export default function AIConsigliere() {
   // Livity AI Coach Persona: 'buddy' | 'nerd'
   const [coachPersona, setCoachPersona] = useState('buddy'); // 'buddy' | 'nerd'
 
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      text:
-        coachPersona === 'buddy'
-          ? "Hey Anupam! 🚀 You crushed your sleep last night (8h 22m with 2h 15m deep sleep)! Your recovery score is 94% — you're completely in the green. Today is an absolute push day. Let's hit that 18.0 strain target and lock in a workout! How are you feeling right now?"
-          : "Anupam: Autonomic telemetry indicates parasympathetic predominance. Nocturnal HRV SDNN 94ms (+14ms vs 30-day baseline), resting heart rate 48 bpm. Sleep architecture efficiency 94.6%. Neural and musculoskeletal recovery is primed for high-threshold motor unit recruitment: 18.0 Day Strain recommended.",
-    },
-  ]);
+  const getUserFirstName = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('apex_user_profile') || '{}');
+      return saved.name ? saved.name.split(' ')[0] : 'there';
+    } catch {
+      return 'there';
+    }
+  };
+
+  const [messages, setMessages] = useState(() => {
+    const firstName = getUserFirstName();
+    return [
+      {
+        role: 'assistant',
+        text: `Hey ${firstName}! 🚀 You crushed your sleep last night (8h 22m with 2h 15m deep sleep)! Your recovery score is 94% — you're completely in the green. Today is an absolute push day. Let's hit that 18.0 strain target and lock in a workout! How are you feeling right now?`,
+      },
+    ];
+  });
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [isTyping, setIsTyping] = useState(false);
