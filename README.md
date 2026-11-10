@@ -123,20 +123,39 @@ Visit `http://localhost:5174/` in your browser.
 
 ---
 
-## 🍏 Native macOS Desktop App Release
+## 🍏 Native macOS Desktop App & DMG Compilation
 
-APEX // OS includes a native standalone Apple Silicon (`arm64`) macOS application bundle built with Swift, AppKit, and WebKit:
+APEX // OS includes a native standalone Apple Silicon (`arm64`) macOS application bundle and DMG installer built with Swift, AppKit, and WebKit featuring a zero-dependency embedded offline server with WebRTC camera permissions and hardware-accelerated rendering.
+
+### ⚡ One-Command Compilation
+Compile the entire project (Vite web bundle, Swift native Mach-O executable, app icons, `.app` bundle, and `.dmg` installer) with a single command:
 
 ```bash
-# Compile and package native macOS application
-cd mac_app
-swiftc -O -target arm64-apple-macos12.0 -framework Cocoa -framework WebKit main.swift -o "APEX OS"
+# 1. Install dependencies
+npm install
 
-# Launch the macOS application
-open "APEX OS.app"
+# 2. Compile the complete app and DMG installer
+npm run compile
 ```
 
-A pre-built native macOS release is available in the [GitHub Releases](https://github.com/archiboltmusk/apex-lifemaxx-os/releases) section.
+This automatically:
+1. Runs Vite production build (`npm run build`) into `dist/`
+2. Generates high-res macOS ICNS icons (`mac_app/AppIcon.icns`)
+3. Compiles the native Apple Silicon binary with Swift optimization flags (`swiftc -O`)
+4. Assembles the standalone `APEX OS.app` bundle
+5. Signs the app with camera, microphone, and networking entitlements
+6. Packages the `APEX-OS-Installer.dmg` disk image with `/Applications` drag-and-drop link
+
+### 🚀 Launching & Testing
+```bash
+# Launch the compiled macOS app directly:
+open "APEX OS.app"
+
+# Or mount the DMG installer:
+open APEX-OS-Installer.dmg
+```
+
+A pre-built native macOS release is available in [GitHub Releases v1.0.0](https://github.com/archiboltmusk/apex-lifemaxx-os/releases/tag/v1.0.0).
 
 ---
 

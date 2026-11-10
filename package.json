@@ -5,7 +5,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "compile": "bash scripts/build_app.sh",
+    "build:mac": "bash scripts/build_app.sh",
+    "build:dmg": "bash scripts/build_app.sh --dmg",
+    "build:all": "bash scripts/build_app.sh --dmg",
+    "package": "bash scripts/build_app.sh --dmg"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
