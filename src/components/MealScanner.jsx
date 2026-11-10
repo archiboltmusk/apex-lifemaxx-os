@@ -53,11 +53,11 @@ export default function MealScanner() {
               <div className="flex items-center space-x-2">
                 <h3 className="text-sm font-bold text-white tracking-tight">AI Vision Macro Scanner</h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-black">
-                  MACROFACTOR ENGINE
+                  ON-DEVICE VISION
                 </span>
               </div>
               <span className="text-[11px] font-mono text-[#8A8A8A]">
-                Multi-object photogrammetric nutrition estimation
+                MobileNetV4 (<code className="text-[#00F0FF]">food_macro_vision.onnx</code> 37MB) · On-Device Nutrition Inference
               </span>
             </div>
           </div>

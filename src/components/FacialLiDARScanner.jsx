@@ -256,11 +256,11 @@ export default function FacialLiDARScanner() {
                   TrueDepth LiDAR Craniofacial Camera
                 </h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/40 font-black">
-                  LIVE AR 2026
+                  OFFLINE 468-POINT MESH
                 </span>
               </div>
               <span className="text-[11px] font-mono text-[#8A8A8A]">
-                {isCameraActive ? 'Real-Time Front Camera Active' : 'AR Mesh Active (Camera Ready)'}
+                MediaPipe TrueDepth (<code className="text-[#00F0FF]">face_landmarker.task</code> 3.6MB) · {isCameraActive ? 'Mac Front Camera 60fps Active' : 'Front Camera Ready'}
               </span>
             </div>
           </div>

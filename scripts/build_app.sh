@@ -40,6 +40,10 @@ done
 
 # Step 2: Build Vite Production Assets
 echo -e "\n${COLOR_YELLOW}[2/6] Building Production React & Tailwind Bundle...${COLOR_RESET}"
+if [ ! -f "public/models/pose_landmarker_heavy.task" ]; then
+    echo -e "  Models missing — fetching production ML weights..."
+    bash scripts/download_models.sh
+fi
 npm run build
 if [ ! -f "dist/index.html" ]; then
     echo -e "${COLOR_RED}Error: dist/index.html was not generated!${COLOR_RESET}"
@@ -67,7 +71,7 @@ swiftc -O \
 echo -e "${COLOR_GREEN}  ✓ Mach-O binary compiled: mac_app/APEX OS${COLOR_RESET}"
 
 # Step 5: Assemble & Sign APEX OS.app Bundle
-echo -e "\n${COLOR_YELLOW}[5/6] Assembling macOS Application Bundle...${COLOR_RESET}"
+echo -e "\n${COLOR_YELLOW}[5/7] Assembling macOS Application Bundle with AI Models...${COLOR_RESET}"
 APP_BUNDLE="APEX OS.app"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
@@ -79,26 +83,35 @@ cp "mac_app/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "mac_app/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 cp -R dist/ "$APP_BUNDLE/Contents/Resources/dist"
 
+# Embed AI models directly into Resources as well
+if [ -d "public/models" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/models"
+    cp -R public/models/* "$APP_BUNDLE/Contents/Resources/models/"
+fi
+
+APP_SIZE=$(du -sh "$APP_BUNDLE" | awk '{print $1}')
+echo -e "${COLOR_GREEN}  ✓ Complete Standalone App Bundle assembled: $APP_SIZE${COLOR_RESET}"
+
 echo -e "  Applying Camera/Microphone Entitlements & Ad-hoc Signature..."
 codesign --force --deep --sign - --entitlements mac_app/APEX_OS.entitlements "$APP_BUNDLE"
 codesign -v "$APP_BUNDLE"
-echo -e "${COLOR_GREEN}  ✓ $APP_BUNDLE assembled and codesigned successfully!${COLOR_RESET}"
+echo -e "${COLOR_GREEN}  ✓ $APP_BUNDLE codesigned successfully!${COLOR_RESET}"
 
-# Package Standalone Complete App Archive (.zip)
-echo -e "\n${COLOR_YELLOW}[6/7] Creating Standalone Complete App Archive (No Installer Required)...${COLOR_RESET}"
+# Step 6: Package Standalone Complete App Archive (.zip)
+echo -e "\n${COLOR_YELLOW}[6/7] Creating Standalone Complete App Archive...${COLOR_RESET}"
 ZIP_NAME="APEX-OS-macOS-Standalone.zip"
 rm -f "$ZIP_NAME"
 zip -q -r -y "$ZIP_NAME" "$APP_BUNDLE"
 ZIP_SIZE=$(ls -lh "$ZIP_NAME" | awk '{print $5}')
 echo -e "${COLOR_GREEN}  ✓ Standalone App Archive created: $ZIP_NAME ($ZIP_SIZE)${COLOR_RESET}"
 
-# Step 7: Create Production DMG Installer (if requested)
+# Step 7: Create Production Standalone DMG (No installer, just the complete app)
 if [ "$BUILD_DMG" = true ]; then
-    echo -e "\n${COLOR_YELLOW}[7/7] Generating macOS Disk Image (APEX-OS-Installer.dmg)...${COLOR_RESET}"
-    DMG_NAME="APEX-OS-Installer.dmg"
+    echo -e "\n${COLOR_YELLOW}[7/7] Generating Complete macOS Disk Image (APEX-OS.dmg)...${COLOR_RESET}"
+    DMG_NAME="APEX-OS.dmg"
     DMG_STAGING=".dmg_staging"
 
-    rm -rf "$DMG_STAGING" "$DMG_NAME"
+    rm -rf "$DMG_STAGING" "$DMG_NAME" "APEX-OS-Installer.dmg"
     mkdir -p "$DMG_STAGING"
 
     cp -R "$APP_BUNDLE" "$DMG_STAGING/"
@@ -113,7 +126,7 @@ if [ "$BUILD_DMG" = true ]; then
 
     rm -rf "$DMG_STAGING"
     DMG_SIZE=$(ls -lh "$DMG_NAME" | awk '{print $5}')
-    echo -e "${COLOR_GREEN}  ✓ Disk Image created: $DMG_NAME ($DMG_SIZE)${COLOR_RESET}"
+    echo -e "${COLOR_GREEN}  ✓ Complete Disk Image created: $DMG_NAME ($DMG_SIZE)${COLOR_RESET}"
 else
     echo -e "\n${COLOR_YELLOW}[7/7] Skipping DMG creation (--no-dmg specified).${COLOR_RESET}"
 fi
@@ -121,9 +134,9 @@ fi
 echo -e "\n${COLOR_GREEN}${COLOR_BOLD}======================================================================${COLOR_RESET}"
 echo -e "${COLOR_GREEN}${COLOR_BOLD}   🎉 BUILD & COMPILATION COMPLETE!                                   ${COLOR_RESET}"
 echo -e "${COLOR_GREEN}${COLOR_BOLD}======================================================================${COLOR_RESET}"
-echo -e "• Complete App Bundle : ${COLOR_BOLD}$PROJECT_DIR/$APP_BUNDLE${COLOR_RESET} (Ready to run directly)"
-echo -e "• Standalone Archive  : ${COLOR_BOLD}$PROJECT_DIR/$ZIP_NAME${COLOR_RESET} (Unzip & run anywhere)"
+echo -e "• Complete App Bundle : ${COLOR_BOLD}$PROJECT_DIR/$APP_BUNDLE${COLOR_RESET} ($APP_SIZE - Ready to run directly)"
+echo -e "• Standalone Archive  : ${COLOR_BOLD}$PROJECT_DIR/$ZIP_NAME${COLOR_RESET} ($ZIP_SIZE)"
 if [ "$BUILD_DMG" = true ]; then
-    echo -e "• Optional DMG Disk   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS-Installer.dmg${COLOR_RESET}"
+    echo -e "• Complete DMG Disk   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS.dmg${COLOR_RESET} ($DMG_SIZE)"
 fi
 echo -e "• Direct Launch       : ${COLOR_BOLD}open \"$APP_BUNDLE\"${COLOR_RESET}\n"

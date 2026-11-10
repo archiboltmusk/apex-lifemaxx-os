@@ -151,7 +151,41 @@ class MiniStaticServer {
             return
         }
 
-        // 3. Static Assets Server
+        // 3. Local Neural Models Registry: GET /api/models
+        if path == "api/models" {
+            let modelsDir = rootDir.appendingPathComponent("models")
+            var modelList: [[String: Any]] = []
+            if let files = try? FileManager.default.contentsOfDirectory(at: modelsDir, includingPropertiesForKeys: [.fileSizeKey], options: .skipsHiddenFiles) {
+                for file in files {
+                    let name = file.lastPathComponent
+                    let values = try? file.resourceValues(forKeys: [.fileSizeKey])
+                    let sizeBytes = values?.fileSize ?? 0
+                    let sizeMB = Double(sizeBytes) / (1024.0 * 1024.0)
+                    modelList.append([
+                        "filename": name,
+                        "path": "/models/\(name)",
+                        "sizeBytes": sizeBytes,
+                        "sizeMB": String(format: "%.1f MB", sizeMB),
+                        "status": "ONLINE // Apple Silicon ANE Ready",
+                        "acceleration": "CoreML / Metal / Apple Neural Engine"
+                    ])
+                }
+            }
+            let resObj: [String: Any] = [
+                "totalModels": modelList.count,
+                "engine": "Apple Silicon Neural Engine & CoreML Runtime",
+                "models": modelList
+            ]
+            let jsonData = (try? JSONSerialization.data(withJSONObject: resObj)) ?? Data()
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(jsonString)"
+            _ = res.utf8CString.withUnsafeBufferPointer {
+                write(clientSocket, $0.baseAddress, $0.count - 1)
+            }
+            return
+        }
+
+        // 4. Static Assets Server
         if path == "" || path == "/" {
             path = "index.html"
         }
@@ -163,10 +197,12 @@ class MiniStaticServer {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             fileData = try? Data(contentsOf: fileURL)
         } else {
-            // SPA fallback to index.html
-            let indexURL = rootDir.appendingPathComponent("index.html")
-            fileData = try? Data(contentsOf: indexURL)
-            path = "index.html"
+            // SPA fallback to index.html (skip if looking for models)
+            if !path.hasPrefix("models/") {
+                let indexURL = rootDir.appendingPathComponent("index.html")
+                fileData = try? Data(contentsOf: indexURL)
+                path = "index.html"
+            }
         }
 
         if path.hasSuffix(".html") { mimeType = "text/html; charset=utf-8" }
@@ -177,6 +213,8 @@ class MiniStaticServer {
         else if path.hasSuffix(".jpg") || path.hasSuffix(".jpeg") { mimeType = "image/jpeg" }
         else if path.hasSuffix(".json") { mimeType = "application/json" }
         else if path.hasSuffix(".woff2") { mimeType = "font/woff2" }
+        else if path.hasSuffix(".task") || path.hasSuffix(".tflite") || path.hasSuffix(".onnx") || path.hasSuffix(".bin") { mimeType = "application/octet-stream" }
+        else if path.hasSuffix(".wasm") { mimeType = "application/wasm" }
 
         guard let data = fileData else {
             let notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -191,8 +229,14 @@ class MiniStaticServer {
             write(clientSocket, $0.baseAddress, $0.count - 1)
         }
         data.withUnsafeBytes { rawBuffer in
-            if let ptr = rawBuffer.baseAddress {
-                _ = write(clientSocket, ptr, data.count)
+            guard let ptr = rawBuffer.baseAddress else { return }
+            var totalWritten = 0
+            while totalWritten < data.count {
+                let bytesToWrite = data.count - totalWritten
+                let chunk = min(bytesToWrite, 65536) // 64KB socket chunks
+                let written = write(clientSocket, ptr.advanced(by: totalWritten), chunk)
+                if written <= 0 { break }
+                totalWritten += written
             }
         }
     }

@@ -1,18 +1,46 @@
 import React, { useState } from 'react';
-import { Bot, Send, Sparkles, User, Zap, ShieldCheck, RefreshCw } from 'lucide-react';
-import { playPlunk, playCoinChime } from '../utils/audioSynth';
-
-const INITIAL_MESSAGES = [
-  {
-    role: 'assistant',
-    text: 'Greetings, Alexander. I am your APEX AI Consigliere, calibrated to the clinical methodologies of Peter Attia, Bryan Johnson, and Andrew Huberman. Your biological age is currently 22.8y (-6.2y reversed) and your morning autonomic recovery is at 94% (HRV 94ms). How shall we optimize your biology today?',
-  },
-];
+import {
+  Bot,
+  Send,
+  Sparkles,
+  User,
+  Zap,
+  ShieldCheck,
+  RefreshCw,
+  Heart,
+  Smile,
+  Glasses,
+  Flame,
+  CheckCircle2
+} from 'lucide-react';
+import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
 
 export default function AIConsigliere() {
-  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+  // Livity AI Coach Persona: 'buddy' | 'nerd'
+  const [coachPersona, setCoachPersona] = useState('buddy'); // 'buddy' | 'nerd'
+
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      text:
+        coachPersona === 'buddy'
+          ? "Hey Alexander! 🚀 You crushed your sleep last night (8h 22m with 2h 15m deep sleep)! Your recovery score is 94% — you're completely in the green. Today is an absolute push day. Let's hit that 18.0 strain target and lock in a workout! How are you feeling right now?"
+          : "Alexander: Autonomic telemetry indicates parasympathetic predominance. Nocturnal HRV SDNN 94ms (+14ms vs 30-day baseline), resting heart rate 48 bpm. Sleep architecture efficiency 94.6%. Neural and musculoskeletal recovery is primed for high-threshold motor unit recruitment: 18.0 Day Strain recommended.",
+    },
+  ]);
+
   const [inputPrompt, setInputPrompt] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+
+  const handlePersonaSwitch = (newPersona) => {
+    playPlunk();
+    setCoachPersona(newPersona);
+    const greeting =
+      newPersona === 'buddy'
+        ? "Switched to Buddy mode! ⚡ I've got your back. I read your sleep and recovery and I'm ready to keep you fired up all day. What do you want to conquer next?"
+        : "Switched to Nerd mode (Sports Science & Clinical Precision). 🧬 Calibrated to Attia, Huberman, and Levine protocols. Standing by for biometric queries.";
+    setMessages((prev) => [...prev, { role: 'assistant', text: greeting }]);
+  };
 
   const handleSend = (textToSend) => {
     const prompt = textToSend || inputPrompt;
@@ -30,47 +58,89 @@ export default function AIConsigliere() {
 
       let reply = '';
       const lower = prompt.toLowerCase();
-      if (lower.includes('hrv') || lower.includes('recovery')) {
-        reply =
-          'Your overnight HRV of 94ms indicates high vagal nerve parasympathetic dominance. Last night’s mouth taping and 144mg Magnesium L-Threonate prevented micro-arousals. You are in an optimal neuro-muscular window for maximum strain: aim for 18.0 Day Strain with heavy overhead pressing and Zone 2 flush.';
-      } else if (lower.includes('glucose') || lower.includes('sugar') || lower.includes('cgm')) {
-        reply =
-          'With your baseline fasting glucose at 82 mg/dL, take 1 tbsp Apple Cider Vinegar diluted in 250ml water 10 minutes prior to complex carbohydrates. Following your meal, a 12-minute brisk walk activates non-insulin-mediated GLUT4 translocation in your soleus muscle, flattening glycemic excursions by 34%.';
-      } else if (lower.includes('phenoage') || lower.includes('longevity') || lower.includes('age')) {
-        reply =
-          'Your PhenoAge is calculated at 22.8 years versus your 29.0 chronological age. To push your pace of aging below 0.70x/yr, focus on keeping your hs-CRP below 0.25 mg/L via daily omega-3 (2,400mg EPA/DHA) and maintaining your ApoB below 55 mg/dL to prevent any atherogenic subendothelial retention.';
+
+      if (coachPersona === 'buddy') {
+        if (lower.includes('push') || lower.includes('workout') || lower.includes('exercise')) {
+          reply =
+            "Heck yeah! Today is 100% a green light to PUSH! 💥 Your body is fully recharged at 94% recovery. Fire up the camera workout tracker for some deep squats or hit heavy deadlifts. You've got the energy in the tank, make it count!";
+        } else if (lower.includes('sleep') || lower.includes('tired')) {
+          reply =
+            "Your sleep last night was phenomenal — 2h 15m of deep repair sleep! If you're feeling an afternoon dip around 2:30 PM, that's just your natural circadian rhythm. Grab some water, get 5 minutes of sunlight, and push through — no caffeine after 2 PM!";
+        } else if (lower.includes('week') || lower.includes('progress') || lower.includes('pattern')) {
+          reply =
+            "Looking at your week, you're on a 42-day streak! 🔥 You hit all three activity rings 6 out of 7 days, your fitness age dropped another 0.4 years, and your average strain was 16.8. You are crushing the top 1%!";
+        } else {
+          reply = `Awesome question! With your current 94% recovery and 840 active calories burned, you're in prime shape. Stay hydrated, keep that momentum going, and let's crush today's protocols together! 🏆`;
+        }
       } else {
-        reply = `Prescription locked for: "${prompt}". Based on your blood chemistry and genetic profile, sustain 15 minutes of direct solar lux, 3 minutes in the 4°C cold plunge for RBM3 cold shock induction, and maintain your 40Hz binaural flow state during deep equity-building sprints.`;
+        // Nerd Persona
+        if (lower.includes('push') || lower.includes('workout') || lower.includes('exercise')) {
+          reply =
+            "Cardiovascular & Muscular Analysis: Autonomic readiness index: 94.2/100. Vagal tone supports maximal cardiac output (VO2 Max 54.2 mL/kg). Prescribed stimulus: 45 min Zone 2 aerobic base (134-142 bpm) followed by 4x4 min Zone 5 HIIT at >90% HRmax. Expected EPOC: 380 kcal.";
+        } else if (lower.includes('sleep') || lower.includes('tired')) {
+          reply =
+            "Polysomnography breakdown: Deep N3 cellular stage 27% (135 min), REM stage 23% (115 min). Core temperature nadir occurred at 04:12 AM. Postprandial dip at 14:15 reflects circadian adenosine accumulation. Light intervention: 10,000 lux outdoor photon stimulation resets melanopsin retinal ganglion cells.";
+        } else if (lower.includes('week') || lower.includes('progress') || lower.includes('pattern')) {
+          reply =
+            "Weekly Epigenetic & Hemodynamic Retrospective: Cumulative strain 118.4 Borg units. Resting heart rate trending downward (-2 bpm delta). PhenoAge regression indicates pace of aging sustained at 0.74x/yr. DunedinPACE cohort rank: 99.9th percentile.";
+        } else {
+          reply = `Biometric evaluation for "${prompt}": Telemetry matches optimal homeostasis. Fasting insulin estimated < 3.0 uIU/mL, Hs-CRP at 0.22 mg/L. All physiological systems are within longevity target brackets.`;
+        }
       }
 
       setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
-    }, 900);
+    }, 750);
   };
 
   return (
     <div className="space-y-4">
       {/* CHAT CONTAINER */}
-      <div className="liquid-glass-elevated rounded-[26px] p-6 border border-white/15 flex flex-col h-[520px] justify-between">
+      <div className="liquid-glass-elevated rounded-[26px] p-6 border border-white/15 flex flex-col h-[540px] justify-between">
         {/* Top Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
+        <div className="flex flex-wrap items-center justify-between pb-3 border-b border-white/10 shrink-0 gap-3">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-[12px] bg-[#E5FE40]/20 border border-[#E5FE40]/40 flex items-center justify-center">
               <Bot className="w-5 h-5 text-[#E5FE40]" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h3 className="text-sm font-bold text-white tracking-tight">APEX AI Consigliere</h3>
+                <h3 className="text-sm font-bold text-white tracking-tight">Livity AI Virtual Coach</h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-bold">
-                  ON-DEVICE NEURAL MODEL
+                  READS LIVE RECOVERY & STRAIN
                 </span>
               </div>
               <span className="text-[11px] font-mono text-[#8A8A8A]">
-                Trained on 40,000+ clinical longevity & biomechanics papers
+                Like a sports scientist in your pocket · Remembers your goals
               </span>
             </div>
           </div>
 
-          <span className="text-xs font-mono text-[#00F0FF] font-bold">ATTIA & BLUEPRINT ENGINE</span>
+          {/* Persona Switcher: Buddy vs Nerd */}
+          <div className="flex items-center space-x-1 p-1 rounded-[14px] bg-black/60 border border-white/10 text-xs font-mono">
+            <button
+              onClick={() => handlePersonaSwitch('buddy')}
+              className={`px-3 py-1.5 rounded-[10px] font-bold flex items-center space-x-1.5 transition ${
+                coachPersona === 'buddy'
+                  ? 'bg-[#E5FE40] text-black font-black shadow-[0_0_10px_rgba(229,254,64,0.4)]'
+                  : 'text-[#8A8A8A] hover:text-white'
+              }`}
+            >
+              <Smile className="w-3.5 h-3.5" />
+              <span>BUDDY (Warm)</span>
+            </button>
+
+            <button
+              onClick={() => handlePersonaSwitch('nerd')}
+              className={`px-3 py-1.5 rounded-[10px] font-bold flex items-center space-x-1.5 transition ${
+                coachPersona === 'nerd'
+                  ? 'bg-[#00F0FF] text-black font-black shadow-[0_0_10px_rgba(0,240,255,0.4)]'
+                  : 'text-[#8A8A8A] hover:text-white'
+              }`}
+            >
+              <Glasses className="w-3.5 h-3.5" />
+              <span>NERD (Data)</span>
+            </button>
+          </div>
         </div>
 
         {/* Message Thread */}
@@ -105,50 +175,65 @@ export default function AIConsigliere() {
           ))}
 
           {isTyping && (
-            <div className="flex items-center space-x-2 text-xs font-mono text-[#8A8A8A] pl-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E5FE40] animate-bounce" />
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E5FE40] animate-bounce [animation-delay:0.2s]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E5FE40] animate-bounce [animation-delay:0.4s]" />
-              <span>Synthesizing clinical protocol...</span>
+            <div className="flex items-center space-x-2 text-[#E5FE40] font-mono text-xs animate-pulse">
+              <Bot className="w-4 h-4" />
+              <span>
+                {coachPersona === 'buddy'
+                  ? 'Coach Buddy is checking your recovery scores...'
+                  : 'Running inference across physiological telemetry...'}
+              </span>
             </div>
           )}
         </div>
 
-        {/* Quick Prompts */}
-        <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-2 border-t border-white/10 shrink-0">
-          {[
-            'Why is my HRV 94ms today?',
-            'Optimize my post-workout meal',
-            'How to suppress postprandial glucose spike?',
-            'Prescribe my PhenoAge reduction stack',
-          ].map((prompt, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSend(prompt)}
-              className="px-3 py-1 rounded-[10px] bg-white/[0.04] hover:bg-white/[0.08] text-[10px] font-mono text-white/80 whitespace-nowrap border border-white/10 transition shrink-0"
-            >
-              {prompt}
-            </button>
-          ))}
+        {/* Quick Suggestion Chips */}
+        <div className="flex items-center space-x-2 pb-3 overflow-x-auto no-scrollbar text-[11px] font-mono text-[#A1A1AA]">
+          <button
+            onClick={() => handleSend('Should I push today or recover?')}
+            className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
+          >
+            "Should I push today or recover?"
+          </button>
+          <button
+            onClick={() => handleSend('How was my week and sleep?')}
+            className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
+          >
+            "How was my week and sleep?"
+          </button>
+          <button
+            onClick={() => handleSend('What patterns should I know?')}
+            className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
+          >
+            "What patterns should I know?"
+          </button>
         </div>
 
-        {/* Text Input */}
-        <div className="flex items-center space-x-2 pt-2 shrink-0">
+        {/* Prompt Input Form */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
+          }}
+          className="flex items-center space-x-2 pt-2 border-t border-white/10 shrink-0"
+        >
           <input
             type="text"
+            placeholder={
+              coachPersona === 'buddy'
+                ? 'Ask Coach Buddy anything about your workouts, sleep, or goals...'
+                : 'Ask Coach Nerd for biomarker regressions, HRV analysis, or Zone 2 target...'
+            }
             value={inputPrompt}
             onChange={(e) => setInputPrompt(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask your longevity consigliere..."
-            className="flex-1 bg-black/60 border border-white/15 rounded-[14px] px-4 py-3 text-xs font-mono text-white placeholder-[#8A8A8A] focus:outline-none focus:border-[#E5FE40]"
+            className="flex-1 px-4 py-3 rounded-[16px] bg-black/60 border border-white/15 text-white placeholder-white/40 font-mono text-xs focus:outline-none focus:border-[#E5FE40] transition"
           />
           <button
-            onClick={() => handleSend()}
-            className="p-3 rounded-[14px] cred-plunk-primary text-black"
+            type="submit"
+            className="w-11 h-11 rounded-[16px] bg-[#E5FE40] hover:bg-[#d8f030] text-black flex items-center justify-center font-bold transition shadow-[0_0_15px_rgba(229,254,64,0.4)]"
           >
             <Send className="w-4 h-4" />
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

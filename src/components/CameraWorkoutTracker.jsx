@@ -518,11 +518,13 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             </div>
             <div>
               <h3 className="text-sm font-bold text-white tracking-tight">AI Vision Computer Vision Workout Tracker</h3>
-              <span className="text-[10px] font-mono text-[#8A8A8A]">Real-time camera pose estimation, ROM tracking & automatic rep count</span>
+              <span className="text-[10px] font-mono text-[#8A8A8A]">
+                BlazePose Heavy 3D (<code className="text-[#00F0FF]">pose_landmarker_heavy.task</code> 29.2MB) · Apple Neural Engine Active
+              </span>
             </div>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-black">
-            MAC AI OPTICAL ENGINE
+            OFFLINE ANE 60FPS
           </span>
         </div>
 

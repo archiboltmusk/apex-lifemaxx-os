@@ -95,6 +95,7 @@ import CameraWorkoutTracker from './components/CameraWorkoutTracker';
 import AccountTesterModal from './components/AccountTesterModal';
 import AIConsigliere from './components/AIConsigliere';
 import ThermalSuite from './components/ThermalSuite';
+import OfflineModelsMonitor from './components/OfflineModelsMonitor';
 
 export default function App() {
   // Navigation & View mode
@@ -1080,6 +1081,7 @@ export default function App() {
             <div className="flex items-center space-x-1.5 bg-black/40 p-1 rounded-[12px] border border-white/10">
               {[
                 { id: 'hardware', label: 'Garage & Drops' },
+                { id: 'models', label: 'Offline AI Models (139MB)' },
                 { id: 'burnvault', label: 'The Burn Vault' },
                 { id: 'ios18', label: 'iOS 18 Widgets' },
               ].map((sub) => (
@@ -1110,6 +1112,10 @@ export default function App() {
                 onRewardWon={(item) => showToast(`Claimed: ${item.title}`)}
               />
             </div>
+          )}
+
+          {garageSubTab === 'models' && (
+            <OfflineModelsMonitor />
           )}
 
           {garageSubTab === 'burnvault' && (

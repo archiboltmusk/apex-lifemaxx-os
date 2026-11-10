@@ -8,9 +8,11 @@
     "preview": "vite preview",
     "compile": "bash scripts/build_app.sh",
     "build:mac": "bash scripts/build_app.sh",
+    "build:ios": "bash scripts/build_ios.sh",
+    "compile:all": "bash scripts/build_app.sh && bash scripts/build_ios.sh",
     "build:dmg": "bash scripts/build_app.sh --dmg",
-    "build:all": "bash scripts/build_app.sh --dmg",
-    "package": "bash scripts/build_app.sh --dmg"
+    "build:all": "bash scripts/build_app.sh --dmg && bash scripts/build_ios.sh",
+    "package": "bash scripts/build_app.sh --dmg && bash scripts/build_ios.sh"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

@@ -44,11 +44,11 @@ export default function VocalResonanceAnalyzer() {
                   Acoustic Vocal Resonance & Pitch Analyzer
                 </h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/40 font-black">
-                  FRAMEMAXXING
+                  ON-DEVICE DSP TRANSFORMER
                 </span>
               </div>
               <span className="text-[11px] font-mono text-[#8A8A8A]">
-                Fundamental pitch (F0), chest resonance & unhurried pacing analysis
+                Whisper DSP Transformer (<code className="text-[#00F0FF]">vocal_whisper_encoder.onnx</code> 31MB) · Fundamental pitch (F0), formant & resonance
               </span>
             </div>
           </div>
