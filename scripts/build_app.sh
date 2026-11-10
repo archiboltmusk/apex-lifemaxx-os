@@ -58,9 +58,10 @@ echo -e "${COLOR_GREEN}  ✓ macOS icon generated: mac_app/AppIcon.icns${COLOR_R
 # Step 4: Compile Native Swift Mach-O Binary
 echo -e "\n${COLOR_YELLOW}[4/6] Compiling Native Apple Silicon Executable (Swift 5.10+)...${COLOR_RESET}"
 swiftc -O \
-    -target arm64-apple-macos12.0 \
+    -target arm64-apple-macos13.0 \
     -framework Cocoa \
     -framework WebKit \
+    -framework HealthKit \
     mac_app/main.swift \
     -o "mac_app/APEX OS"
 echo -e "${COLOR_GREEN}  ✓ Mach-O binary compiled: mac_app/APEX OS${COLOR_RESET}"

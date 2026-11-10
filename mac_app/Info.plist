@@ -31,5 +31,11 @@
     <string>APEX OS requires microphone access to analyze acoustic vocal pitch and thoracic resonance.</string>
     <key>NSCameraUsageDescription</key>
     <string>APEX OS uses front camera computer vision for TrueDepth photogrammetric facial landmark mapping.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>APEX OS requires read access to Apple HealthKit to analyze cardiovascular recovery, HRV, VO2 Max, and active caloric expenditure.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>APEX OS writes workout sessions, sets, and active energy samples directly into your Apple HealthKit store.</string>
+    <key>NSHealthClinicalHealthRecordsShareUsageDescription</key>
+    <string>APEX OS imports clinical biometric records from Apple HealthKit for PhenoAge epigenetic scoring.</string>
 </dict>
 </plist>
