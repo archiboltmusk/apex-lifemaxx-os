@@ -66,6 +66,7 @@ swiftc -O \
     -framework Cocoa \
     -framework WebKit \
     -framework HealthKit \
+    -framework AVFoundation \
     mac_app/main.swift \
     -o "mac_app/APEX OS"
 echo -e "${COLOR_GREEN}  ✓ Mach-O binary compiled: mac_app/APEX OS${COLOR_RESET}"

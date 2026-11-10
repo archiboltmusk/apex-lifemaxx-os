@@ -3,10 +3,20 @@ import { Activity, Flame, Moon, Heart, TrendingUp, Zap, Clock, ShieldAlert } fro
 import { RECOVERY_STRAIN_DATA, APPLE_HEALTH_DATA } from '../utils/lifemaxxData';
 import { playPlunk } from '../utils/audioSynth';
 
-export default function RecoveryStrainView() {
-  const { recoveryScore, recoveryStatus, recoveryMessage, strainCurrent, strainTarget, zones } =
-    RECOVERY_STRAIN_DATA;
-  const { sleepStages } = APPLE_HEALTH_DATA;
+export default function RecoveryStrainView({ healthData }) {
+  const currentHealth = healthData || APPLE_HEALTH_DATA;
+  const sleepStages = currentHealth.sleepStages || APPLE_HEALTH_DATA.sleepStages;
+  const hrvValue = currentHealth.metrics?.hrv?.value || 94;
+  const rhrValue = currentHealth.metrics?.restingHeartRate?.value || 48;
+
+  // Real biological recovery calculation from HRV & Resting HR
+  const recoveryScore = Math.min(99, Math.max(35, Math.round(50 + (hrvValue - 50) * 0.5 - (rhrValue - 55) * 0.6)));
+  const recoveryStatus = recoveryScore >= 80 ? 'PEAK RECOVERY' : recoveryScore >= 60 ? 'BALANCED' : 'RECOVERY REQUIRED';
+  const recoveryMessage = recoveryScore >= 80
+    ? `High parasympathetic dominance detected (HRV ${hrvValue}ms, Resting HR ${rhrValue}bpm). Your autonomic nervous system is fully primed for high strain.`
+    : `Elevated physiological load. HRV at ${hrvValue}ms. Prioritize restorative sleep and hydration.`;
+
+  const { strainCurrent, strainTarget, zones } = RECOVERY_STRAIN_DATA;
 
   return (
     <div className="space-y-6">

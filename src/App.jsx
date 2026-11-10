@@ -123,26 +123,29 @@ export default function App() {
 
   const handleAddHealthData = (sample) => {
     setAppleHealthState((prev) => {
-      const newMove = prev.activityRings.move.current + (sample.calories || 0);
-      const newEx = prev.activityRings.exercise.current + (sample.exerciseMin || 0);
-      const newStand = prev.activityRings.stand.current + (sample.standHours || 0);
+      const isAbs = sample.setAbsolute;
+      const newMove = isAbs ? (sample.calories ?? prev.activityRings.move.current) : prev.activityRings.move.current + (sample.calories || 0);
+      const newEx = isAbs ? (sample.exerciseMin ?? prev.activityRings.exercise.current) : prev.activityRings.exercise.current + (sample.exerciseMin || 0);
+      const newStand = isAbs ? (sample.standHours ?? prev.activityRings.stand.current) : prev.activityRings.stand.current + (sample.standHours || 0);
 
       const updated = {
         ...prev,
+        deviceSource: sample.source || prev.deviceSource,
+        lastSynced: 'Just now',
         activityRings: {
           move: {
             ...prev.activityRings.move,
-            current: newMove,
+            current: Math.round(newMove),
             percentage: Math.round((newMove / prev.activityRings.move.target) * 100),
           },
           exercise: {
             ...prev.activityRings.exercise,
-            current: newEx,
+            current: Math.round(newEx),
             percentage: Math.round((newEx / prev.activityRings.exercise.target) * 100),
           },
           stand: {
             ...prev.activityRings.stand,
-            current: newStand,
+            current: Math.round(newStand),
             percentage: Math.round((newStand / prev.activityRings.stand.target) * 100),
           },
         },
@@ -153,6 +156,18 @@ export default function App() {
             ...prev.metrics.restingHeartRate,
             value: sample.rhr || prev.metrics.restingHeartRate.value,
           },
+          vo2Max: {
+            ...prev.metrics.vo2Max,
+            value: sample.vo2Max || prev.metrics.vo2Max.value,
+          },
+        },
+        sleepStages: {
+          ...prev.sleepStages,
+          totalHours: sample.sleepHours ? `${sample.sleepHours}h` : prev.sleepStages.totalHours,
+          deep: {
+            ...prev.sleepStages.deep,
+            time: sample.deepSleepHours ? `${sample.deepSleepHours}h` : prev.sleepStages.deep.time,
+          },
         },
       };
       try {
@@ -160,18 +175,56 @@ export default function App() {
       } catch {}
       return updated;
     });
-    showToast(`Committed +${sample.calories} kcal & +${sample.exerciseMin}m to Apple HealthKit`);
+
+    if (sample.setAbsolute) {
+      showToast(`Apple HealthKit Calibrated · ${sample.source || 'Verified Data'}`);
+    } else {
+      showToast(`Committed +${sample.calories || 0} kcal & +${sample.exerciseMin || 0}m to Apple HealthKit`);
+    }
   };
 
-  // VIP Testing Account Profile & Membership
-  const [membershipPlan, setMembershipPlan] = useState('lifetime'); // 'lifetime' | 'annual' | 'monthly' | null
-  const [userProfile, setUserProfile] = useState({
-    name: 'Alexander Vance',
-    handle: '@vance.apex',
-    tier: 'LIFETIME SOVEREIGN (FOUNDER #001)',
-    badge: '👑 APEX 0.01%',
-    appleId: 'alexander.vance@apex.club',
-    status: 'VERIFIED TESTER',
+  // Global Real-Time Listener for HealthKit Packets from Swift Native Server
+  useEffect(() => {
+    const handleGlobalHealthKitPacket = (e) => {
+      const payload = e.detail;
+      if (!payload) return;
+      playHealthSyncChime();
+      handleAddHealthData({
+        calories: payload.move || payload.calories,
+        exerciseMin: payload.exercise || payload.exerciseMin,
+        standHours: payload.stand || payload.standHours,
+        hrv: payload.hrv,
+        rhr: payload.hr || payload.rhr,
+        vo2Max: payload.vo2 || payload.vo2Max,
+        source: payload.source || 'Apple Watch Ultra (Real-Time Ingest)',
+        setAbsolute: payload.setAbsolute || false,
+      });
+    };
+
+    window.addEventListener('appleHealthSync', handleGlobalHealthKitPacket);
+    return () => {
+      window.removeEventListener('appleHealthSync', handleGlobalHealthKitPacket);
+    };
+  }, []);
+
+  // Real User Account Profile & Membership
+  const [membershipPlan, setMembershipPlan] = useState('lifetime');
+  const [userProfile, setUserProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('apex_user_profile');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    const defaultName = (typeof window !== 'undefined' && window.__macDeviceTelemetry?.userName) || 'Anupam Mahato';
+    const defaultLogin = (typeof window !== 'undefined' && window.__macDeviceTelemetry?.userLogin) || 'anupam';
+    return {
+      name: defaultName,
+      handle: `@${defaultLogin}`,
+      tier: 'SOVEREIGN FOUNDER (LIFETIME ACCESS)',
+      badge: '👑 VERIFIED MAC USER',
+      appleId: `${defaultLogin}@icloud.com`,
+      status: 'VERIFIED LOCAL HOST',
+      device: 'MacBook Air (Apple M5 · 16 GB)',
+    };
   });
 
   // Economy & Streaks
@@ -613,7 +666,7 @@ export default function App() {
               onLogSet={(set) => showToast(`Camera Reps Logged: ${set.reps} ${set.exercise}`)}
             />
           )}
-          {fitnessSubTab === 'recovery' && <RecoveryStrainView />}
+          {fitnessSubTab === 'recovery' && <RecoveryStrainView healthData={appleHealthState} />}
           {fitnessSubTab === 'thermal' && <ThermalSuite />}
           {fitnessSubTab === 'decathlon' && <CentenarianDecathlon />}
           {fitnessSubTab === 'muscles' && <MuscleRecoveryMap />}

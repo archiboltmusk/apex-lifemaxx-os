@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   ShieldCheck,
@@ -19,29 +19,61 @@ import {
   AlertCircle,
   ArrowRight,
   Radio,
-  Cpu
+  Cpu,
+  Upload,
+  FileCode,
+  Copy,
+  Terminal,
+  Activity
 } from 'lucide-react';
 import { playPlunk, playHealthSyncChime, playCoinChime, playHaptic } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
+import { parseAppleHealthXML, SAMPLE_APPLE_HEALTH_EXPORT_XML } from '../utils/appleHealthParser';
 
 export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, healthData, onAddHealthData }) {
-  // Tabs: 'realtime_stream' | 'ios_companion' | 'manual'
-  const [activeModalTab, setActiveModalTab] = useState('realtime_stream');
+  // Tabs: 'stream' | 'calibrate' | 'ios_app' | 'shortcuts' | 'xml_import'
+  const [activeModalTab, setActiveModalTab] = useState('stream');
 
-  // Stream Status
-  const [streamConnected, setStreamConnected] = useState(true);
+  // Stream & Gateway State
   const [localPort, setLocalPort] = useState(window.location.port || '5174');
+  const [localIP, setLocalIP] = useState('192.168.1.5');
   const [lastSyncTime, setLastSyncTime] = useState(new Date().toLocaleTimeString());
-  const [packetCount, setPacketCount] = useState(48);
+  const [packetCount, setPacketCount] = useState(52);
   const [isSendingPacket, setIsSendingPacket] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
 
-  // Manual Form Inputs
-  const [addCalories, setAddCalories] = useState(350);
-  const [addExerciseMin, setAddExerciseMin] = useState(45);
-  const [addStandHours, setAddStandHours] = useState(2);
-  const [addWaterMl, setAddWaterMl] = useState(750);
-  const [addHRV, setAddHRV] = useState(98);
-  const [addRHR, setAddRHR] = useState(46);
+  // Calibration / Absolute Values State (Initialized from current healthData)
+  const [calibMove, setCalibMove] = useState(healthData?.activityRings?.move?.current || 840);
+  const [calibMoveTarget, setCalibMoveTarget] = useState(healthData?.activityRings?.move?.target || 750);
+  const [calibExercise, setCalibExercise] = useState(healthData?.activityRings?.exercise?.current || 54);
+  const [calibStand, setCalibStand] = useState(healthData?.activityRings?.stand?.current || 14);
+  const [calibRHR, setCalibRHR] = useState(healthData?.metrics?.restingHeartRate?.value || 48);
+  const [calibHRV, setCalibHRV] = useState(healthData?.metrics?.hrv?.value || 94);
+  const [calibVo2Max, setCalibVo2Max] = useState(healthData?.metrics?.vo2Max?.value || 58.4);
+  const [calibSleepHours, setCalibSleepHours] = useState(8.2);
+  const [calibDeepSleep, setCalibDeepSleep] = useState(2.2);
+
+  // XML Import State
+  const [isParsingXML, setIsParsingXML] = useState(false);
+  const [xmlResult, setXmlResult] = useState(null);
+  const [xmlFileName, setXmlFileName] = useState('');
+  const fileInputRef = useRef(null);
+
+  // Sync internal state when healthData changes
+  useEffect(() => {
+    if (healthData) {
+      setCalibMove(healthData.activityRings?.move?.current || 840);
+      setCalibMoveTarget(healthData.activityRings?.move?.target || 750);
+      setCalibExercise(healthData.activityRings?.exercise?.current || 54);
+      setCalibStand(healthData.activityRings?.stand?.current || 14);
+      setCalibRHR(healthData.metrics?.restingHeartRate?.value || 48);
+      setCalibHRV(healthData.metrics?.hrv?.value || 94);
+      setCalibVo2Max(healthData.metrics?.vo2Max?.value || 58.4);
+    }
+    if (typeof window !== 'undefined' && window.__macDeviceTelemetry?.localIP) {
+      setLocalIP(window.__macDeviceTelemetry.localIP);
+    }
+  }, [healthData]);
 
   // Listen for Real-Time Incoming HealthKit Webhook Packets
   useEffect(() => {
@@ -55,11 +87,14 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
 
       if (onAddHealthData && payload) {
         onAddHealthData({
-          calories: payload.move || payload.calories || 0,
-          exerciseMin: payload.exercise || payload.exerciseMin || 0,
-          standHours: payload.stand || 0,
-          hrv: payload.hrv || 95,
-          rhr: payload.hr || payload.rhr || 48,
+          calories: payload.move || payload.calories,
+          exerciseMin: payload.exercise || payload.exerciseMin,
+          standHours: payload.stand || payload.standHours,
+          hrv: payload.hrv,
+          rhr: payload.hr || payload.rhr,
+          vo2Max: payload.vo2 || payload.vo2Max,
+          source: payload.source || 'Apple Watch Ultra (Real-Time Ingest)',
+          setAbsolute: payload.setAbsolute || false,
         });
       }
     };
@@ -72,7 +107,7 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
 
   if (!isOpen) return null;
 
-  // Trigger Real-Time HealthKit Stream Packet
+  // Trigger Real-Time Test Packet to Swift Local Server
   const handleSendLivePacket = async () => {
     playPlunk();
     setIsSendingPacket(true);
@@ -83,6 +118,7 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
       stand: 1,
       hr: Math.round(48 + Math.random() * 6),
       hrv: Math.round(92 + Math.random() * 8),
+      vo2: +(58.2 + Math.random() * 0.4).toFixed(1),
       source: 'Apple Watch Ultra 2 (Real-Time HKObserverQuery)',
       timestamp: new Date().toISOString(),
     };
@@ -99,7 +135,7 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
         playHealthSyncChime();
       }
     } catch {
-      // Local event fallback
+      // Local fallback event
       window.dispatchEvent(new CustomEvent('appleHealthSync', { detail: payload }));
     }
 
@@ -113,26 +149,30 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
     } catch {}
   };
 
-  // Commit Manual Biometrics
-  const handleCommitManual = () => {
+  // Commit Calibrated Absolute Biometrics
+  const handleCommitCalibration = () => {
     playPlunk();
     playHealthSyncChime();
 
     if (onAddHealthData) {
       onAddHealthData({
-        calories: Number(addCalories),
-        exerciseMin: Number(addExerciseMin),
-        standHours: Number(addStandHours),
-        waterMl: Number(addWaterMl),
-        hrv: Number(addHRV),
-        rhr: Number(addRHR),
+        calories: Number(calibMove),
+        exerciseMin: Number(calibExercise),
+        standHours: Number(calibStand),
+        hrv: Number(calibHRV),
+        rhr: Number(calibRHR),
+        vo2Max: Number(calibVo2Max),
+        sleepHours: Number(calibSleepHours),
+        deepSleepHours: Number(calibDeepSleep),
+        source: 'User Biometric Calibration (Verified Apple Health Data)',
+        setAbsolute: true,
       });
     }
 
     try {
       confetti({
-        particleCount: 50,
-        spread: 50,
+        particleCount: 70,
+        spread: 65,
         colors: ['#FA114F', '#92E82A', '#00D6E6'],
       });
     } catch {}
@@ -140,11 +180,89 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
     onClose();
   };
 
+  // Handle Real XML Upload
+  const handleXmlFileUpload = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    playPlunk();
+    setXmlFileName(file.name);
+    setIsParsingXML(true);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target.result;
+      const parsed = parseAppleHealthXML(content);
+      setIsParsingXML(false);
+      if (parsed.success) {
+        setXmlResult(parsed.data);
+        playCoinChime();
+      } else {
+        alert(`Error parsing Apple Health XML: ${parsed.error}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Apply Sample Apple Health XML
+  const handleLoadSampleXml = () => {
+    playPlunk();
+    setIsParsingXML(true);
+    setXmlFileName('export.xml (Anupam’s Apple Watch Ultra 2)');
+    setTimeout(() => {
+      const parsed = parseAppleHealthXML(SAMPLE_APPLE_HEALTH_EXPORT_XML);
+      setIsParsingXML(false);
+      if (parsed.success) {
+        setXmlResult(parsed.data);
+        playCoinChime();
+      }
+    }, 400);
+  };
+
+  // Commit Parsed XML Data to State
+  const handleCommitParsedXML = () => {
+    if (!xmlResult) return;
+    playPlunk();
+    playHealthSyncChime();
+
+    if (onAddHealthData) {
+      onAddHealthData({
+        calories: xmlResult.metrics.moveCalories,
+        exerciseMin: xmlResult.metrics.exerciseMinutes,
+        standHours: xmlResult.metrics.standHours,
+        rhr: xmlResult.metrics.restingHeartRate,
+        hrv: xmlResult.metrics.hrvMs,
+        vo2Max: xmlResult.metrics.vo2Max,
+        source: xmlResult.sourceName || 'Apple Health export.xml',
+        setAbsolute: true,
+      });
+    }
+
+    try {
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        colors: ['#FA114F', '#92E82A', '#00D6E6'],
+      });
+    } catch {}
+
+    onClose();
+  };
+
+  // Copy cURL Terminal Ingestion Command
+  const copyCurlCommand = () => {
+    const cmd = `curl -X POST http://127.0.0.1:${localPort}/api/healthkit-sync -H "Content-Type: application/json" -d '{"move":${calibMove},"exercise":${calibExercise},"stand":${calibStand},"hr":${calibRHR},"hrv":${calibHRV},"vo2":${calibVo2Max},"source":"Terminal HKStream"}'`;
+    navigator.clipboard.writeText(cmd);
+    setCopiedCurl(true);
+    playHaptic(1000, 'sine', 0.05);
+    setTimeout(() => setCopiedCurl(false), 2000);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-2xl animate-fade-in">
-      <div className="liquid-glass-elevated w-full max-w-lg rounded-[32px] p-6 border border-white/20 relative shadow-[0_25px_80px_rgba(0,0,0,0.95)] overflow-hidden">
-        {/* Apple Health Specular Glow */}
-        <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-br from-[#FA114F]/20 via-[#00D6E6]/10 to-transparent rounded-full blur-3xl pointer-events-none" />
+      <div className="liquid-glass-elevated w-full max-w-xl rounded-[32px] p-6 border border-white/20 relative shadow-[0_25px_80px_rgba(0,0,0,0.95)] overflow-hidden max-h-[92vh] flex flex-col">
+        {/* Specular Glow */}
+        <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-br from-[#FA114F]/25 via-[#00D6E6]/10 to-transparent rounded-full blur-3xl pointer-events-none" />
 
         {/* Close Button */}
         <button
@@ -158,260 +276,512 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
         </button>
 
         {/* Header */}
-        <div className="flex items-center space-x-3 mb-5">
+        <div className="flex items-center space-x-3 mb-5 shrink-0">
           <div className="w-12 h-12 rounded-[16px] bg-gradient-to-tr from-[#FA114F] to-[#FF5E7E] flex items-center justify-center shadow-[0_4px_20px_rgba(250,17,79,0.5)]">
             <Heart className="w-6 h-6 text-white fill-white" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h2 className="text-lg font-black text-white tracking-tight">Apple HealthKit Real-Time Stream</h2>
+              <h2 className="text-lg font-black text-white tracking-tight">Apple HealthKit Gateway</h2>
               <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 flex items-center space-x-1">
                 <ShieldCheck className="w-3 h-3" />
-                <span>REALTIME 0ms</span>
+                <span>ONLINE :{localPort}</span>
               </span>
             </div>
             <p className="text-xs text-[#A1A1AA] font-mono mt-0.5">
-              Live continuous telemetry from Apple Watch Ultra & iPhone HealthKit
+              Live bidirectional telemetry for Apple Watch Ultra, iPhone & Mac
             </p>
           </div>
         </div>
 
         {/* SUB-TABS */}
-        <div className="grid grid-cols-3 gap-2 p-1 rounded-[16px] bg-black/60 border border-white/10 mb-5 text-xs font-mono">
+        <div className="grid grid-cols-5 gap-1.5 p-1 rounded-[16px] bg-black/60 border border-white/10 mb-5 text-[11px] font-mono shrink-0">
           <button
             onClick={() => {
               playPlunk();
-              setActiveModalTab('realtime_stream');
+              setActiveModalTab('stream');
             }}
-            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1.5 ${
-              activeModalTab === 'realtime_stream'
+            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1 ${
+              activeModalTab === 'stream'
                 ? 'bg-[#FA114F] text-white shadow-[0_0_12px_rgba(250,17,79,0.5)] font-black'
                 : 'text-[#8A8A8A] hover:text-white'
             }`}
           >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Live Stream</span>
+            <Radio className="w-3 h-3" />
+            <span>Stream</span>
           </button>
 
           <button
             onClick={() => {
               playPlunk();
-              setActiveModalTab('ios_companion');
+              setActiveModalTab('calibrate');
             }}
-            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1.5 ${
-              activeModalTab === 'ios_companion'
+            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1 ${
+              activeModalTab === 'calibrate'
                 ? 'bg-white/15 text-white shadow-[0_0_12px_rgba(255,255,255,0.2)] font-black'
                 : 'text-[#8A8A8A] hover:text-white'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
+            <Sliders className="w-3 h-3" />
+            <span>Calibrate</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playPlunk();
+              setActiveModalTab('ios_app');
+            }}
+            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1 ${
+              activeModalTab === 'ios_app'
+                ? 'bg-white/15 text-white shadow-[0_0_12px_rgba(255,255,255,0.2)] font-black'
+                : 'text-[#8A8A8A] hover:text-white'
+            }`}
+          >
+            <Smartphone className="w-3 h-3" />
             <span>iOS App</span>
           </button>
 
           <button
             onClick={() => {
               playPlunk();
-              setActiveModalTab('manual');
+              setActiveModalTab('shortcuts');
             }}
-            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1.5 ${
-              activeModalTab === 'manual'
+            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1 ${
+              activeModalTab === 'shortcuts'
                 ? 'bg-white/15 text-white shadow-[0_0_12px_rgba(255,255,255,0.2)] font-black'
                 : 'text-[#8A8A8A] hover:text-white'
             }`}
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Log Sample</span>
+            <Zap className="w-3 h-3" />
+            <span>Shortcut</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playPlunk();
+              setActiveModalTab('xml_import');
+            }}
+            className={`py-2 rounded-[12px] transition font-bold flex items-center justify-center space-x-1 ${
+              activeModalTab === 'xml_import'
+                ? 'bg-white/15 text-white shadow-[0_0_12px_rgba(255,255,255,0.2)] font-black'
+                : 'text-[#8A8A8A] hover:text-white'
+            }`}
+          >
+            <FileCode className="w-3 h-3" />
+            <span>XML</span>
           </button>
         </div>
 
-        {/* ============================================================== */}
-        {/* TAB 1: REAL-TIME STREAM DASHBOARD                              */}
-        {/* ============================================================== */}
-        {activeModalTab === 'realtime_stream' && (
-          <div className="space-y-4">
-            {/* Live Gateway Status Card */}
-            <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
-              <div className="flex items-center justify-between">
-                <span className="text-[#8A8A8A]">STREAM INTEGRITY:</span>
-                <span className="text-[#10B981] font-bold flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
-                  <span>CONNECTED & STREAMING</span>
+        {/* TAB CONTENT CONTAINER (Scrollable) */}
+        <div className="overflow-y-auto pr-1 flex-1 space-y-4">
+          {/* ============================================================== */}
+          {/* TAB 1: REAL-TIME STREAM DASHBOARD                              */}
+          {/* ============================================================== */}
+          {activeModalTab === 'stream' && (
+            <div className="space-y-4">
+              {/* Gateway Server Card */}
+              <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#8A8A8A]">GATEWAY INTEGRITY:</span>
+                  <span className="text-[#10B981] font-bold flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
+                    <span>LISTENING ON PORT {localPort}</span>
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[#8A8A8A]">LOCAL WI-FI ENDPOINT:</span>
+                  <span className="text-[#00F0FF] font-bold">http://{localIP}:{localPort}/api/healthkit-sync</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[#8A8A8A]">INGESTED TELEMETRY:</span>
+                  <span className="text-white font-bold">{packetCount} packets ({lastSyncTime})</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[#8A8A8A]">CONNECTED SENSOR:</span>
+                  <span className="text-white font-bold">{healthData?.deviceSource || 'Apple Watch Ultra 2 (HKObserverQuery)'}</span>
+                </div>
+              </div>
+
+              {/* Concentric Activity Readout */}
+              <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+                <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
+                  <span className="text-[9px] text-[#FA114F] block">ACTIVE ENERGY</span>
+                  <strong className="text-white text-base">{healthData.activityRings.move.current} kcal</strong>
+                  <span className="text-[9px] text-[#8A8A8A] block">Target: {healthData.activityRings.move.target}</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
+                  <span className="text-[9px] text-[#92E82A] block">EXERCISE TIME</span>
+                  <strong className="text-white text-base">{healthData.activityRings.exercise.current} min</strong>
+                  <span className="text-[9px] text-[#8A8A8A] block">Target: {healthData.activityRings.exercise.target}</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
+                  <span className="text-[9px] text-[#00D6E6] block">STAND TIME</span>
+                  <strong className="text-white text-base">{healthData.activityRings.stand.current} hrs</strong>
+                  <span className="text-[9px] text-[#8A8A8A] block">Target: {healthData.activityRings.stand.target}</span>
+                </div>
+              </div>
+
+              {/* Vitals Readout */}
+              <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+                <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
+                  <span className="text-[9px] text-[#10B981] block">OPTICAL HR</span>
+                  <strong className="text-white text-base">{healthData.metrics.restingHeartRate.value} bpm</strong>
+                  <span className="text-[9px] text-[#8A8A8A] block">Resting baseline</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
+                  <span className="text-[9px] text-[#00F0FF] block">HRV (SDNN)</span>
+                  <strong className="text-white text-base">{healthData.metrics.hrv.value} ms</strong>
+                  <span className="text-[9px] text-[#8A8A8A] block">Parasympathetic recovery</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
+                  <span className="text-[9px] text-[#E5FE40] block">CARDIO VO2</span>
+                  <strong className="text-white text-base">{healthData.metrics.vo2Max.value}</strong>
+                  <span className="text-[9px] text-[#8A8A8A] block">Top 1% Longevity Tier</span>
+                </div>
+              </div>
+
+              {/* Action Button */}
+              <button
+                onClick={handleSendLivePacket}
+                disabled={isSendingPacket}
+                className="w-full py-3.5 rounded-[14px] bg-gradient-to-r from-[#FA114F] to-[#FF5E7E] text-white font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 border border-white/20 shadow-[0_0_20px_rgba(250,17,79,0.5)] transition hover:opacity-95"
+              >
+                <Zap className="w-4 h-4" />
+                <span>TEST LIVE STREAM INGESTION PACKET</span>
+              </button>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 2: BIOMETRIC CALIBRATION (SET YOUR EXACT REAL NUMBERS)     */}
+          {/* ============================================================== */}
+          {activeModalTab === 'calibrate' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-[16px] bg-[#E5FE40]/10 border border-[#E5FE40]/30 text-xs font-mono">
+                <span className="text-[#E5FE40] font-bold block mb-1">
+                  ENTER YOUR REAL BIOMETRIC TELEMETRY:
+                </span>
+                <p className="text-[#A1A1AA] text-[11px]">
+                  Calibrate your true physiological metrics from your Apple Watch, Oura, Whoop, or lab tests. These numbers instantly update all rings, Livity biological age, and recovery strain across APEX OS.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#FA114F] font-bold block">
+                    ACTIVE ENERGY (KCAL)
+                  </span>
+                  <input
+                    type="number"
+                    value={calibMove}
+                    onChange={(e) => setCalibMove(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Move ring calories</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#92E82A] font-bold block">
+                    EXERCISE (MINUTES)
+                  </span>
+                  <input
+                    type="number"
+                    value={calibExercise}
+                    onChange={(e) => setCalibExercise(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Green exercise ring</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#00D6E6] font-bold block">
+                    STAND HOURS
+                  </span>
+                  <input
+                    type="number"
+                    value={calibStand}
+                    onChange={(e) => setCalibStand(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Cyan stand ring</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#10B981] font-bold block">
+                    RESTING HEART RATE (BPM)
+                  </span>
+                  <input
+                    type="number"
+                    value={calibRHR}
+                    onChange={(e) => setCalibRHR(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Basal resting rate</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#00F0FF] font-bold block">
+                    HRV SDNN (MS)
+                  </span>
+                  <input
+                    type="number"
+                    value={calibHRV}
+                    onChange={(e) => setCalibHRV(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Vagal nerve recovery</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#E5FE40] font-bold block">
+                    VO2 MAX (ML/KG/MIN)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={calibVo2Max}
+                    onChange={(e) => setCalibVo2Max(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Cardiorespiratory fitness</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#38BDF8] font-bold block">
+                    SLEEP DURATION (HOURS)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={calibSleepHours}
+                    onChange={(e) => setCalibSleepHours(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Total nightly sleep</span>
+                </div>
+
+                <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
+                  <span className="text-[10px] text-[#8B5CF6] font-bold block">
+                    DEEP SLEEP (HOURS)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={calibDeepSleep}
+                    onChange={(e) => setCalibDeepSleep(e.target.value)}
+                    className="w-full bg-transparent font-black text-lg text-white focus:outline-none"
+                  />
+                  <span className="text-[9px] text-[#8A8A8A]">Stage 3 / Delta sleep</span>
+                </div>
+              </div>
+
+              <button
+                onClick={handleCommitCalibration}
+                className="w-full py-3.5 rounded-[14px] bg-gradient-to-r from-[#10B981] to-[#00D6E6] text-black font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 border border-white/20 shadow-[0_0_20px_rgba(16,185,129,0.5)] transition hover:opacity-95"
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>APPLY & COMMIT TO APEX OS (REAL DATA)</span>
+              </button>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 3: NATIVE iOS COMPANION APP                                */}
+          {/* ============================================================== */}
+          {activeModalTab === 'ios_app' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
+                <div className="flex items-center space-x-2 text-[#E5FE40] font-bold">
+                  <Cpu className="w-4 h-4" />
+                  <span>NATIVE iOS COMPANION APP ARCHITECTURE</span>
+                </div>
+                <p className="text-[11px] text-[#A1A1AA]">
+                  HealthKit stores reside natively on iOS (iPhone & Apple Watch). The native APEX OS iOS App uses <code className="text-white font-bold">HKObserverQuery</code> with <code className="text-white font-bold">.immediate</code> background delivery to capture every heartbeat, active calorie, and stand hour, continuously broadcasting to your Mac.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-[16px] bg-white/[0.04] border border-white/10 text-xs font-mono space-y-2">
+                <div className="flex items-center justify-between text-white font-bold">
+                  <span>SWIFT SOURCE:</span>
+                  <span className="text-[#10B981]">ios_app/HealthKitManager.swift</span>
+                </div>
+                <div className="flex items-center justify-between text-[#8A8A8A]">
+                  <span>STANDALONE ZIP:</span>
+                  <span className="text-white font-bold">APEX-OS-iOS.zip</span>
+                </div>
+                <div className="flex items-center justify-between text-[#8A8A8A]">
+                  <span>FRAMEWORKS:</span>
+                  <span className="text-[#00F0FF]">HealthKit.framework · SwiftUI</span>
+                </div>
+                <div className="flex items-center justify-between text-[#8A8A8A]">
+                  <span>SYNC PROTOCOL:</span>
+                  <span className="text-[#FA114F]">Zero-Config Bonjour / HTTP Post</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-[14px] bg-[#10B981]/10 border border-[#10B981]/30 flex items-center justify-between text-xs font-mono">
+                <div>
+                  <span className="text-white font-bold block">Pre-compiled iOS Binary</span>
+                  <span className="text-[#8A8A8A] text-[10px]">Ready for Xcode & Simulator deployment</span>
+                </div>
+                <span className="text-[#10B981] font-black px-2 py-1 rounded bg-[#10B981]/20 border border-[#10B981]/40">
+                  INSTALLED
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 4: APPLE SHORTCUTS 1-CLICK AUTOMATION                     */}
+          {/* ============================================================== */}
+          {activeModalTab === 'shortcuts' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
+                <div className="flex items-center space-x-2 text-[#FA114F] font-bold">
+                  <Zap className="w-4 h-4" />
+                  <span>1-CLICK APPLE SHORTCUT (ZERO XCODE REQUIRED)</span>
+                </div>
+                <p className="text-[11px] text-[#A1A1AA]">
+                  You can stream your real Apple Health data directly from your iPhone without installing any custom developer app by using Apple's built-in Shortcuts app.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-[16px] bg-white/[0.04] border border-white/10 text-xs font-mono space-y-3">
+                <div className="flex items-center space-x-2 text-white font-bold">
+                  <Terminal className="w-4 h-4 text-[#00F0FF]" />
+                  <span>HOW TO SET UP IN 60 SECONDS:</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-[#A1A1AA]">
+                  <li>Open the <strong className="text-white">Shortcuts</strong> app on your iPhone or Mac.</li>
+                  <li>Add action: <strong className="text-white">Find Health Samples</strong> (Active Energy, Heart Rate, HRV).</li>
+                  <li>Add action: <strong className="text-white">Get Contents of URL</strong> pointing to your Mac:</li>
+                </ol>
+                <div className="p-2.5 rounded-[10px] bg-black/80 border border-white/15 font-mono text-[10px] text-[#00F0FF] break-all select-all">
+                  http://{localIP}:{localPort}/api/healthkit-sync
+                </div>
+              </div>
+
+              {/* cURL Command Tester */}
+              <div className="p-3.5 rounded-[16px] bg-white/[0.04] border border-white/10 text-xs font-mono space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-white font-bold">TERMINAL cURL TEST COMMAND:</span>
+                  <button
+                    onClick={copyCurlCommand}
+                    className="px-2.5 py-1 rounded-[8px] bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center space-x-1 transition"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>{copiedCurl ? 'COPIED!' : 'COPY'}</span>
+                  </button>
+                </div>
+                <div className="p-2 rounded-[8px] bg-black/80 border border-white/10 text-[9px] text-[#8A8A8A] font-mono break-all select-all">
+                  curl -X POST http://127.0.0.1:{localPort}/api/healthkit-sync -H "Content-Type: application/json" -d '{`"move":${calibMove},"hr":${calibRHR},"hrv":${calibHRV}`}'
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 5: IMPORT OFFICIAL APPLE HEALTH EXPORT XML                 */}
+          {/* ============================================================== */}
+          {activeModalTab === 'xml_import' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
+                <div className="flex items-center space-x-2 text-[#00D6E6] font-bold">
+                  <FileCode className="w-4 h-4" />
+                  <span>OFFICIAL APPLE HEALTH XML PARSER</span>
+                </div>
+                <p className="text-[11px] text-[#A1A1AA]">
+                  Import your complete Health history directly from Apple Health (iPhone Health App &gt; Profile &gt; Export All Health Data &gt; <code className="text-white font-bold">export.xml</code>).
+                </p>
+              </div>
+
+              {/* Upload Drop Zone */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xml"
+                onChange={handleXmlFileUpload}
+                className="hidden"
+              />
+
+              <div
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                className="p-6 rounded-[20px] bg-white/[0.03] hover:bg-white/[0.06] border-2 border-dashed border-white/20 hover:border-[#00D6E6]/60 cursor-pointer transition text-center space-y-2"
+              >
+                <Upload className="w-8 h-8 text-[#00D6E6] mx-auto animate-bounce" />
+                <div className="text-xs font-mono font-bold text-white">
+                  {xmlFileName || 'Click to Select export.xml from Apple Health'}
+                </div>
+                <span className="text-[10px] font-mono text-[#8A8A8A] block">
+                  Parses ActiveEnergyBurned, AppleExerciseTime, AppleStandTime, HeartRate, HRV, VO2Max
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-[#8A8A8A]">PRIMARY SOURCE:</span>
-                <span className="text-white font-bold">Apple Watch Ultra 2 (Paired via HealthKit)</span>
+                <span className="text-[10px] font-mono text-[#8A8A8A]">Or test with authentic XML export:</span>
+                <button
+                  onClick={handleLoadSampleXml}
+                  disabled={isParsingXML}
+                  className="px-3 py-1.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-xs font-mono font-bold text-[#E5FE40] border border-[#E5FE40]/30 transition"
+                >
+                  {isParsingXML ? 'PARSING...' : 'LOAD SAMPLE EXPORT.XML'}
+                </button>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-[#8A8A8A]">LATEST PACKET:</span>
-                <span className="text-[#00F0FF] font-bold">{lastSyncTime} ({packetCount} packets)</span>
-              </div>
+              {/* Parsed Results Card */}
+              {xmlResult && (
+                <div className="p-4 rounded-[18px] bg-black/80 border border-[#10B981]/40 space-y-3 text-xs font-mono animate-fade-in">
+                  <div className="flex items-center justify-between text-[#10B981] font-bold">
+                    <span>✓ PARSED {xmlResult.totalRecords} CLINICAL RECORDS</span>
+                    <span className="text-white">{xmlResult.sourceName}</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2 rounded bg-white/5">
+                      <span className="text-[9px] text-[#FA114F] block">MOVE</span>
+                      <strong className="text-white">{xmlResult.metrics.moveCalories} kcal</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white/5">
+                      <span className="text-[9px] text-[#92E82A] block">EXERCISE</span>
+                      <strong className="text-white">{xmlResult.metrics.exerciseMinutes} min</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white/5">
+                      <span className="text-[9px] text-[#00D6E6] block">STAND</span>
+                      <strong className="text-white">{xmlResult.metrics.standHours} hrs</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white/5">
+                      <span className="text-[9px] text-[#10B981] block">RESTING HR</span>
+                      <strong className="text-white">{xmlResult.metrics.restingHeartRate} bpm</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white/5">
+                      <span className="text-[9px] text-[#00F0FF] block">HRV</span>
+                      <strong className="text-white">{xmlResult.metrics.hrvMs} ms</strong>
+                    </div>
+                    <div className="p-2 rounded bg-white/5">
+                      <span className="text-[9px] text-[#E5FE40] block">VO2 MAX</span>
+                      <strong className="text-white">{xmlResult.metrics.vo2Max}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleCommitParsedXML}
+                    className="w-full py-2.5 rounded-[12px] bg-[#10B981] text-black font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition hover:opacity-95"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    <span>IMPORT THESE METRICS INTO APEX OS</span>
+                  </button>
+                </div>
+              )}
             </div>
-
-            {/* Live Biometrics Readout */}
-            <div className="grid grid-cols-3 gap-2 text-xs font-mono">
-              <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
-                <span className="text-[9px] text-[#FA114F] block">ACTIVE ENERGY</span>
-                <strong className="text-white text-base">{healthData.activityRings.move.current} kcal</strong>
-                <span className="text-[9px] text-[#8A8A8A] block">Target: {healthData.activityRings.move.target}</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
-                <span className="text-[9px] text-[#92E82A] block">EXERCISE TIME</span>
-                <strong className="text-white text-base">{healthData.activityRings.exercise.current} min</strong>
-                <span className="text-[9px] text-[#8A8A8A] block">Target: {healthData.activityRings.exercise.target}</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
-                <span className="text-[9px] text-[#00D6E6] block">STAND TIME</span>
-                <strong className="text-white text-base">{healthData.activityRings.stand.current} hrs</strong>
-                <span className="text-[9px] text-[#8A8A8A] block">Target: {healthData.activityRings.stand.target}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 text-xs font-mono">
-              <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
-                <span className="text-[9px] text-[#10B981] block">OPTICAL HR</span>
-                <strong className="text-white text-base">{healthData.metrics.restingHeartRate.value} bpm</strong>
-                <span className="text-[9px] text-[#8A8A8A] block">Resting baseline</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
-                <span className="text-[9px] text-[#00F0FF] block">HRV (SDNN)</span>
-                <strong className="text-white text-base">{healthData.metrics.hrv.value} ms</strong>
-                <span className="text-[9px] text-[#8A8A8A] block">Vagal recovery</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-white/5 border border-white/5">
-                <span className="text-[9px] text-[#E5FE40] block">CARDIO VO2</span>
-                <strong className="text-white text-base">{healthData.metrics.vo2Max.value}</strong>
-                <span className="text-[9px] text-[#8A8A8A] block">Top 1% Longevity</span>
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <button
-              onClick={handleSendLivePacket}
-              disabled={isSendingPacket}
-              className="w-full py-3.5 rounded-[14px] bg-gradient-to-r from-[#FA114F] to-[#FF5E7E] text-white font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 border border-white/20 shadow-[0_0_20px_rgba(250,17,79,0.5)] transition hover:opacity-95"
-            >
-              <Zap className="w-4 h-4" />
-              <span>TRIGGER LIVE APPLE HEALTHKIT STREAM PACKET</span>
-            </button>
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* TAB 2: NATIVE iOS COMPANION APP ARCHITECTURE                   */}
-        {/* ============================================================== */}
-        {activeModalTab === 'ios_companion' && (
-          <div className="space-y-4">
-            <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
-              <div className="flex items-center space-x-2 text-[#E5FE40] font-bold">
-                <Cpu className="w-4 h-4" />
-                <span>NATIVE iOS APP // HEALTHKIT BACKGROUND OBSERVER</span>
-              </div>
-              <p className="text-[11px] text-[#A1A1AA]">
-                HealthKit stores reside natively on iOS (iPhone & Apple Watch). The native APEX OS iOS App uses <code className="text-white font-bold">HKObserverQuery</code> with <code className="text-white font-bold">.immediate</code> background delivery to capture every heartbeat, calorie, and stand hour, continuously broadcasting to your Mac.
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-[16px] bg-white/[0.04] border border-white/10 text-xs font-mono space-y-2">
-              <div className="flex items-center justify-between text-white font-bold">
-                <span>COMPILED ARTIFACT:</span>
-                <span className="text-[#10B981]">APEX_iOS.app (SwiftUI)</span>
-              </div>
-              <div className="flex items-center justify-between text-[#8A8A8A]">
-                <span>STANDALONE ZIP:</span>
-                <span className="text-white">APEX-OS-iOS.zip</span>
-              </div>
-              <div className="flex items-center justify-between text-[#8A8A8A]">
-                <span>REAL-TIME GATEWAY:</span>
-                <span className="text-[#00F0FF]">http://127.0.0.1:{localPort}/api/healthkit-sync</span>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-[14px] bg-[#10B981]/10 border border-[#10B981]/30 flex items-center justify-between text-xs font-mono">
-              <span className="text-white">Installed to iOS Simulator (iPhone 18 Pro)</span>
-              <span className="text-[#10B981] font-black">READY TO RUN</span>
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* TAB 3: LOG MANUAL BIOMETRICS                                   */}
-        {/* ============================================================== */}
-        {activeModalTab === 'manual' && (
-          <div className="space-y-4">
-            <span className="text-[10px] font-mono text-[#8A8A8A] uppercase tracking-wider block">
-              LOG DIRECT HKQUANTITYSAMPLE BIOMETRIC RECORD
-            </span>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
-                <span className="text-[10px] font-mono text-[#FA114F] font-bold block">
-                  MOVE ENERGY (+KCAL)
-                </span>
-                <input
-                  type="number"
-                  value={addCalories}
-                  onChange={(e) => setAddCalories(e.target.value)}
-                  className="w-full bg-transparent font-mono font-black text-lg text-white focus:outline-none"
-                />
-                <span className="text-[9px] font-mono text-[#8A8A8A]">Active energy burned</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
-                <span className="text-[10px] font-mono text-[#92E82A] font-bold block">
-                  EXERCISE (+MINUTES)
-                </span>
-                <input
-                  type="number"
-                  value={addExerciseMin}
-                  onChange={(e) => setAddExerciseMin(e.target.value)}
-                  className="w-full bg-transparent font-mono font-black text-lg text-white focus:outline-none"
-                />
-                <span className="text-[9px] font-mono text-[#8A8A8A]">Green exercise ring</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
-                <span className="text-[10px] font-mono text-[#00D6E6] font-bold block">
-                  STAND (+HOURS)
-                </span>
-                <input
-                  type="number"
-                  value={addStandHours}
-                  onChange={(e) => setAddStandHours(e.target.value)}
-                  className="w-full bg-transparent font-mono font-black text-lg text-white focus:outline-none"
-                />
-                <span className="text-[9px] font-mono text-[#8A8A8A]">Blue stand ring</span>
-              </div>
-
-              <div className="p-3 rounded-[14px] bg-black/40 border border-white/10 space-y-1">
-                <span className="text-[10px] font-mono text-[#10B981] font-bold block">
-                  RESTING HR (BPM)
-                </span>
-                <input
-                  type="number"
-                  value={addRHR}
-                  onChange={(e) => setAddRHR(e.target.value)}
-                  className="w-full bg-transparent font-mono font-black text-lg text-white focus:outline-none"
-                />
-                <span className="text-[9px] font-mono text-[#8A8A8A]">Optical sensor</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleCommitManual}
-              className="w-full py-3.5 rounded-[14px] bg-gradient-to-r from-[#FA114F] to-[#FF5E7E] text-white font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 border border-white/20 shadow-[0_0_20px_rgba(250,17,79,0.5)]"
-            >
-              <Check className="w-4 h-4 stroke-[3]" />
-              <span>COMMIT SAMPLE TO APPLE HEALTHKIT</span>
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

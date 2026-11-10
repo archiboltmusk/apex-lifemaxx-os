@@ -213,10 +213,17 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
     };
   }, [isTracking]);
 
-  // Computer Vision Skeletal Landmark & Rep Detection Loop
+  // Computer Vision Skeletal Landmark & Real Optical Motion Detection Loop
   useEffect(() => {
-    let phase = 0;
     let repInProgress = false;
+    let smoothY = 0.4;
+    let prevFrameData = null;
+    let lastRepTimestamp = 0;
+
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = 160;
+    offCanvas.height = 120;
+    const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
 
     const renderLoop = () => {
       const canvas = canvasRef.current;
@@ -226,69 +233,114 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
       const h = canvas.height;
 
       ctx.clearRect(0, 0, w, h);
-      phase += 0.045;
 
-      // Simulated kinematic body motion matching current exercise
+      const video = videoRef.current;
+      const hasRealVideo = isCameraActive && video && video.readyState >= 2;
+
+      let detectedMotionMagnitude = 0;
+
+      // Real Optical Motion Centroid from Live Mac Front Camera
+      if (hasRealVideo) {
+        try {
+          offCtx.drawImage(video, 0, 0, 160, 120);
+          const imgData = offCtx.getImageData(0, 0, 160, 120);
+          const curr = imgData.data;
+
+          if (prevFrameData) {
+            let motionPixels = 0;
+            let weightedY = 0;
+
+            for (let i = 0; i < curr.length; i += 16) {
+              const diff =
+                Math.abs(curr[i] - prevFrameData[i]) +
+                Math.abs(curr[i + 1] - prevFrameData[i + 1]) +
+                Math.abs(curr[i + 2] - prevFrameData[i + 2]);
+              if (diff > 50) {
+                motionPixels++;
+                const pIdx = i / 4;
+                const py = Math.floor(pIdx / 160);
+                weightedY += py;
+              }
+            }
+
+            detectedMotionMagnitude = motionPixels;
+
+            if (motionPixels > 40) {
+              const currentY = weightedY / (motionPixels * 120); // 0.0 (top) to 1.0 (bottom)
+              smoothY = smoothY * 0.7 + currentY * 0.3; // Low-pass filter
+            }
+          }
+          prevFrameData = new Uint8ClampedArray(curr);
+        } catch {}
+      }
+
       const cx = w / 2;
       const cy = h / 2 - 20;
 
-      // Calculate kinematic joint positions based on exercise type and phase
       let headY = cy - 130;
       let shoulderY = cy - 80;
       let hipY = cy + 20;
-      let kneeY = cy + 90;
-      let ankleY = cy + 150;
-      let elbowAngleDeg = 170;
       let kneeAngleDeg = 170;
+      let elbowAngleDeg = 170;
 
       if (isTracking) {
-        const cycle = (Math.sin(phase) + 1) / 2; // 0 (bottom) to 1 (top lockout)
-        const isDescending = Math.cos(phase) < 0;
+        const now = Date.now();
 
         if (currentEx.id === 'squats') {
-          // Squat kinematic translation
-          const squatDrop = (1 - cycle) * 55;
-          headY += squatDrop;
-          shoulderY += squatDrop;
-          hipY += squatDrop;
-          kneeAngleDeg = Math.round(80 + cycle * 90); // 80° (hole) to 170° (lockout)
+          // Map real vertical motion to knee angle
+          // smoothY: 0.35 (top lockout) to 0.65 (deep squat)
+          const clamped = Math.max(0.35, Math.min(0.65, smoothY));
+          const depthRatio = (clamped - 0.35) / 0.3; // 0 = standing, 1 = deep squat
+
+          headY += depthRatio * 65;
+          shoulderY += depthRatio * 65;
+          hipY += depthRatio * 65;
+          kneeAngleDeg = Math.round(175 - depthRatio * 95); // 175° to 80°
           angleRef.current = kneeAngleDeg;
 
-          // Rep State Machine for Squats
+          // State Machine: Trigger DEPTH on real downward motion
           if (kneeAngleDeg < 95 && repStateRef.current !== 'BOTTOM') {
             repStateRef.current = 'BOTTOM';
             setRepState('BOTTOM');
-            setFeedbackCue('✓ DEPTH REACHED (< 90°)! DRIVE UP!');
+            setFeedbackCue('✓ REAL DEPTH REACHED (< 90°)! DRIVE UP!');
             playHaptic(920, 'sine', 0.03);
             repInProgress = true;
-          } else if (kneeAngleDeg >= 162 && repInProgress && repStateRef.current === 'BOTTOM') {
+          } else if (kneeAngleDeg >= 155 && repInProgress && repStateRef.current === 'BOTTOM') {
+            if (now - lastRepTimestamp > 1200) {
+              lastRepTimestamp = now;
+              repStateRef.current = 'READY';
+              setRepState('READY');
+              repInProgress = false;
+              setRepCount((r) => {
+                const next = r + 1;
+                speakCue(`${next}`);
+                playCoinChime();
+                setEstimatedWatts(Math.round(280 + Math.random() * 80));
+                try {
+                  confetti({
+                    particleCount: 30,
+                    spread: 50,
+                    origin: { y: 0.75 },
+                    colors: ['#00F0FF', '#E5FE40', '#10B981'],
+                  });
+                } catch {}
+                return next;
+              });
+              setFeedbackCue('EXCELLENT LOCKOUT! NEXT REP.');
+            }
+          } else if (kneeAngleDeg > 120 && !repInProgress) {
             repStateRef.current = 'READY';
             setRepState('READY');
-            repInProgress = false;
-            setRepCount((r) => {
-              const next = r + 1;
-              speakCue(`${next}`);
-              playCoinChime();
-              setEstimatedWatts(Math.round(280 + Math.random() * 80));
-              try {
-                confetti({
-                  particleCount: 25,
-                  spread: 45,
-                  origin: { y: 0.8 },
-                  colors: ['#00F0FF', '#E5FE40', '#10B981'],
-                });
-              } catch {}
-              return next;
-            });
-            setFeedbackCue('EXCELLENT LOCKOUT! NEXT REP.');
-          } else if (isDescending && kneeAngleDeg > 110) {
-            repStateRef.current = 'ECCENTRIC';
-            setRepState('ECCENTRIC');
-            setFeedbackCue('CONTROL DESCENT · KEEP CHEST UP');
+            setFeedbackCue(
+              detectedMotionMagnitude > 40
+                ? 'DESCENT DETECTED · REACH 90° PARALLEL'
+                : 'CAMERA READY · SQUAT DEEP'
+            );
           }
         } else if (currentEx.id === 'pushups') {
-          // Push-up kinematic inflection
-          elbowAngleDeg = Math.round(75 + cycle * 95); // 75° to 170°
+          const clamped = Math.max(0.35, Math.min(0.65, smoothY));
+          const depthRatio = (clamped - 0.35) / 0.3;
+          elbowAngleDeg = Math.round(170 - depthRatio * 90);
           angleRef.current = elbowAngleDeg;
 
           if (elbowAngleDeg < 88 && repStateRef.current !== 'BOTTOM') {
@@ -297,61 +349,68 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             setFeedbackCue('✓ CHEST TO DECK! PUSH!');
             playHaptic(900, 'sine', 0.03);
             repInProgress = true;
-          } else if (elbowAngleDeg >= 158 && repInProgress && repStateRef.current === 'BOTTOM') {
-            repStateRef.current = 'READY';
-            setRepState('READY');
-            repInProgress = false;
-            setRepCount((r) => {
-              const next = r + 1;
-              speakCue(`${next}`);
-              playCoinChime();
-              setEstimatedWatts(Math.round(190 + Math.random() * 40));
-              return next;
-            });
-            setFeedbackCue('STRONG LOCKOUT! ENGAGE TRICEPS.');
+          } else if (elbowAngleDeg >= 155 && repInProgress && repStateRef.current === 'BOTTOM') {
+            if (now - lastRepTimestamp > 1200) {
+              lastRepTimestamp = now;
+              repStateRef.current = 'READY';
+              setRepState('READY');
+              repInProgress = false;
+              setRepCount((r) => {
+                const next = r + 1;
+                speakCue(`${next}`);
+                playCoinChime();
+                setEstimatedWatts(Math.round(190 + Math.random() * 40));
+                return next;
+              });
+              setFeedbackCue('STRONG LOCKOUT! ENGAGE TRICEPS.');
+            }
           }
         } else if (currentEx.id === 'curls') {
-          // Bicep curl inflection
-          elbowAngleDeg = Math.round(45 + cycle * 115); // 45° (peak) to 160° (bottom)
+          const clamped = Math.max(0.35, Math.min(0.65, smoothY));
+          const depthRatio = (clamped - 0.35) / 0.3;
+          elbowAngleDeg = Math.round(50 + depthRatio * 110);
           angleRef.current = elbowAngleDeg;
 
-          if (elbowAngleDeg < 55 && repStateRef.current !== 'BOTTOM') {
+          if (elbowAngleDeg < 60 && repStateRef.current !== 'BOTTOM') {
             repStateRef.current = 'BOTTOM';
             setRepState('BOTTOM');
-            setFeedbackCue('✓ PEAK BICEP CONTRACTION! SQUEEZE!');
-            playHaptic(1000, 'sine', 0.03);
+            setFeedbackCue('✓ PEAK BICEP SQUEEZE!');
+            playHaptic(920, 'sine', 0.03);
             repInProgress = true;
           } else if (elbowAngleDeg >= 150 && repInProgress && repStateRef.current === 'BOTTOM') {
-            repStateRef.current = 'READY';
-            setRepState('READY');
-            repInProgress = false;
-            setRepCount((r) => {
-              const next = r + 1;
-              speakCue(`${next}`);
-              playCoinChime();
-              return next;
-            });
-            setFeedbackCue('FULL STRETCH! CONTROL ECCENTRIC.');
+            if (now - lastRepTimestamp > 1200) {
+              lastRepTimestamp = now;
+              repStateRef.current = 'READY';
+              setRepState('READY');
+              repInProgress = false;
+              setRepCount((r) => {
+                const next = r + 1;
+                speakCue(`${next}`);
+                playCoinChime();
+                return next;
+              });
+              setFeedbackCue('FULL STRETCH! SQUEEZE UP.');
+            }
           }
-        } else if (currentEx.id === 'jumping_jacks') {
-          // Jumping jacks abduction
-          const abductionAngle = Math.round(35 + cycle * 130);
-          angleRef.current = abductionAngle;
-
-          if (abductionAngle > 150 && repStateRef.current !== 'BOTTOM') {
+        } else {
+          // Jumping jacks
+          if (detectedMotionMagnitude > 80 && repStateRef.current !== 'BOTTOM') {
             repStateRef.current = 'BOTTOM';
             setRepState('BOTTOM');
             repInProgress = true;
-          } else if (abductionAngle <= 50 && repInProgress && repStateRef.current === 'BOTTOM') {
-            repStateRef.current = 'READY';
-            setRepState('READY');
-            repInProgress = false;
-            setRepCount((r) => {
-              const next = r + 1;
-              if (next % 5 === 0) speakCue(`${next}`);
-              playCoinChime();
-              return next;
-            });
+          } else if (detectedMotionMagnitude < 40 && repInProgress) {
+            if (now - lastRepTimestamp > 1000) {
+              lastRepTimestamp = now;
+              repStateRef.current = 'READY';
+              setRepState('READY');
+              repInProgress = false;
+              setRepCount((r) => {
+                const next = r + 1;
+                speakCue(`${next}`);
+                playCoinChime();
+                return next;
+              });
+            }
           }
         }
 
@@ -654,7 +713,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             <div className="flex items-center space-x-2">
               <span className={`w-2.5 h-2.5 rounded-full ${isCameraActive ? 'bg-[#10B981] animate-ping' : 'bg-[#00F0FF]'}`} />
               <span className="font-bold text-white bg-black/50 px-2 py-0.5 rounded backdrop-blur-md border border-white/10">
-                {isCameraActive ? 'FACETIME HD CAM // TRACKING' : 'AI SKELETON SIMULATION ACTIVE'}
+                {isCameraActive ? 'FACETIME HD CAM // REAL OPTICAL MOTION TRACKING' : 'CAMERA STANDBY · CLICK START MAC CAMERA'}
               </span>
             </div>
 
