@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+:root {
+  --apex-dark: #030406;
+  --apex-canvas: #07090D;
+  --apex-card: rgba(18, 22, 31, 0.65);
+  --apex-border: rgba(255, 255, 255, 0.08);
+  --apex-border-bright: rgba(255, 255, 255, 0.18);
+
+  --apex-volt: #E5FE40;
+  --apex-cyan: #00F0FF;
+  --apex-emerald: #10B981;
+  --apex-violet: #8B5CF6;
+  --apex-amber: #F59E0B;
+  --apex-crimson: #EF4444;
+  --apex-apple-red: #FA114F;
+  --apex-apple-green: #92E82A;
+  --apex-apple-blue: #00D6E6;
+}
+
+body {
+  background-color: #030406;
+  color: #F3F4F6;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ============================================================== */
+/* LIQUID GLASS & APPLE VISION/CRED AESTHETICS                    */
+/* ============================================================== */
+.liquid-glass {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.07) 0%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.65),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.liquid-glass-elevated {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.11) 0%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 
+    0 16px 48px rgba(0, 0, 0, 0.8),
+    inset 0 1px 2px rgba(255, 255, 255, 0.3),
+    0 0 20px rgba(0, 240, 255, 0.08);
+}
+
+.liquid-glass-dock {
+  background: rgba(12, 15, 22, 0.75);
+  backdrop-filter: blur(40px) saturate(210%);
+  -webkit-backdrop-filter: blur(40px) saturate(210%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 
+    0 20px 50px rgba(0, 0, 0, 0.9),
+    inset 0 1px 1px rgba(255, 255, 255, 0.25);
+}
+
+/* CRED METALLIC CARD GRADIENT */
+.cred-metallic-card {
+  background: linear-gradient(
+    145deg,
+    rgba(28, 33, 44, 0.8) 0%,
+    rgba(14, 17, 24, 0.9) 50%,
+    rgba(8, 10, 15, 0.95) 100%
+  );
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 
+    4px 4px 0px #000000,
+    0 10px 30px rgba(0, 0, 0, 0.7);
+  position: relative;
+  overflow: hidden;
+}
+
+.cred-metallic-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 200%;
+  height: 100%;
+  background: linear-gradient(
+    60deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 45%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 55%
+  );
+  pointer-events: none;
+  animation: metallicShine 7s infinite ease-in-out;
+}
+
+@keyframes metallicShine {
+  0% { transform: translateX(-100%); }
+  30%, 100% { transform: translateX(100%); }
+}
+
+/* CRED 3D PLUNK BUTTON ENGINE */
+.cred-plunk-primary {
+  background: #E5FE40;
+  color: #000000;
+  font-weight: 900;
+  border: 2px solid #000000;
+  box-shadow: 4px 4px 0px #000000;
+  transition: all 0.07s cubic-bezier(0.1, 0.9, 0.2, 1);
+  user-select: none;
+  cursor: pointer;
+}
+
+.cred-plunk-primary:hover {
+  background: #EEFE65;
+  box-shadow: 5px 5px 0px #000000;
+}
+
+.cred-plunk-primary:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0px #000000;
+}
+
+.cred-plunk-dark {
+  background: linear-gradient(180deg, #1A1F2B 0%, #10141D 100%);
+  color: #FFFFFF;
+  font-weight: 800;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 3px 3px 0px #000000;
+  transition: all 0.07s cubic-bezier(0.1, 0.9, 0.2, 1);
+  user-select: none;
+  cursor: pointer;
+}
+
+.cred-plunk-dark:hover {
+  background: linear-gradient(180deg, #242B3C 0%, #161C28 100%);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.cred-plunk-dark:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #000000;
+}
+
+/* HOLOGRAPHIC ACCENT */
+.holo-glow {
+  background: linear-gradient(
+    90deg,
+    #FA114F,
+    #E5FE40,
+    #00F0FF,
+    #8B5CF6,
+    #FA114F
+  );
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: holoGradient 6s linear infinite;
+}
+
+@keyframes holoGradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* RECESSED INSET HUD */
+.apex-inset {
+  background: #06080B;
+  border: 1px solid #141822;
+  box-shadow: inset 2px 2px 8px rgba(0, 0, 0, 0.95);
+}
+
+/* CYBER GRID */
+.cyber-grid {
+  background-size: 28px 28px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+}
+
+/* MOBILE FRAME SIMULATOR SHADOW */
+.iphone-frame {
+  box-shadow: 
+    0 0 0 10px #1C1F26,
+    0 0 0 12px #2E3340,
+    0 25px 70px rgba(0, 0, 0, 0.95);
+}
+
+/* APPLE ACTIVITY RING GLOWS */
+.ring-glow-red {
+  filter: drop-shadow(0 0 8px rgba(250, 17, 79, 0.65));
+}
+.ring-glow-green {
+  filter: drop-shadow(0 0 8px rgba(146, 232, 42, 0.65));
+}
+.ring-glow-blue {
+  filter: drop-shadow(0 0 8px rgba(0, 214, 230, 0.65));
+}
+
+/* PULSE RING ANIMATION */
+@keyframes syncPulse {
+  0% { transform: scale(0.98); opacity: 0.8; }
+  50% { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(0.98); opacity: 0.8; }
+}
+.syncing-pulse {
+  animation: syncPulse 1.2s infinite ease-in-out;
+}
+
+/* SCROLLBAR HIDING */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
