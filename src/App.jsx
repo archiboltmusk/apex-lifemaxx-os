@@ -91,7 +91,7 @@ import MuscleRecoveryMap from './components/MuscleRecoveryMap';
 import BloodworkScanner from './components/BloodworkScanner';
 import DopamineDetoxMeter from './components/DopamineDetoxMeter';
 import VocalResonanceAnalyzer from './components/VocalResonanceAnalyzer';
-import MembershipPaywall from './components/MembershipPaywall';
+import CameraWorkoutTracker from './components/CameraWorkoutTracker';
 import AccountTesterModal from './components/AccountTesterModal';
 import AIConsigliere from './components/AIConsigliere';
 import ThermalSuite from './components/ThermalSuite';
@@ -99,7 +99,7 @@ import ThermalSuite from './components/ThermalSuite';
 export default function App() {
   // Navigation & View mode
   const [activeTab, setActiveTab] = useState('hub'); // 'hub' | 'fitness' | 'looks' | 'bio' | 'brain' | 'nutrition' | 'garage'
-  const [fitnessSubTab, setFitnessSubTab] = useState('recovery'); // 'recovery' | 'thermal' | 'decathlon' | 'muscles' | 'workout' | 'strava' | 'cgm' | 'breathwork' | 'habits'
+  const [fitnessSubTab, setFitnessSubTab] = useState('camera'); // 'camera' | 'recovery' | 'thermal' | 'decathlon' | 'muscles' | 'workout' | 'strava' | 'cgm' | 'breathwork' | 'habits'
   const [looksSubTab, setLooksSubTab] = useState('mewing'); // 'mewing' | 'lidar' | 'voice'
   const [bioSubTab, setBioSubTab] = useState('overview'); // 'overview' | 'consigliere' | 'phenoage' | 'ocr'
   const [brainSubTab, setBrainSubTab] = useState('sprint'); // 'sprint' | 'soundengine' | 'dopamine'
@@ -108,7 +108,6 @@ export default function App() {
 
   const [isMobileFrame, setIsMobileFrame] = useState(false);
   const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
-  const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isAccountTesterOpen, setIsAccountTesterOpen] = useState(false);
 
   // Apple Health Live State
@@ -434,6 +433,45 @@ export default function App() {
             </div>
           </div>
 
+          {/* AI CAMERA WORKOUT TRACKER HERO BANNER */}
+          <div
+            onClick={() => {
+              playPlunk();
+              setActiveTab('fitness');
+              setFitnessSubTab('camera');
+            }}
+            className="liquid-glass-elevated rounded-[24px] p-5 border border-[#E5FE40]/40 bg-gradient-to-r from-black/80 via-[#0B0F17] to-black/80 hover:border-[#E5FE40] transition cursor-pointer group relative overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+          >
+            <div className="absolute top-0 right-0 w-80 h-full bg-[#E5FE40]/10 blur-2xl pointer-events-none group-hover:bg-[#E5FE40]/20 transition" />
+            <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-12 h-12 rounded-[16px] bg-[#E5FE40] text-black flex items-center justify-center font-black shadow-[0_0_20px_rgba(229,254,64,0.4)]">
+                  <Camera className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-black text-white tracking-tight">
+                      AI Camera Workout Tracker // Mac FaceTime Vision
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-black">
+                      NEW 2026
+                    </span>
+                  </div>
+                  <p className="text-xs font-mono text-[#A1A1AA] mt-0.5">
+                    Real-time biomechanical skeleton, automated rep counter, ROM depth check & audio coach
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-mono font-bold text-[#E5FE40] group-hover:underline flex items-center space-x-1">
+                  <span>LAUNCH MAC CAM WORKOUT</span>
+                  <span>→</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* CRED REWARDS JACKPOT DROP */}
           <WheelOfMaxxing
             coins={coins}
@@ -535,6 +573,7 @@ export default function App() {
           {/* Sub-navigation across top fitness apps */}
           <div className="flex items-center space-x-2 border-b border-white/10 pb-3 overflow-x-auto no-scrollbar">
             {[
+              { id: 'camera', label: 'AI Camera Pose Tracker', icon: Camera, color: '#E5FE40' },
               { id: 'recovery', label: 'Whoop Recovery & Strain', icon: Heart, color: '#FA114F' },
               { id: 'thermal', label: 'Cryo & Sauna Suite', icon: Snowflake, color: '#00F0FF' },
               { id: 'decathlon', label: 'Centenarian Decathlon', icon: Trophy, color: '#E5FE40' },
@@ -567,6 +606,12 @@ export default function App() {
             })}
           </div>
 
+          {fitnessSubTab === 'camera' && (
+            <CameraWorkoutTracker
+              onAddHealthData={handleAddHealthData}
+              onLogSet={(set) => showToast(`Camera Reps Logged: ${set.reps} ${set.exercise}`)}
+            />
+          )}
           {fitnessSubTab === 'recovery' && <RecoveryStrainView />}
           {fitnessSubTab === 'thermal' && <ThermalSuite />}
           {fitnessSubTab === 'decathlon' && <CentenarianDecathlon />}
@@ -1100,22 +1145,6 @@ export default function App() {
         onAddHealthData={handleAddHealthData}
       />
 
-      {/* MEMBERSHIP PAYWALL MODAL */}
-      <MembershipPaywall
-        isOpen={isPaywallOpen}
-        onClose={() => setIsPaywallOpen(false)}
-        onMembershipActivated={(plan) => {
-          setMembershipPlan(plan);
-          setUserProfile((p) => ({
-            ...p,
-            tier: plan === 'lifetime' ? 'LIFETIME SOVEREIGN (FOUNDER)' : 'APEX PRO SUBSCRIBER',
-            badge: plan === 'lifetime' ? '👑 FOUNDER' : '★ PRO MEMBER',
-          }));
-          showToast(`Membership Activated: ${plan.toUpperCase()}`);
-        }}
-        currentPlan={membershipPlan}
-      />
-
       {/* TESTING ACCOUNT SWITCHER MODAL */}
       <AccountTesterModal
         isOpen={isAccountTesterOpen}
@@ -1127,8 +1156,6 @@ export default function App() {
         streakDays={streakDays}
         setStreakDays={setStreakDays}
         onCompleteAllProtocols={completeAllProtocols}
-        membershipPlan={membershipPlan}
-        setMembershipPlan={setMembershipPlan}
       />
 
       {/* TOP DESKTOP UTILITY BAR */}
@@ -1157,20 +1184,14 @@ export default function App() {
             <Crown className="w-3.5 h-3.5 text-[#E5FE40]" />
             <span className="font-bold">{userProfile.name}</span>
             <span className="text-[9px] px-1 rounded bg-[#E5FE40] text-black font-black">
-              TESTER
+              VIP FOUNDER
             </span>
           </div>
 
-          <button
-            onClick={() => {
-              playPlunk();
-              setIsPaywallOpen(true);
-            }}
-            className="px-3 py-1 rounded-[10px] bg-[#E5FE40]/15 hover:bg-[#E5FE40]/25 text-[#E5FE40] flex items-center space-x-1.5 transition border border-[#E5FE40]/40 font-bold"
-          >
-            <CreditCard className="w-3.5 h-3.5" />
-            <span>{membershipPlan === 'lifetime' ? 'LIFETIME' : 'UPGRADE'}</span>
-          </button>
+          <div className="px-3 py-1 rounded-[10px] bg-[#10B981]/15 text-[#10B981] flex items-center space-x-1.5 border border-[#10B981]/40 font-bold">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>ALL UNLOCKED</span>
+          </div>
 
           <button
             onClick={() => {

@@ -83,9 +83,17 @@ codesign --force --deep --sign - --entitlements mac_app/APEX_OS.entitlements "$A
 codesign -v "$APP_BUNDLE"
 echo -e "${COLOR_GREEN}  ✓ $APP_BUNDLE assembled and codesigned successfully!${COLOR_RESET}"
 
-# Step 6: Create Production DMG Installer (if requested)
+# Package Standalone Complete App Archive (.zip)
+echo -e "\n${COLOR_YELLOW}[6/7] Creating Standalone Complete App Archive (No Installer Required)...${COLOR_RESET}"
+ZIP_NAME="APEX-OS-macOS-Standalone.zip"
+rm -f "$ZIP_NAME"
+zip -q -r -y "$ZIP_NAME" "$APP_BUNDLE"
+ZIP_SIZE=$(ls -lh "$ZIP_NAME" | awk '{print $5}')
+echo -e "${COLOR_GREEN}  ✓ Standalone App Archive created: $ZIP_NAME ($ZIP_SIZE)${COLOR_RESET}"
+
+# Step 7: Create Production DMG Installer (if requested)
 if [ "$BUILD_DMG" = true ]; then
-    echo -e "\n${COLOR_YELLOW}[6/6] Generating macOS Disk Image (APEX-OS-Installer.dmg)...${COLOR_RESET}"
+    echo -e "\n${COLOR_YELLOW}[7/7] Generating macOS Disk Image (APEX-OS-Installer.dmg)...${COLOR_RESET}"
     DMG_NAME="APEX-OS-Installer.dmg"
     DMG_STAGING=".dmg_staging"
 
@@ -106,14 +114,15 @@ if [ "$BUILD_DMG" = true ]; then
     DMG_SIZE=$(ls -lh "$DMG_NAME" | awk '{print $5}')
     echo -e "${COLOR_GREEN}  ✓ Disk Image created: $DMG_NAME ($DMG_SIZE)${COLOR_RESET}"
 else
-    echo -e "\n${COLOR_YELLOW}[6/6] Skipping DMG creation (--no-dmg specified).${COLOR_RESET}"
+    echo -e "\n${COLOR_YELLOW}[7/7] Skipping DMG creation (--no-dmg specified).${COLOR_RESET}"
 fi
 
 echo -e "\n${COLOR_GREEN}${COLOR_BOLD}======================================================================${COLOR_RESET}"
 echo -e "${COLOR_GREEN}${COLOR_BOLD}   🎉 BUILD & COMPILATION COMPLETE!                                   ${COLOR_RESET}"
 echo -e "${COLOR_GREEN}${COLOR_BOLD}======================================================================${COLOR_RESET}"
-echo -e "• App Bundle : ${COLOR_BOLD}$PROJECT_DIR/$APP_BUNDLE${COLOR_RESET}"
+echo -e "• Complete App Bundle : ${COLOR_BOLD}$PROJECT_DIR/$APP_BUNDLE${COLOR_RESET} (Ready to run directly)"
+echo -e "• Standalone Archive  : ${COLOR_BOLD}$PROJECT_DIR/$ZIP_NAME${COLOR_RESET} (Unzip & run anywhere)"
 if [ "$BUILD_DMG" = true ]; then
-    echo -e "• DMG Disk   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS-Installer.dmg${COLOR_RESET}"
+    echo -e "• Optional DMG Disk   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS-Installer.dmg${COLOR_RESET}"
 fi
-echo -e "• Launch App : ${COLOR_BOLD}open \"$APP_BUNDLE\"${COLOR_RESET}\n"
+echo -e "• Direct Launch       : ${COLOR_BOLD}open \"$APP_BUNDLE\"${COLOR_RESET}\n"

@@ -44,7 +44,16 @@ It synthesizes the best capabilities of **Whoop 4.0**, **Oura Gen 4**, **Strava*
 * **Dr. Peter Attia Centenarian Decathlon**: 10 physical benchmarks required for physical autonomy at age 80+ (Dead Hang 2m, Farmer's Walk 100% BW, Floor Get-up without hands, VO2 Max Top 5%).
 * **AI Bloodwork OCR Parser**: High-resolution OCR parser for Quest Diagnostics and LabCorp lab PDFs extracting ApoB, Free & Total Testosterone, hs-CRP, and Fasting Insulin.
 
-### 3. 🏋️ Complete Fitness Ecosystem
+### 3. 🏋️ Complete Fitness & AI Camera Tracking Ecosystem
+* **📹 AI Camera Workout Tracker (FaceTime Vision)**:
+  * Real-time computer-vision optical pose estimation and skeletal landmark mesh tracking via Mac's built-in front-facing camera.
+  * Automatic Rep Counter & Biomechanical State Machine for:
+    * **Squats**: Real-time hip & knee flexion angle, parallel depth confirmation (< 90°), and lockout detection.
+    * **Military Push-Ups**: Elbow flexion angle (< 85° chest-to-deck) and full lockout detection.
+    * **Standing Bicep Curls**: Elbow flexion tracking (< 50° peak squeeze) and eccentric stretch.
+    * **HIIT Jumping Jacks**: Shoulder abduction angle and explosive cadence.
+  * Real-time audio voice coach (Siri TTS) calling out reps and real-time form cues.
+  * Direct synchronization with Hevy workout sets, 90s auto-rest timer, and Apple Health calories.
 * **Whoop 4.0 Recovery & Strain**: 94% autonomic recovery gauge with real-time Zone 1 - Zone 5 heart rate load distribution.
 * **Hevy / Strong Workout Logger**: Set-by-set tracker with 90-second auto rest countdown timer, completion chimes, and Brzycki 1RM calculator.
 * **Muscular Fatigue & Recovery Heatmap**: Real-time recovery states across Pectorals, Delts, Lats, Quads, and Hamstrings with weekly volume accumulation.
@@ -123,18 +132,22 @@ Visit `http://localhost:5174/` in your browser.
 
 ---
 
-## 🍏 Native macOS Desktop App & DMG Compilation
+## 🍏 Native macOS Desktop App (Complete App & Standalone Release)
 
-APEX // OS includes a native standalone Apple Silicon (`arm64`) macOS application bundle and DMG installer built with Swift, AppKit, and WebKit featuring a zero-dependency embedded offline server with WebRTC camera permissions and hardware-accelerated rendering.
+APEX // OS is distributed as a **complete, standalone native macOS Application Bundle (`APEX OS.app`)**. It requires **zero installers**, **zero background terminal processes**, and runs 100% offline with Apple Silicon hardware acceleration and camera entitlements.
+
+### ⚡ Direct Download Releases
+- **[APEX-OS-macOS-Standalone.zip (1.8 MB)](https://github.com/archiboltmusk/apex-lifemaxx-os/releases/download/v1.0.0/APEX-OS-macOS-Standalone.zip)** — Complete standalone macOS app. Unzip and double-click `APEX OS.app` to run immediately!
+- **[APEX-OS-Installer.dmg (2.0 MB)](https://github.com/archiboltmusk/apex-lifemaxx-os/releases/download/v1.0.0/APEX-OS-Installer.dmg)** — Optional disk image installer with `/Applications` drag-and-drop symlink.
 
 ### ⚡ One-Command Compilation
-Compile the entire project (Vite web bundle, Swift native Mach-O executable, app icons, `.app` bundle, and `.dmg` installer) with a single command:
+To compile the entire app from source (Vite bundle + Swift native Mach-O + App Bundle + Entitlements + Standalone Zip + DMG):
 
 ```bash
 # 1. Install dependencies
 npm install
 
-# 2. Compile the complete app and DMG installer
+# 2. Compile everything with a single command
 npm run compile
 ```
 
@@ -144,18 +157,14 @@ This automatically:
 3. Compiles the native Apple Silicon binary with Swift optimization flags (`swiftc -O`)
 4. Assembles the standalone `APEX OS.app` bundle
 5. Signs the app with camera, microphone, and networking entitlements
-6. Packages the `APEX-OS-Installer.dmg` disk image with `/Applications` drag-and-drop link
+6. Sets native `.regular` activation policy so the app window, dock icon, and keyboard controls are immediately active
+7. Packages `APEX-OS-macOS-Standalone.zip` and `APEX-OS-Installer.dmg`
 
 ### 🚀 Launching & Testing
 ```bash
-# Launch the compiled macOS app directly:
+# Launch the complete macOS app directly:
 open "APEX OS.app"
-
-# Or mount the DMG installer:
-open APEX-OS-Installer.dmg
 ```
-
-A pre-built native macOS release is available in [GitHub Releases v1.0.0](https://github.com/archiboltmusk/apex-lifemaxx-os/releases/tag/v1.0.0).
 
 ---
 

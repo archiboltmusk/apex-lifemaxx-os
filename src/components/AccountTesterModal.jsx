@@ -5,13 +5,11 @@ import {
   ShieldCheck,
   Sparkles,
   Zap,
-  RefreshCw,
   Coins,
   CheckCircle2,
-  Lock,
-  Unlock,
   User,
-  Heart
+  Heart,
+  Dumbbell
 } from 'lucide-react';
 import { playPlunk, playCoinChime } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
@@ -26,8 +24,6 @@ export default function AccountTesterModal({
   streakDays,
   setStreakDays,
   onCompleteAllProtocols,
-  membershipPlan,
-  setMembershipPlan,
 }) {
   if (!isOpen) return null;
 
@@ -40,9 +36,8 @@ export default function AccountTesterModal({
       tier: 'LIFETIME SOVEREIGN (FOUNDER #001)',
       badge: '👑 APEX 0.01%',
       appleId: 'alexander.vance@apex.club',
-      status: 'VERIFIED TESTER',
+      status: 'VERIFIED FOUNDER',
     });
-    setMembershipPlan('lifetime');
     setCoins((c) => Math.max(c, 10000));
     setStreakDays(42);
     try {
@@ -54,22 +49,29 @@ export default function AccountTesterModal({
     } catch {}
   };
 
-  const switchToFreeUser = () => {
+  const switchToOlympicAthlete = () => {
     playPlunk();
+    playCoinChime();
     setUserProfile({
-      name: 'Test Athlete (Guest)',
-      handle: '@guest.trial',
-      tier: 'FREE TIER (PAYWALL ACTIVE)',
-      badge: 'GUEST',
-      appleId: 'guest@icloud.com',
-      status: 'UNVERIFIED',
+      name: 'Elena Rostova',
+      handle: '@rostova.elite',
+      tier: 'OLYMPIC GOLD PROTOCOL',
+      badge: '⚡ DECATHLON #007',
+      appleId: 'elena.rostova@apex.club',
+      status: 'ACTIVE ATHLETE',
     });
-    setMembershipPlan(null);
-    setCoins(150);
-    setStreakDays(1);
+    setCoins((c) => Math.max(c, 25000));
+    setStreakDays(180);
+    try {
+      confetti({
+        particleCount: 70,
+        spread: 60,
+        colors: ['#00F0FF', '#10B981', '#E5FE40'],
+      });
+    } catch {}
   };
 
-  const addFreeCoins = (amount = 1000) => {
+  const addFreeCoins = (amount = 2500) => {
     playPlunk();
     playCoinChime();
     setCoins((c) => c + amount);
@@ -103,13 +105,13 @@ export default function AccountTesterModal({
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="text-lg font-bold text-white tracking-tight">Testing Account Hub</h3>
+              <h3 className="text-lg font-bold text-white tracking-tight">VIP Account Testing Hub</h3>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-bold">
-                DEV MODE
+                100% UNLOCKED
               </span>
             </div>
             <p className="text-xs text-[#A1A1AA] font-mono">
-              Switch test accounts & trigger developer bypass states
+              All features permanently unlocked · Full sovereign privileges
             </p>
           </div>
         </div>
@@ -136,8 +138,8 @@ export default function AccountTesterModal({
 
           <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-2 border-t border-white/5">
             <div>
-              <span className="text-[10px] text-[#8A8A8A] block">MEMBERSHIP STATUS</span>
-              <span className="text-white font-bold">{userProfile.tier}</span>
+              <span className="text-[10px] text-[#8A8A8A] block">ACCESS STATUS</span>
+              <span className="text-[#10B981] font-bold">PERMANENT UNLOCKED</span>
             </div>
             <div>
               <span className="text-[10px] text-[#8A8A8A] block">COIN BALANCE</span>
@@ -146,17 +148,17 @@ export default function AccountTesterModal({
           </div>
         </div>
 
-        {/* TEST ACCOUNT SWITCHER */}
+        {/* PROFILES */}
         <div className="space-y-2 mb-5">
           <span className="text-[10px] font-mono text-[#8A8A8A] uppercase tracking-wider block">
-            PRE-CONFIGURED TEST PROFILES
+            PRE-CONFIGURED PROFILES
           </span>
 
           {/* Profile 1: VIP Founder */}
           <div
             onClick={switchToFounder}
             className={`p-3.5 rounded-[16px] border transition cursor-pointer flex items-center justify-between ${
-              membershipPlan === 'lifetime'
+              userProfile.handle === '@vance.apex'
                 ? 'bg-[#E5FE40]/15 border-[#E5FE40] text-white shadow-[0_0_15px_rgba(229,254,64,0.3)]'
                 : 'bg-white/[0.04] border-white/10 hover:border-white/25'
             }`}
@@ -165,42 +167,39 @@ export default function AccountTesterModal({
               <Crown className="w-5 h-5 text-[#E5FE40]" />
               <div>
                 <div className="flex items-center space-x-2">
-                  <span className="text-xs font-mono font-black text-white">VIP 0.01% FOUNDER ACCOUNT</span>
-                  <span className="text-[9px] font-mono px-1.5 rounded bg-[#10B981] text-black font-bold">
-                    RECOMMENDED
-                  </span>
+                  <span className="text-xs font-mono font-black text-white">ALEXANDER VANCE (FOUNDER #001)</span>
                 </div>
                 <span className="text-[11px] text-[#A1A1AA] block">
-                  All features unlocked · 10,000 Coins · 42-day Warrior streak · Zero paywalls
+                  Bio age 22.8y (-6.2y) · 10,000 Coins · 42-day Warrior streak
                 </span>
               </div>
             </div>
-            {membershipPlan === 'lifetime' && <CheckCircle2 className="w-4 h-4 text-[#E5FE40]" />}
+            {userProfile.handle === '@vance.apex' && <CheckCircle2 className="w-4 h-4 text-[#E5FE40]" />}
           </div>
 
-          {/* Profile 2: Free User Trial */}
+          {/* Profile 2: Olympic Athlete */}
           <div
-            onClick={switchToFreeUser}
+            onClick={switchToOlympicAthlete}
             className={`p-3.5 rounded-[16px] border transition cursor-pointer flex items-center justify-between ${
-              !membershipPlan
-                ? 'bg-white/15 border-white/40 text-white'
+              userProfile.handle === '@rostova.elite'
+                ? 'bg-[#00F0FF]/15 border-[#00F0FF] text-white shadow-[0_0_15px_rgba(0,240,255,0.3)]'
                 : 'bg-white/[0.04] border-white/10 hover:border-white/25'
             }`}
           >
             <div className="flex items-center space-x-3">
-              <Lock className="w-5 h-5 text-[#FA114F]" />
+              <Dumbbell className="w-5 h-5 text-[#00F0FF]" />
               <div>
-                <span className="text-xs font-mono font-bold text-white block">GUEST / FREE TIER ACCOUNT</span>
+                <span className="text-xs font-mono font-bold text-white block">ELENA ROSTOVA (DECATHLON ELITE)</span>
                 <span className="text-[11px] text-[#A1A1AA] block">
-                  Paywalls active · 150 Coins · Test upgrade checkout flows
+                  VO2 Max 68 ml/kg · 25,000 Coins · 180-day streak
                 </span>
               </div>
             </div>
-            {!membershipPlan && <CheckCircle2 className="w-4 h-4 text-white" />}
+            {userProfile.handle === '@rostova.elite' && <CheckCircle2 className="w-4 h-4 text-[#00F0FF]" />}
           </div>
         </div>
 
-        {/* DEVELOPER RAPID TEST TRIGGERS */}
+        {/* RAPID TEST TRIGGERS */}
         <div className="grid grid-cols-2 gap-2 mb-4">
           <button
             onClick={() => addFreeCoins(2500)}

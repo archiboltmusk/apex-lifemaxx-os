@@ -197,24 +197,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
     }
 
     func loadContent() {
-        // 1. Check if Vite dev/preview server is live on port 5174
-        if let devURL = URL(string: "http://localhost:5174/") {
-            var request = URLRequest(url: devURL, timeoutInterval: 1.0)
-            request.httpMethod = "HEAD"
-            let session = URLSession(configuration: .ephemeral)
-            let task = session.dataTask(with: request) { [weak self] (_, response, error) in
-                DispatchQueue.main.async {
-                    if error == nil, let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 {
-                        self?.webView.load(URLRequest(url: devURL))
-                    } else {
-                        self?.startOfflineStaticServerAndLoad()
+        // Fast-path: Launch standalone embedded app immediately (0ms delay)
+        if CommandLine.arguments.contains("--dev") {
+            if let devURL = URL(string: "http://localhost:5174/") {
+                var request = URLRequest(url: devURL, timeoutInterval: 0.5)
+                request.httpMethod = "HEAD"
+                let session = URLSession(configuration: .ephemeral)
+                let task = session.dataTask(with: request) { [weak self] (_, response, error) in
+                    DispatchQueue.main.async {
+                        if error == nil, let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 {
+                            self?.webView.load(URLRequest(url: devURL))
+                        } else {
+                            self?.startOfflineStaticServerAndLoad()
+                        }
                     }
                 }
+                task.resume()
+                return
             }
-            task.resume()
-        } else {
-            startOfflineStaticServerAndLoad()
         }
+
+        // Production default: Launch embedded offline server instantly
+        startOfflineStaticServerAndLoad()
     }
 
     func startOfflineStaticServerAndLoad() {
@@ -301,6 +305,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
 }
 
 let app = NSApplication.shared
+app.setActivationPolicy(.regular)
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
