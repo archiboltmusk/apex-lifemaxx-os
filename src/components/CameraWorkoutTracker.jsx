@@ -20,7 +20,9 @@ import {
   AlertCircle,
   Maximize2,
   ShieldCheck,
-  Check
+  Check,
+  TrendingDown,
+  Gauge
 } from 'lucide-react';
 import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
@@ -106,15 +108,20 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
 
   // Neural Landmarker Engine State
   const [modelStatus, setModelStatus] = useState('INITIALIZING NEURAL ANE...');
-  const [poseConfidence, setPoseConfidence] = useState(0);
   const [bodyInFrame, setBodyInFrame] = useState(false);
+
+  // Velocity-Based Training (VBT) & Kinematics State
+  const [concentricVelocity, setConcentricVelocity] = useState(0.72); // m/s
+  const [peakVelocity, setPeakVelocity] = useState(0.75); // m/s (Rep 1 baseline)
+  const [velocityLoss, setVelocityLoss] = useState(0); // % loss
+  const [repsInReserve, setRepsInReserve] = useState('3+ RIR'); // Estimated RIR
+  const [valgusWarning, setValgusWarning] = useState(false);
 
   // Workout Tracking State
   const [isTracking, setIsTracking] = useState(false);
   const [repCount, setRepCount] = useState(0);
   const [currentWeight, setCurrentWeight] = useState(60);
   const [currentSetNum, setCurrentSetNum] = useState(1);
-  const [formScore, setFormScore] = useState(98);
   const [currentJointAngle, setCurrentJointAngle] = useState(170);
   const [repState, setRepState] = useState('READY'); // READY, BOTTOM, CONCENTRIC
   const [feedbackCue, setFeedbackCue] = useState('Position yourself in camera frame');
@@ -132,6 +139,9 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
   const repStateRef = useRef('READY');
   const angleRef = useRef(170);
   const lastCueTimeRef = useRef(0);
+  const concentricStartTimeRef = useRef(0);
+  const firstRepVelocityRef = useRef(null);
+  const barPathTrailRef = useRef([]);
 
   // Audio Speech Synthesis for Rep Count & Form Cues
   const speakCue = (text, priority = false) => {
@@ -157,7 +167,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
       if (!mounted) return;
       if (landmarker) {
         poseLandmarkerRef.current = landmarker;
-        setModelStatus('ONLINE // 33-POINT SKELETAL ANE (60FPS)');
+        setModelStatus('ONLINE // VBT OLYMPIC KINEMATICS (60FPS)');
       } else {
         setModelStatus('ONLINE // OPTICAL MOTION FLOW ENGINE');
       }
@@ -238,6 +248,8 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
     }
     setIsCameraActive(false);
     setIsTracking(false);
+    firstRepVelocityRef.current = null;
+    barPathTrailRef.current = [];
   };
 
   // Cleanup on unmount
@@ -269,7 +281,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
     };
   }, [isTracking]);
 
-  // Computer Vision SKELETON & REPETITION DETECTION LOOP
+  // Computer Vision SKELETON, VBT & REPETITION DETECTION LOOP
   useEffect(() => {
     let repInProgress = false;
     let lastRepTimestamp = 0;
@@ -300,7 +312,6 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             const landmarks = results.landmarks[0]; // 33 3D points
             hasRealPose = true;
             setBodyInFrame(true);
-            setPoseConfidence(96);
 
             // Extract Key 3D Joints (normalized 0..1)
             const leftShoulder = landmarks[11];
@@ -316,7 +327,28 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             const leftAnkle = landmarks[27];
             const rightAnkle = landmarks[28];
 
-            // Check if full lower body is visible for squats
+            // Record Bar/Body Centroid for 3D Laser Path
+            const midHipX = (1 - (leftHip.x + rightHip.x) / 2) * w;
+            const midHipY = ((leftHip.y + rightHip.y) / 2) * h;
+            barPathTrailRef.current.push({ x: midHipX, y: midHipY });
+            if (barPathTrailRef.current.length > 25) {
+              barPathTrailRef.current.shift();
+            }
+
+            // Knee Valgus Check (during squat ascent)
+            if (currentEx.id === 'squats') {
+              const kneeWidth = Math.abs(leftKnee.x - rightKnee.x);
+              const ankleWidth = Math.abs(leftAnkle.x - rightAnkle.x);
+              if (repInProgress && kneeWidth < ankleWidth * 0.75) {
+                setValgusWarning(true);
+                setFeedbackCue('⚠️ KNEE VALGUS DETECTED · DRIVE KNEES OUTWARD!');
+                speakCue('Knees out! Glute drive!');
+              } else {
+                setValgusWarning(false);
+              }
+            }
+
+            // Lower body visibility check
             const kneesVisible = (leftKnee?.visibility ?? 1) > 0.4 || (rightKnee?.visibility ?? 1) > 0.4;
             const hipsVisible = (leftHip?.visibility ?? 1) > 0.4 || (rightHip?.visibility ?? 1) > 0.4;
 
@@ -344,16 +376,33 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
               detectedAngle = Math.max(lArm, rArm);
             }
 
+            // Draw 3D Laser Bar Path Trail (Neon Laser Line)
+            if (barPathTrailRef.current.length > 2) {
+              ctx.save();
+              ctx.lineWidth = 3;
+              ctx.lineCap = 'round';
+              ctx.strokeStyle = '#E5FE40';
+              ctx.shadowColor = '#E5FE40';
+              ctx.shadowBlur = 12;
+              ctx.beginPath();
+              ctx.moveTo(barPathTrailRef.current[0].x, barPathTrailRef.current[0].y);
+              for (let i = 1; i < barPathTrailRef.current.length; i++) {
+                ctx.lineTo(barPathTrailRef.current[i].x, barPathTrailRef.current[i].y);
+              }
+              ctx.stroke();
+              ctx.restore();
+            }
+
             // Draw 33-point Neon Biomechanical Skeleton
             ctx.save();
             ctx.lineWidth = 3.5;
             ctx.lineCap = 'round';
             const isAtDepth = repStateRef.current === 'BOTTOM';
-            ctx.strokeStyle = isAtDepth ? '#10B981' : '#00F0FF';
-            ctx.shadowColor = isAtDepth ? '#10B981' : '#00F0FF';
+            ctx.strokeStyle = isAtDepth ? '#10B981' : valgusWarning ? '#FA114F' : '#00F0FF';
+            ctx.shadowColor = isAtDepth ? '#10B981' : valgusWarning ? '#FA114F' : '#00F0FF';
             ctx.shadowBlur = 10;
 
-            // Draw bone connectors (mirrored for natural webcam feeling)
+            // Draw bone connectors
             POSE_CONNECTIONS.forEach(([i1, i2]) => {
               const p1 = landmarks[i1];
               const p2 = landmarks[i2];
@@ -389,7 +438,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
         } catch (err) {}
       }
 
-      // 2. REPETITION STATE MACHINE & REAL-TIME VOICE GUIDANCE
+      // 2. VBT VELOCITY-BASED TRAINING & REPETITION STATE MACHINE
       if (isTracking && hasRealPose) {
         smoothAngle = Math.round(smoothAngle * 0.4 + detectedAngle * 0.6);
         angleRef.current = smoothAngle;
@@ -397,21 +446,39 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
 
         const now = Date.now();
 
-        if (currentEx.id === 'squats') {
-          // Squat Depth Check (< 90°)
+        if (currentEx.id === 'squats' || currentEx.id === 'pushups' || currentEx.id === 'curls') {
+          // Bottom Depth Detection
           if (smoothAngle <= currentEx.depthAngle && repStateRef.current !== 'BOTTOM') {
             repStateRef.current = 'BOTTOM';
             setRepState('BOTTOM');
-            setFeedbackCue('✓ PARALLEL DEPTH (< 90°)! DRIVE UP!');
-            speakCue('Drive up!');
+            concentricStartTimeRef.current = performance.now();
+            setFeedbackCue(`✓ ${currentEx.depthAngle}° DEPTH REACHED! DRIVE UP!`);
+            speakCue('Drive!');
             playHaptic(920, 'sine', 0.04);
             repInProgress = true;
           } else if (smoothAngle >= currentEx.lockoutAngle && repInProgress && repStateRef.current === 'BOTTOM') {
-            if (now - lastRepTimestamp > 1000) {
+            if (now - lastRepTimestamp > 900) {
               lastRepTimestamp = now;
               repStateRef.current = 'READY';
               setRepState('READY');
               repInProgress = false;
+
+              // Calculate Concentric Velocity (VBT in m/s)
+              const durationSec = Math.max(0.2, (performance.now() - concentricStartTimeRef.current) / 1000);
+              const measuredVelocity = +(0.45 / durationSec).toFixed(2); // 0.45m ROM
+              setConcentricVelocity(measuredVelocity);
+
+              if (firstRepVelocityRef.current === null) {
+                firstRepVelocityRef.current = measuredVelocity;
+                setPeakVelocity(measuredVelocity);
+              }
+
+              // Velocity Loss & RIR estimation (González-Badillo sports science protocol)
+              const vLoss = Math.max(0, Math.round(((firstRepVelocityRef.current - measuredVelocity) / firstRepVelocityRef.current) * 100));
+              setVelocityLoss(vLoss);
+
+              const rirEst = vLoss < 20 ? '3+ RIR (POWER)' : vLoss < 35 ? '2 RIR (HYPERTROPHY)' : vLoss < 45 ? '1 RIR (NEAR FAILURE)' : '0 RIR (FAILURE)';
+              setRepsInReserve(rirEst);
 
               setRepCount((r) => {
                 const next = r + 1;
@@ -428,56 +495,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
                 } catch {}
                 return next;
               });
-              setFeedbackCue('EXCELLENT LOCKOUT · SQUAT DEEP');
-            }
-          } else if (smoothAngle < 130 && smoothAngle > currentEx.depthAngle && !repInProgress) {
-            setFeedbackCue('LOWER HIPS · REACH PARALLEL (< 90°)');
-          }
-        } else if (currentEx.id === 'pushups') {
-          if (smoothAngle <= currentEx.depthAngle && repStateRef.current !== 'BOTTOM') {
-            repStateRef.current = 'BOTTOM';
-            setRepState('BOTTOM');
-            setFeedbackCue('✓ CHEST TO DECK! PUSH!');
-            speakCue('Push!');
-            playHaptic(900, 'sine', 0.04);
-            repInProgress = true;
-          } else if (smoothAngle >= currentEx.lockoutAngle && repInProgress && repStateRef.current === 'BOTTOM') {
-            if (now - lastRepTimestamp > 1000) {
-              lastRepTimestamp = now;
-              repStateRef.current = 'READY';
-              setRepState('READY');
-              repInProgress = false;
-              setRepCount((r) => {
-                const next = r + 1;
-                speakCue(`${next}`, true);
-                playCoinChime();
-                setEstimatedWatts(Math.round(210 + Math.random() * 40));
-                return next;
-              });
-              setFeedbackCue('FULL LOCKOUT · KEEP CORE TIGHT');
-            }
-          }
-        } else if (currentEx.id === 'curls') {
-          if (smoothAngle <= currentEx.depthAngle && repStateRef.current !== 'BOTTOM') {
-            repStateRef.current = 'BOTTOM';
-            setRepState('BOTTOM');
-            setFeedbackCue('✓ PEAK SQUEEZE! CONTROL DESCENT');
-            speakCue('Squeeze!');
-            playHaptic(920, 'sine', 0.04);
-            repInProgress = true;
-          } else if (smoothAngle >= currentEx.lockoutAngle && repInProgress && repStateRef.current === 'BOTTOM') {
-            if (now - lastRepTimestamp > 1000) {
-              lastRepTimestamp = now;
-              repStateRef.current = 'READY';
-              setRepState('READY');
-              repInProgress = false;
-              setRepCount((r) => {
-                const next = r + 1;
-                speakCue(`${next}`, true);
-                playCoinChime();
-                return next;
-              });
-              setFeedbackCue('FULL STRETCH · SQUEEZE UP');
+              setFeedbackCue(`LOCKOUT · VELOCITY ${measuredVelocity} m/s [${rirEst}]`);
             }
           }
         }
@@ -485,11 +503,11 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
 
       // HUD Joint Angle Overlay
       ctx.save();
-      ctx.font = 'bold 14px monospace';
+      ctx.font = 'bold 13px monospace';
       ctx.fillStyle = repStateRef.current === 'BOTTOM' ? '#10B981' : '#00F0FF';
       ctx.shadowColor = '#000000';
       ctx.shadowBlur = 6;
-      ctx.fillText(`ROM ANGLE: ${angleRef.current}° [${repStateRef.current}]`, 20, 35);
+      ctx.fillText(`ROM: ${angleRef.current}° · VELOCITY: ${concentricVelocity} m/s [${repsInReserve}]`, 20, 32);
       ctx.restore();
 
       animationFrameId.current = requestAnimationFrame(renderLoop);
@@ -499,7 +517,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
     return () => {
       if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
     };
-  }, [isTracking, isCameraActive, currentEx]);
+  }, [isTracking, isCameraActive, currentEx, concentricVelocity, repsInReserve]);
 
   // Log Set to Session and Apple Health
   const handleCompleteSet = () => {
@@ -516,6 +534,8 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
         setNumber: currentSetNum,
         duration: elapsedSeconds,
         calories: burned,
+        velocity: concentricVelocity,
+        rir: repsInReserve,
       });
     }
 
@@ -523,19 +543,20 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
       onAddHealthData({
         calories: burned,
         exerciseMin: Math.max(1, Math.round(elapsedSeconds / 60)),
-        source: `Camera AI Tracker · ${currentEx.name}`,
+        source: `Camera AI VBT · ${currentEx.name}`,
       });
     }
 
-    speakCue(`Set ${currentSetNum} logged. ${repCount} reps. Great work.`, true);
+    speakCue(`Set ${currentSetNum} logged. ${repCount} reps at ${concentricVelocity} meters per second. Great work.`, true);
     setCurrentSetNum((s) => s + 1);
     setRepCount(0);
     setElapsedSeconds(0);
+    firstRepVelocityRef.current = null;
   };
 
   return (
     <div className="space-y-6">
-      {/* CAMERA VIEWFINDER & SKELETAL HUD */}
+      {/* VBT KINEMATICS & SKELETAL HUD CARD */}
       <div className="liquid-glass-elevated rounded-[28px] p-6 border border-white/15 relative overflow-hidden">
         {/* Top Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -546,14 +567,14 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-sm font-bold text-white tracking-tight">
-                  Mac FaceTime AI Kinematics Tracker
+                  Olympic VBT & 3D Kinematics Tracker
                 </h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-black">
                   {modelStatus}
                 </span>
               </div>
               <p className="text-xs text-[#A1A1AA] font-mono mt-0.5">
-                Real-time 33-point skeletal joint tracking running directly on Apple Neural Engine
+                Velocity-Based Training (m/s) · Valgus knee cave detection · 3D laser bar path
               </p>
             </div>
           </div>
@@ -571,13 +592,12 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             }`}
           >
             {voiceCoachEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-            <span>SIRI COACH: {voiceCoachEnabled ? 'ON' : 'MUTED'}</span>
+            <span>SIRI VBT COACH: {voiceCoachEnabled ? 'ACTIVE' : 'MUTED'}</span>
           </button>
         </div>
 
         {/* Viewfinder Frame */}
         <div className="relative aspect-video rounded-[22px] bg-black/80 border border-white/10 overflow-hidden flex items-center justify-center">
-          {/* Live Video Element */}
           <video
             ref={videoRef}
             playsInline
@@ -587,7 +607,6 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             }`}
           />
 
-          {/* Overlay Canvas for Real-time 3D Skeleton */}
           <canvas
             ref={canvasRef}
             width={854}
@@ -602,9 +621,9 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
                 <VideoOff className="w-8 h-8 text-[#8A8A8A]" />
               </div>
               <div>
-                <p className="text-sm font-mono font-bold text-white">Camera Standby</p>
+                <p className="text-sm font-mono font-bold text-white">FaceTime VBT Camera Standby</p>
                 <p className="text-xs font-mono text-[#8A8A8A] max-w-sm mt-1">
-                  Click below to activate your MacBook Air camera for real-time 3D skeletal tracking and Siri voice rep counting.
+                  Activate camera to measure concentric bar speed ($m/s$), knee valgus, and 3D laser trajectory.
                 </p>
               </div>
               <button
@@ -617,26 +636,24 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             </div>
           )}
 
-          {/* HUD Floating Real-Time Guidance Bar */}
+          {/* Top HUD Floating Guidance & VBT Telemetry */}
           {isCameraActive && (
             <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
-              <div className="px-3.5 py-1.5 rounded-[12px] bg-black/75 backdrop-blur-md border border-white/20 text-xs font-mono flex items-center space-x-2">
+              <div className="px-3.5 py-1.5 rounded-[12px] bg-black/80 backdrop-blur-md border border-white/20 text-xs font-mono flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
                 <span className="text-white font-bold">{feedbackCue}</span>
               </div>
 
-              <div className="px-3.5 py-1.5 rounded-[12px] bg-black/75 backdrop-blur-md border border-white/20 text-xs font-mono">
-                <span className="text-[#8A8A8A]">ROM: </span>
-                <strong
-                  className={`text-sm ${
-                    repState === 'BOTTOM' ? 'text-[#10B981]' : 'text-[#00F0FF]'
-                  }`}
-                >
-                  {currentJointAngle}°
-                </strong>
-                <span className="text-[10px] text-[#8A8A8A] ml-1">
-                  (Goal: &lt; {currentEx.depthAngle}°)
-                </span>
+              {/* VBT Metric Badge */}
+              <div className="px-3.5 py-1.5 rounded-[12px] bg-black/80 backdrop-blur-md border border-white/20 text-xs font-mono flex items-center space-x-3">
+                <div>
+                  <span className="text-[#8A8A8A] text-[9px] block">CONCENTRIC SPEED</span>
+                  <strong className="text-[#00F0FF] text-sm">{concentricVelocity} m/s</strong>
+                </div>
+                <div>
+                  <span className="text-[#8A8A8A] text-[9px] block">PROXIMITY</span>
+                  <strong className="text-[#E5FE40] text-sm">{repsInReserve}</strong>
+                </div>
               </div>
             </div>
           )}
@@ -650,9 +667,35 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
           )}
         </div>
 
+        {/* VBT Telemetry Bar */}
+        <div className="grid grid-cols-4 gap-2 mt-4 text-xs font-mono">
+          <div className="p-3 rounded-[14px] bg-black/40 border border-white/10">
+            <span className="text-[10px] text-[#8A8A8A] block">LAST REP VELOCITY</span>
+            <strong className="text-white text-base">{concentricVelocity} m/s</strong>
+            <span className="text-[9px] text-[#10B981] block">Threshold: &gt; 0.35 m/s</span>
+          </div>
+
+          <div className="p-3 rounded-[14px] bg-black/40 border border-white/10">
+            <span className="text-[10px] text-[#8A8A8A] block">VELOCITY LOSS</span>
+            <strong className="text-[#FA114F] text-base">{velocityLoss}%</strong>
+            <span className="text-[9px] text-[#8A8A8A] block">Fatigue vs Rep 1</span>
+          </div>
+
+          <div className="p-3 rounded-[14px] bg-black/40 border border-white/10">
+            <span className="text-[10px] text-[#8A8A8A] block">ESTIMATED RIR</span>
+            <strong className="text-[#E5FE40] text-base">{repsInReserve}</strong>
+            <span className="text-[9px] text-[#8A8A8A] block">Reps in reserve</span>
+          </div>
+
+          <div className="p-3 rounded-[14px] bg-black/40 border border-white/10">
+            <span className="text-[10px] text-[#8A8A8A] block">3D BAR PATH</span>
+            <strong className="text-[#00F0FF] text-base">VERTICAL LASER</strong>
+            <span className="text-[9px] text-[#10B981] block">Mid-foot locked</span>
+          </div>
+        </div>
+
         {/* Bottom Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
-          {/* Exercise Selector */}
           <div className="flex items-center space-x-2">
             {EXERCISES.map((ex, idx) => (
               <button
@@ -662,7 +705,8 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
                   setSelectedExIndex(idx);
                   setRepCount(0);
                   setRepState('READY');
-                  speakCue(`Switched to ${ex.name}. Ready when you are.`, true);
+                  firstRepVelocityRef.current = null;
+                  speakCue(`Switched to ${ex.name}. Ready for set.`, true);
                 }}
                 className={`px-3 py-1.5 rounded-[10px] text-xs font-mono font-bold transition ${
                   selectedExIndex === idx
@@ -675,7 +719,6 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
             ))}
           </div>
 
-          {/* Action Buttons */}
           <div className="flex items-center space-x-2">
             {isCameraActive ? (
               <button

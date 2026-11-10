@@ -207,6 +207,25 @@ export default function App() {
     };
   }, []);
 
+  // Global Cross-Component Navigation Listener
+  useEffect(() => {
+    const handleNavEvent = (e) => {
+      const detail = e.detail;
+      if (!detail) return;
+      if (detail.tab) setActiveTab(detail.tab);
+      if (detail.subTab) {
+        if (detail.tab === 'fitness') setFitnessSubTab(detail.subTab);
+        else if (detail.tab === 'looks') setLooksSubTab(detail.subTab);
+        else if (detail.tab === 'bio') setBioSubTab(detail.subTab);
+        else if (detail.tab === 'brain') setBrainSubTab(detail.subTab);
+        else if (detail.tab === 'nutrition') setNutritionSubTab(detail.subTab);
+        else if (detail.tab === 'garage') setGarageSubTab(detail.subTab);
+      }
+    };
+    window.addEventListener('apex:navigate-tab', handleNavEvent);
+    return () => window.removeEventListener('apex:navigate-tab', handleNavEvent);
+  }, []);
+
   // Real User Account Profile & Membership
   const [membershipPlan, setMembershipPlan] = useState('lifetime');
   const [userProfile, setUserProfile] = useState(() => {
@@ -498,6 +517,42 @@ export default function App() {
                 >
                   <Mic className="w-3.5 h-3.5" />
                   <span>VOICE RESONANCE TEST</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('fitness');
+                    setFitnessSubTab('muscles');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-[#E5FE40]/20 text-[#E5FE40] hover:bg-[#E5FE40]/30 border border-[#E5FE40]/40 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Dumbbell className="w-3.5 h-3.5" />
+                  <span>14-MUSCLE VOLUME MAP</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('fitness');
+                    setFitnessSubTab('decathlon');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-[#10B981]/20 text-[#10B981] hover:bg-[#10B981]/30 border border-[#10B981]/40 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Trophy className="w-3.5 h-3.5" />
+                  <span>CENTENARIAN DECATHLON</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    playPlunk();
+                    setActiveTab('nutrition');
+                    setNutritionSubTab('scanner');
+                  }}
+                  className="px-3 py-1.5 rounded-[10px] bg-[#00F0FF]/20 text-[#00F0FF] hover:bg-[#00F0FF]/30 border border-[#00F0FF]/40 font-bold transition flex items-center space-x-1.5"
+                >
+                  <Target className="w-3.5 h-3.5" />
+                  <span>AI MEAL SCANNER</span>
                 </button>
 
                 <button
