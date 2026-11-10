@@ -16,6 +16,8 @@
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>NSHighResolutionCapable</key>
@@ -26,8 +28,8 @@
         <true/>
     </dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>APEX OS requires microphone access to analyze fundamental acoustic vocal pitch and chest resonance.</string>
+    <string>APEX OS requires microphone access to analyze acoustic vocal pitch and thoracic resonance.</string>
     <key>NSCameraUsageDescription</key>
-    <string>APEX OS uses computer vision for photogrammetric facial landmark and macro food scanning.</string>
+    <string>APEX OS uses front camera computer vision for TrueDepth photogrammetric facial landmark mapping.</string>
 </dict>
 </plist>
