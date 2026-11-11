@@ -17,16 +17,29 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIUserInterfaceStyle</key>
     <string>Dark</string>
+    <key>NSSupportsLiveActivities</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict>
         <key>UIColorName</key>
         <string>LaunchBackground</string>
     </dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>club.apex.lifemaxx.ios</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>apex</string>
+            </array>
+        </dict>
+    </array>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>
@@ -36,15 +49,21 @@
         <string>UIInterfaceOrientationPortrait</string>
     </array>
     <key>NSHealthShareUsageDescription</key>
-    <string>APEX reads your active energy, heart rate, HRV, VO₂ max, and sleep from Apple Health to track recovery and biological fitness age.</string>
+    <string>APEX reads your active energy, heart rate, HRV, VO₂ max, respiratory rate, blood oxygen, and sleep stages from Apple Health to compute recovery and biological fitness age.</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>APEX saves your completed strength workouts and active energy directly into Apple Health.</string>
     <key>NSCameraUsageDescription</key>
-    <string>APEX uses the front camera with on-device Apple Vision to analyze exercise form and craniofacial symmetry.</string>
+    <string>APEX uses the camera with on-device Apple Vision &amp; TrueDepth to track exercise form, scan lab panels, and measure craniofacial symmetry.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>APEX analyzes vocal resonance for voice biomarkers.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>APEX lets you select a portrait photo from your library for on-device craniofacial symmetry analysis.</string>
+    <string>APEX lets you select portraits or bloodwork lab photos for on-device Apple Vision analysis.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>APEX discovers your Mac Companion app over local Wi-Fi via Bonjour to synchronize Apple Health telemetry and scans privately.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_apexos._tcp</string>
+    </array>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>

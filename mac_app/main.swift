@@ -3,19 +3,33 @@ import WebKit
 import HealthKit
 import AVFoundation
 
-// MARK: - Mini Local Static Server & HealthKit Webhook Gateway
-class MiniStaticServer {
+// MARK: - Mini Local Static Server, Bonjour Discovery & Continuity Webhook Gateway
+class MiniStaticServer: NSObject, NetServiceDelegate {
     private var serverSocket: Int32 = -1
     private(set) var port: UInt16 = 0
     let rootDir: URL
     private var isRunning = false
+    private var netService: NetService?
     var onSyncPayload: (([String: Any]) -> Void)?
 
     init(rootDir: URL) {
         self.rootDir = rootDir
+        super.init()
     }
 
     func start() -> Bool {
+        if startSocket(preferredPort: 60159) {
+            publishBonjour(port: port)
+            return true
+        }
+        if startSocket(preferredPort: 0) {
+            publishBonjour(port: port)
+            return true
+        }
+        return false
+    }
+
+    private func startSocket(preferredPort: UInt16) -> Bool {
         serverSocket = socket(AF_INET, SOCK_STREAM, 0)
         guard serverSocket >= 0 else { return false }
 
@@ -24,13 +38,13 @@ class MiniStaticServer {
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(0).bigEndian // 0 = assign free ephemeral port
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        addr.sin_port = preferredPort.bigEndian
+        addr.sin_addr.s_addr = INADDR_ANY.bigEndian // Reachable from both 127.0.0.1 and iPhone on LAN Wi-Fi
 
         var bindAddr = addr
         let bindRes = withUnsafePointer(to: &bindAddr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(serverSocket, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                Darwin.bind(serverSocket, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         guard bindRes == 0 else {
@@ -59,6 +73,17 @@ class MiniStaticServer {
         return true
     }
 
+    private func publishBonjour(port: UInt16) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let name = Host.current().localizedName ?? "APEX Mac"
+            let service = NetService(domain: "local.", type: "_apexos._tcp.", name: name, port: Int32(port))
+            service.delegate = self
+            service.publish()
+            self.netService = service
+        }
+    }
+
     private func acceptLoop() {
         while isRunning {
             var clientAddr = sockaddr_in()
@@ -75,14 +100,51 @@ class MiniStaticServer {
         }
     }
 
+    private func readFullHTTPRequest(_ clientSocket: Int32) -> (String, Data)? {
+        var accumulated = Data()
+        var chunk = [UInt8](repeating: 0, count: 8192)
+        var headerEndIndex: Data.Index? = nil
+        var expectedBodyLength: Int = 0
+        let separator = Data("\r\n\r\n".utf8)
+
+        while true {
+            let n = read(clientSocket, &chunk, chunk.count)
+            if n <= 0 { break }
+            accumulated.append(contentsOf: chunk[0..<n])
+
+            if headerEndIndex == nil, let range = accumulated.range(of: separator) {
+                headerEndIndex = range.upperBound
+                let headerText = String(data: accumulated[..<range.lowerBound], encoding: .utf8) ?? ""
+                for line in headerText.components(separatedBy: "\r\n") {
+                    if line.lowercased().hasPrefix("content-length:") {
+                        let val = line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)
+                        expectedBodyLength = Int(val) ?? 0
+                    }
+                }
+            }
+
+            if let endIdx = headerEndIndex {
+                let currentBodyLen = accumulated.count - endIdx
+                if currentBodyLen >= expectedBodyLength {
+                    break
+                }
+            }
+            if accumulated.count > 2_000_000 { break }
+        }
+
+        guard let endIdx = headerEndIndex else {
+            return (String(decoding: accumulated, as: UTF8.self), Data())
+        }
+        let headerStr = String(data: accumulated[..<endIdx], encoding: .utf8) ?? ""
+        let bodyData = accumulated[endIdx...]
+        return (headerStr, Data(bodyData))
+    }
+
     private func handleClient(_ clientSocket: Int32) {
         defer { close(clientSocket) }
-        var buffer = [UInt8](repeating: 0, count: 8192)
-        let bytesRead = read(clientSocket, &buffer, buffer.count)
-        guard bytesRead > 0 else { return }
+        guard let (headerString, bodyData) = readFullHTTPRequest(clientSocket) else { return }
 
-        let requestString = String(decoding: buffer[0..<bytesRead], as: UTF8.self)
-        guard let firstLine = requestString.components(separatedBy: "\r\n").first else { return }
+        guard let firstLine = headerString.components(separatedBy: "\r\n").first else { return }
         let parts = firstLine.components(separatedBy: " ")
         guard parts.count >= 2 else { return }
 
@@ -104,17 +166,34 @@ class MiniStaticServer {
             return
         }
 
-        // 1. HealthKit Webhook Endpoint: POST /api/healthkit-sync
-        if path == "api/healthkit-sync" && method == "POST" {
-            let components = requestString.components(separatedBy: "\r\n\r\n")
-            if components.count > 1, let bodyData = components[1].data(using: .utf8) {
-                if let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onSyncPayload?(json)
-                    }
+        // 1. Unified HealthKit & Mobile Continuity Webhook: POST /api/healthkit-sync | /api/mobile-sync
+        if (path == "api/healthkit-sync" || path == "api/mobile-sync") && method == "POST" {
+            if !bodyData.isEmpty,
+               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSyncPayload?(json)
                 }
             }
-            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"synced\",\"source\":\"Apple HealthKit Live Webhook\"}"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"synced\",\"source\":\"Apple Continuity Bridge\"}"
+            _ = res.utf8CString.withUnsafeBufferPointer {
+                write(clientSocket, $0.baseAddress, $0.count - 1)
+            }
+            return
+        }
+
+        // 1b. Pairing Discovery Info: GET /api/pairing-info
+        if path == "api/pairing-info" {
+            let tele = AppDelegate.gatherDeviceTelemetry()
+            let pairing: [String: Any] = [
+                "host": tele["computerName"] ?? "APEX Mac",
+                "localIP": tele["localIP"] ?? "127.0.0.1",
+                "port": port,
+                "bonjourService": "_apexos._tcp",
+                "status": "ready"
+            ]
+            let jsonData = (try? JSONSerialization.data(withJSONObject: pairing)) ?? Data()
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(jsonString)"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
@@ -256,6 +335,8 @@ class MiniStaticServer {
 
     func stop() {
         isRunning = false
+        netService?.stop()
+        netService = nil
         if serverSocket >= 0 {
             close(serverSocket)
             serverSocket = -1

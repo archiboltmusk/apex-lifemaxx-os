@@ -183,22 +183,67 @@ export default function App() {
     }
   };
 
-  // Global Real-Time Listener for HealthKit Packets from Swift Native Server
+  // Global Real-Time Listener for iPhone Continuity & HealthKit Packets from Swift Native Server
   useEffect(() => {
     const handleGlobalHealthKitPacket = (e) => {
       const payload = e.detail;
       if (!payload) return;
       playHealthSyncChime();
       handleAddHealthData({
-        calories: payload.move || payload.calories,
-        exerciseMin: payload.exercise || payload.exerciseMin,
-        standHours: payload.stand || payload.standHours,
+        calories: payload.move ?? payload.calories,
+        exerciseMin: payload.exercise ?? payload.exerciseMin,
+        standHours: payload.stand ?? payload.standHours,
         hrv: payload.hrv,
         rhr: payload.hr || payload.rhr,
         vo2Max: payload.vo2 || payload.vo2Max,
-        source: payload.source || 'Apple Watch Ultra (Real-Time Ingest)',
+        sleepHours: payload.sleepHours,
+        deepSleepHours: payload.deepSleepHours,
+        source: payload.source || 'iPhone · Apple HealthKit Live',
         setAbsolute: payload.setAbsolute || false,
       });
+
+      // Merge iOS Face Scan into Mac localStorage & UI toast
+      if (payload.faceScan) {
+        try {
+          const existing = JSON.parse(localStorage.getItem('apex_facial_scans') || '[]');
+          const syncedScan = {
+            id: payload.faceScan.id || `ios-${Date.now()}`,
+            timestamp: payload.faceScan.date || new Date().toISOString(),
+            canthalTilt: payload.faceScan.canthalTilt,
+            symmetryIndex: `${payload.faceScan.symmetryPercent}%`,
+            midfaceRatio: `${payload.faceScan.midfaceRatio}`,
+            fwhr: `${payload.faceScan.fwhrRatio}`,
+            source: payload.faceScan.depthEngine || 'iPhone Vision',
+          };
+          const deduped = [syncedScan, ...existing.filter((x) => x.id !== syncedScan.id)].slice(0, 20);
+          localStorage.setItem('apex_facial_scans', JSON.stringify(deduped));
+          showToast(`iPhone Face Scan Synced · Symmetry ${syncedScan.symmetryIndex}`);
+        } catch {}
+      }
+
+      // Merge iOS Optical Workout Set
+      if (payload.workoutSet) {
+        try {
+          const sets = JSON.parse(localStorage.getItem('apex_ios_workout_sets') || '[]');
+          const updatedSets = [payload.workoutSet, ...sets.filter((x) => x.id !== payload.workoutSet.id)].slice(0, 30);
+          localStorage.setItem('apex_ios_workout_sets', JSON.stringify(updatedSets));
+          showToast(`iPhone Workout Synced · ${payload.workoutSet.reps} ${payload.workoutSet.exercise}`);
+        } catch {}
+      }
+
+      // Merge iOS Bloodwork OCR Clinical PhenoAge
+      if (payload.phenoAge && payload.phenoAge > 0) {
+        try {
+          const prevLabs = JSON.parse(localStorage.getItem('apex_user_bloodwork') || '{}');
+          localStorage.setItem('apex_user_bloodwork', JSON.stringify({
+            ...prevLabs,
+            phenoAge: payload.phenoAge,
+            source: payload.phenoAgeSource || 'iPhone Bloodwork OCR',
+            updatedAt: new Date().toISOString(),
+          }));
+          showToast(`iPhone Clinical PhenoAge Synced · ${payload.phenoAge} yrs`);
+        } catch {}
+      }
     };
 
     window.addEventListener('appleHealthSync', handleGlobalHealthKitPacket);

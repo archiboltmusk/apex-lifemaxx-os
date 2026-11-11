@@ -27,6 +27,12 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>APEX OS uses Bonjour over local Wi-Fi so your iPhone app discovers and syncs Apple Health vitals automatically.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_apexos._tcp</string>
+    </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>APEX OS requires microphone access to analyze acoustic vocal pitch and thoracic resonance.</string>
     <key>NSCameraUsageDescription</key>

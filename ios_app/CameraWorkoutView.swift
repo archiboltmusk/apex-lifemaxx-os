@@ -11,12 +11,16 @@ public struct WorkoutSetEntry: Codable, Identifiable {
     public let reps: Int
     public let durationSeconds: Int
     public let calories: Double
+    public let peakVelocity: Double?
+    public let velocityLossPercent: Int?
     public let date: Date
 }
 
-// MARK: - Native Apple Vision Optical Pose & Strength Tracker
+// MARK: - Native Apple Vision Optical Coach, VBT Tempo & Live Activity Tracker
 public struct CameraWorkoutView: View {
     @ObservedObject private var health = HealthKitManager.shared
+    @ObservedObject private var activityMgr = WorkoutActivityManager.shared
+    @ObservedObject private var router = ApexNavigationRouter.shared
     @StateObject private var poseController = BodyPoseController()
 
     @State private var selectedExercise: ExerciseMode = .squats
@@ -34,17 +38,23 @@ public struct CameraWorkoutView: View {
     public enum ExerciseMode: String, CaseIterable, Identifiable {
         case squats = "Squats"
         case pushups = "Push-ups"
+        case pullups = "Pull-ups"
+        case ohp = "Overhead Press"
         case curls = "Bicep Curls"
+        case rdl = "Romanian Deadlift"
+        case lunges = "Lunges"
         case jacks = "Jumping Jacks"
 
         public var id: String { rawValue }
 
         var kcalPerRep: Double {
             switch self {
-            case .squats: return 0.65
+            case .squats, .rdl: return 0.72
+            case .pullups, .ohp: return 0.65
+            case .lunges: return 0.60
             case .pushups: return 0.50
-            case .curls: return 0.35
             case .jacks: return 0.45
+            case .curls: return 0.35
             }
         }
 
@@ -62,19 +72,18 @@ public struct CameraWorkoutView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
-                    // 1. HORIZONTAL EXERCISE SELECTOR (Never wraps or cramps)
                     exerciseSelector
 
-                    // 2. LIVE VISION VIEWFINDER OR SESSION STOPWATCH
+                    if activityMgr.isRestTimerRunning {
+                        restCountdownPill
+                    }
+
                     viewfinderHero
 
-                    // 3. REAL-TIME KINEMATICS METRICS (ROM & VELOCITY)
                     kinematicMetricsBar
 
-                    // 4. ACTIVE SET CONTROLS (Save real set to Apple Health)
                     sessionControls
 
-                    // 5. COMPLETED SETS LOG
                     if !workoutHistory.isEmpty {
                         completedSetsSection
                     }
@@ -102,6 +111,12 @@ public struct CameraWorkoutView: View {
             .onReceive(timer) { _ in
                 if isTimerRunning {
                     sessionSeconds += 1
+                    activityMgr.updateSet(
+                        reps: poseController.repCount,
+                        elapsedSeconds: sessionSeconds,
+                        velocity: poseController.concentricVelocity,
+                        velocityDropPercent: poseController.velocityLossPercent
+                    )
                 }
             }
             .onChange(of: selectedExercise) { _, mode in
@@ -109,11 +124,52 @@ public struct CameraWorkoutView: View {
                 sessionSeconds = 0
                 isTimerRunning = false
             }
+            .onChange(of: router.requestedExerciseRaw) { _, raw in
+                guard let name = raw?.lowercased() else { return }
+                if let matched = ExerciseMode.allCases.first(where: { $0.rawValue.lowercased().contains(name) }) {
+                    selectedExercise = matched
+                }
+                router.requestedExerciseRaw = nil
+            }
             .onDisappear {
                 poseController.stop()
                 isTimerRunning = false
             }
         }
+    }
+
+    // MARK: - Dynamic Island Rest Countdown Banner
+    private var restCountdownPill: some View {
+        HStack {
+            HStack(spacing: 10) {
+                Image(systemName: "timer")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(ApexTheme.standCyan)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Recovery Rest Timer")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Lock Screen & Dynamic Island active")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Text(formatDuration(activityMgr.restSecondsRemaining))
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(ApexTheme.standCyan)
+
+            Button {
+                Haptics.tap()
+                activityMgr.stopRestTimer()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .appleCard(padding: 14, cornerRadius: 18)
     }
 
     // MARK: - Horizontal Capsule Exercise Selector
@@ -158,40 +214,40 @@ public struct CameraWorkoutView: View {
                     PoseSkeletonCanvas(joints: poseController.detectedJoints)
                 }
             } else {
-                // Editorial Standby State
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
                     ZStack {
                         Circle()
-                            .fill(ApexTheme.moveCrimson.opacity(0.14))
+                            .fill(ApexTheme.exerciseLime.opacity(0.14))
                             .frame(width: 72, height: 72)
-                        Image(systemName: poseController.cameraAvailable ? "figure.strengthtraining.traditional" : "stopwatch.fill")
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundStyle(ApexTheme.moveCrimson)
+                        Image(systemName: "figure.strengthtraining.traditional")
+                            .font(.system(size: 30, weight: .medium))
+                            .foregroundStyle(ApexTheme.exerciseLime)
                     }
 
                     VStack(spacing: 4) {
-                        Text(poseController.cameraAvailable ? "Optical Pose Coaching" : "Strength Session Ready")
-                            .font(.system(size: 17, weight: .semibold))
+                        Text(selectedExercise.rawValue)
+                            .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white)
                         Text(poseController.cameraAvailable
-                             ? "Position your iPhone upright to count \(selectedExercise.rawValue.lowercased()) automatically via Apple Vision."
-                             : "Front camera available on physical iPhone. Track your set duration & reps cleanly below.")
+                             ? "Tracks joint angles, eccentric tempo, form symmetry, and velocity loss % automatically."
+                             : "Use the stopwatch & rep controls on Simulator, or open on iPhone for live camera pose tracking.")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
                     }
                 }
+                .padding(.vertical, 32)
             }
 
-            // Frosted HUD Overlay
+            // Top HUD Overlay
             VStack {
                 HStack {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(poseController.isCameraRunning ? ApexTheme.accentEmerald : (isTimerRunning ? ApexTheme.accentVolt : .gray))
+                            .fill(poseController.isCameraRunning ? ApexTheme.exerciseLime : .gray)
                             .frame(width: 7, height: 7)
-                        Text(poseController.isCameraRunning ? "Vision Active" : (isTimerRunning ? "Set Active" : "Ready"))
+                        Text(poseController.isCameraRunning ? "Optical Pose Active" : "Ready")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.white)
                     }
@@ -203,7 +259,7 @@ public struct CameraWorkoutView: View {
                     Spacer()
 
                     Text(formatDuration(sessionSeconds))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
@@ -211,198 +267,202 @@ public struct CameraWorkoutView: View {
                         .background(.ultraThinMaterial)
                         .clipShape(Capsule())
                 }
-                .padding(14)
 
                 Spacer()
 
-                // Prominent Rounded Rep Counter
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("REPS")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.secondary)
-                        Text("\(poseController.repCount)")
-                            .font(.system(size: 58, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(ApexTheme.accentVolt)
-                            .contentTransition(.numericText())
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    Spacer()
-
-                    // Manual Adjust +/- for weighted sets
-                    HStack(spacing: 8) {
-                        Button {
-                            Haptics.tap()
-                            poseController.adjustReps(-1)
-                        } label: {
-                            Image(systemName: "minus")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 38, height: 38)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
+                VStack(spacing: 6) {
+                    if let faultCue = poseController.formFaultCue {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                            Text(faultCue)
+                                .font(.system(size: 12, weight: .semibold))
                         }
-
-                        Button {
-                            Haptics.tap(.medium)
-                            if !isTimerRunning { isTimerRunning = true }
-                            poseController.adjustReps(1)
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.black)
-                                .frame(width: 38, height: 38)
-                                .background(ApexTheme.accentVolt)
-                                .clipShape(Circle())
-                        }
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.accentAmber)
+                        .clipShape(Capsule())
                     }
-                }
-                .padding(.horizontal, 14)
 
-                // Guidance Capsule
-                HStack(spacing: 8) {
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(ApexTheme.standCyan)
                     Text(poseController.guidanceCue)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Spacer()
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(14)
             }
+            .padding(14)
         }
-        .frame(height: 350)
+        .frame(height: 330)
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
         )
     }
 
-    // MARK: - Kinematics Bar (ROM + Velocity)
+    // MARK: - Live Kinematics & Tempo Readout Bar
     private var kinematicMetricsBar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Joint Angle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("\(poseController.jointAngle)°")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .appleCard(padding: 14, cornerRadius: 18)
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("REPS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("\(poseController.repCount)")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(ApexTheme.accentVolt)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appleCard(padding: 14, cornerRadius: 18)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Peak Velocity")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(String(format: "%.2f m/s", poseController.concentricVelocity))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(ApexTheme.standCyan)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .appleCard(padding: 14, cornerRadius: 18)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("VELOCITY")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(String(format: "%.2f", poseController.concentricVelocity))
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                        Text("m/s")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appleCard(padding: 14, cornerRadius: 18)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Est. Energy")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("\(Int((Double(poseController.repCount) * selectedExercise.kcalPerRep).rounded())) kcal")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(ApexTheme.moveCrimson)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("VBT DROP")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("-\(poseController.velocityLossPercent)%")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(poseController.velocityLossPercent >= 20 ? ApexTheme.accentAmber : ApexTheme.standCyan)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appleCard(padding: 14, cornerRadius: 18)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .appleCard(padding: 14, cornerRadius: 18)
+
+            // Secondary Tempo & Joint Angle Pill Row
+            HStack {
+                Label("Joint \(poseController.jointAngle)°", systemImage: "angle")
+                Spacer()
+                Label(String(format: "Eccentric %.1fs", poseController.lastEccentricSeconds), systemImage: "arrow.down.circle")
+                Spacer()
+                Label(String(format: "Peak %.2f m/s", poseController.peakVelocity), systemImage: "bolt")
+            }
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .appleCard(padding: 12, cornerRadius: 14)
         }
     }
 
-    // MARK: - Camera & Save Set Action Bar
+    // MARK: - Active Set & Logging Controls
     private var sessionControls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
+            if let banner = savedBanner {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(ApexTheme.accentEmerald)
+                    Text(banner)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                }
+                .appleCard(padding: 12, cornerRadius: 14)
+            }
+
             HStack(spacing: 12) {
-                if poseController.cameraAvailable {
-                    Button {
-                        Haptics.tap()
+                Button {
+                    Haptics.tap(.medium)
+                    if poseController.cameraAvailable {
                         if poseController.isCameraRunning {
                             poseController.stop()
+                            isTimerRunning = false
                         } else {
+                            poseController.setExerciseMode(selectedExercise)
                             poseController.start()
                             isTimerRunning = true
+                            activityMgr.startSet(exercise: selectedExercise.rawValue)
                         }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: poseController.isCameraRunning ? "video.slash.fill" : "video.fill")
-                            Text(poseController.isCameraRunning ? "Stop Camera" : "Start Camera")
-                        }
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(ApexTheme.elevatedSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                } else {
-                    Button {
-                        Haptics.tap()
+                    } else {
                         isTimerRunning.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: isTimerRunning ? "pause.fill" : "play.fill")
-                            Text(isTimerRunning ? "Pause Set" : "Start Set Timer")
+                        if isTimerRunning && sessionSeconds == 0 {
+                            activityMgr.startSet(exercise: selectedExercise.rawValue)
                         }
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(ApexTheme.elevatedSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
-                }
-
-                Button {
-                    saveWorkoutToHealth()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: isSavingWorkout ? "hourglass" : "checkmark.circle.fill")
-                        Text(isSavingWorkout ? "Saving..." : "Log to Health")
+                    let isActive = poseController.isCameraRunning || isTimerRunning
+                    HStack(spacing: 8) {
+                        Image(systemName: isActive ? "pause.fill" : (poseController.cameraAvailable ? "video.fill" : "play.fill"))
+                        Text(isActive ? "Pause Set" : (poseController.cameraAvailable ? "Start Camera Set" : "Start Set Timer"))
                     }
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(poseController.repCount > 0 || sessionSeconds > 0 ? ApexTheme.accentVolt : ApexTheme.accentVolt.opacity(0.45))
+                    .background(isActive ? ApexTheme.accentAmber : ApexTheme.accentVolt)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                .disabled(isSavingWorkout || (poseController.repCount == 0 && sessionSeconds == 0))
+
+                HStack(spacing: 10) {
+                    Button {
+                        Haptics.tap()
+                        poseController.adjustReps(-1)
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.system(size: 15, weight: .bold))
+                            .frame(width: 44, height: 48)
+                            .background(ApexTheme.elevatedSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+
+                    Button {
+                        Haptics.tap(.medium)
+                        poseController.adjustReps(1)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 15, weight: .bold))
+                            .frame(width: 44, height: 48)
+                            .background(ApexTheme.elevatedSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+                .foregroundStyle(.white)
             }
 
-            if let banner = savedBanner {
+            Button {
+                saveWorkoutToHealth()
+            } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(ApexTheme.accentEmerald)
-                    Text(banner)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white)
+                    if isSavingWorkout {
+                        ProgressView().tint(.black)
+                    } else {
+                        Image(systemName: "heart.fill")
+                            .foregroundStyle(ApexTheme.moveCrimson)
+                        Text("Complete Set & Log to Health")
+                    }
                 }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(ApexTheme.accentEmerald.opacity(0.14))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.vertical, 14)
+                .background(ApexTheme.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                )
             }
+            .disabled(isSavingWorkout || (poseController.repCount == 0 && sessionSeconds < 5))
+            .opacity((poseController.repCount == 0 && sessionSeconds < 5) ? 0.5 : 1.0)
         }
     }
 
@@ -420,14 +480,15 @@ public struct CameraWorkoutView: View {
                             Text("\(entry.exercise) · \(entry.reps) reps")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
-                            Text("\(formatDuration(entry.durationSeconds)) · \(Int(entry.calories.rounded())) kcal · \(entry.date.formatted(date: .omitted, time: .shortened))")
+                            let vbtText = (entry.velocityLossPercent ?? 0) > 0 ? " · -\(entry.velocityLossPercent!)% VBT" : ""
+                            Text("\(formatDuration(entry.durationSeconds)) · \(String(format: "%.1f kcal", entry.calories))\(vbtText)")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(ApexTheme.moveCrimson)
+                        Text(entry.date.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
                     }
                     .appleCard(padding: 14, cornerRadius: 16)
                 }
@@ -435,58 +496,74 @@ public struct CameraWorkoutView: View {
         }
     }
 
+    // MARK: - Commit Set to Apple HealthKit + Start Rest Timer + Sync to Mac
     private func saveWorkoutToHealth() {
         let reps = max(1, poseController.repCount)
-        let durationSec = max(15, sessionSeconds)
-        let durationMin = max(0.5, Double(durationSec) / 60.0)
-        let kcal = max(5.0, Double(reps) * selectedExercise.kcalPerRep + durationMin * 3.5)
+        let secs = max(10, sessionSeconds)
+        let kcal = Double(reps) * selectedExercise.kcalPerRep + Double(secs) * 0.08
+        let peakVel = poseController.peakVelocity
+        let velDrop = poseController.velocityLossPercent
 
-        isSavingWorkout = true
         Haptics.tap(.medium)
+        isSavingWorkout = true
+        poseController.stop()
+        isTimerRunning = false
 
         Task {
-            let syncedHealth = await health.logWorkout(
+            let committed = await health.logWorkout(
                 calories: kcal,
-                durationMinutes: durationMin,
+                durationMinutes: Double(secs) / 60.0,
                 workoutType: selectedExercise.workoutType
             )
 
-            let record = WorkoutSetEntry(
+            let entry = WorkoutSetEntry(
                 id: UUID(),
                 exercise: selectedExercise.rawValue,
                 reps: reps,
-                durationSeconds: durationSec,
+                durationSeconds: secs,
                 calories: kcal,
+                peakVelocity: peakVel,
+                velocityLossPercent: velDrop,
                 date: Date()
             )
+            workoutHistory.insert(entry, at: 0)
+            WorkoutSetStore.save(workoutHistory)
 
-            await MainActor.run {
-                workoutHistory.insert(record, at: 0)
-                WorkoutSetStore.save(workoutHistory)
-                poseController.reset()
-                sessionSeconds = 0
-                isTimerRunning = false
-                isSavingWorkout = false
-                savedBanner = syncedHealth
-                    ? "Saved \(reps) \(selectedExercise.rawValue) (+\(Int(kcal)) kcal) to Apple Health"
-                    : "Set logged (+\(Int(kcal)) kcal)"
-                Haptics.success()
+            health.syncEventToMac(extraPayload: [
+                "workoutSet": [
+                    "id": entry.id.uuidString,
+                    "exercise": entry.exercise,
+                    "reps": entry.reps,
+                    "durationSeconds": entry.durationSeconds,
+                    "calories": entry.calories,
+                    "peakVelocity": peakVel,
+                    "velocityLossPercent": velDrop,
+                    "date": ISO8601DateFormatter().string(from: entry.date)
+                ]
+            ])
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-                    savedBanner = nil
-                }
+            activityMgr.startRestCountdown(seconds: 90, reps: reps, elapsedSeconds: secs)
+
+            isSavingWorkout = false
+            savedBanner = committed
+                ? "Logged \(reps) \(selectedExercise.rawValue) · 90s rest started"
+                : "Saved \(reps) reps locally · 90s rest started"
+            poseController.reset()
+            sessionSeconds = 0
+            Haptics.success()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                savedBanner = nil
             }
         }
     }
 
     private func formatDuration(_ sec: Int) -> String {
-        let m = sec / 60
-        let s = sec % 60
-        return String(format: "%d:%02d", m, s)
+        String(format: "%d:%02d", sec / 60, sec % 60)
     }
 }
 
-// MARK: - Skeleton Vector Overlay Canvas
+// MARK: - SwiftUI Optical Skeleton Overlay Canvas
 private struct PoseSkeletonCanvas: View {
     let joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
 
@@ -507,31 +584,34 @@ private struct PoseSkeletonCanvas: View {
             }
 
             for (a, b) in bonePairs {
-                if let ptA = joints[a], let ptB = joints[b] {
+                if let p1 = joints[a], let p2 = joints[b] {
                     var path = Path()
-                    path.move(to: map(ptA))
-                    path.addLine(to: map(ptB))
-                    ctx.stroke(path, with: .color(ApexTheme.standCyan.opacity(0.85)), lineWidth: 3)
+                    path.move(to: map(p1))
+                    path.addLine(to: map(p2))
+                    ctx.stroke(path, with: .color(ApexTheme.standCyan.opacity(0.85)), lineWidth: 2.5)
                 }
             }
 
-            for pt in joints.values {
+            for (_, pt) in joints {
                 let p = map(pt)
-                let rect = CGRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)
-                ctx.fill(Path(ellipseIn: rect), with: .color(ApexTheme.accentVolt))
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(ApexTheme.accentVolt))
             }
         }
         .allowsHitTesting(false)
     }
 }
 
-// MARK: - Live AVFoundation Camera + Apple Vision Body Pose Engine
+// MARK: - Live AVFoundation Camera + Apple Vision Body Pose & VBT Engine
 private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var isCameraRunning: Bool = false
     @Published var repCount: Int = 0
     @Published var jointAngle: Int = 175
     @Published var concentricVelocity: Double = 0.0
-    @Published var guidanceCue: String = "Stand in frame to track form"
+    @Published var peakVelocity: Double = 0.0
+    @Published var velocityLossPercent: Int = 0
+    @Published var lastEccentricSeconds: Double = 0.0
+    @Published var guidanceCue: String = "Position full body in frame"
+    @Published var formFaultCue: String? = nil
     @Published var detectedJoints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
 
     var voiceCoachingEnabled: Bool = true
@@ -542,7 +622,9 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     private let synthesizer = AVSpeechSynthesizer()
     private var exerciseMode: CameraWorkoutView.ExerciseMode = .squats
     private var repPhase: String = "UP"
-    private var phaseStartTime: Date = Date()
+    private var eccentricStartTime: Date = Date()
+    private var concentricStartTime: Date = Date()
+    private var baselineRepPeakVelocity: Double = 0.0
     private var isConfigured = false
 
     override init() {
@@ -564,6 +646,11 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
         repCount = 0
         jointAngle = 175
         concentricVelocity = 0.0
+        peakVelocity = 0.0
+        velocityLossPercent = 0
+        baselineRepPeakVelocity = 0.0
+        lastEccentricSeconds = 0.0
+        formFaultCue = nil
         repPhase = "UP"
     }
 
@@ -607,7 +694,7 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
             self.session.startRunning()
             DispatchQueue.main.async {
                 self.isCameraRunning = true
-                self.guidanceCue = "Tracking skeleton · Start set"
+                self.guidanceCue = "Tracking skeleton · Begin rep"
             }
         }
     }
@@ -639,7 +726,6 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
 
         var mapped: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
         for (name, pt) in recognized where pt.confidence > 0.35 {
-            // Vision origin is bottom-left; SwiftUI Canvas origin is top-left
             mapped[name] = CGPoint(x: pt.location.x, y: 1.0 - pt.location.y)
         }
 
@@ -650,27 +736,47 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     }
 
     private func evaluateKinematics(_ joints: [VNHumanBodyPoseObservation.JointName: CGPoint]) {
+        // Check horizontal shoulder balance for bilateral form warning
+        if let ls = joints[.leftShoulder], let rs = joints[.rightShoulder] {
+            let shoulderTilt = abs(ls.y - rs.y)
+            formFaultCue = shoulderTilt > 0.085 ? "Level Left/Right Shoulders" : nil
+        }
+
         switch exerciseMode {
-        case .squats:
+        case .squats, .lunges:
             let hip = joints[.leftHip] ?? joints[.rightHip]
             let knee = joints[.leftKnee] ?? joints[.rightKnee]
             let ankle = joints[.leftAnkle] ?? joints[.rightAnkle]
             if let h = hip, let k = knee, let a = ankle {
                 let angle = Self.angleBetween(p1: h, vertex: k, p2: a)
                 jointAngle = angle
-                processCycle(angle: angle, downThreshold: 100, upThreshold: 155, cueDown: "Depth achieved — drive up")
+                processCycle(angle: angle, downThreshold: 102, upThreshold: 156, cueDown: "Parallel depth hit — drive up")
             }
 
-        case .pushups, .curls:
+        case .rdl:
+            let shoulder = joints[.leftShoulder] ?? joints[.rightShoulder]
+            let hip = joints[.leftHip] ?? joints[.rightHip]
+            let knee = joints[.leftKnee] ?? joints[.rightKnee]
+            if let s = shoulder, let h = hip, let k = knee {
+                let angle = Self.angleBetween(p1: s, vertex: h, p2: k)
+                jointAngle = angle
+                processCycle(angle: angle, downThreshold: 105, upThreshold: 162, cueDown: "Hip hinge loaded — lock glutes")
+            }
+
+        case .pushups, .curls, .pullups, .ohp:
             let shoulder = joints[.leftShoulder] ?? joints[.rightShoulder]
             let elbow = joints[.leftElbow] ?? joints[.rightElbow]
             let wrist = joints[.leftWrist] ?? joints[.rightWrist]
             if let s = shoulder, let e = elbow, let w = wrist {
                 let angle = Self.angleBetween(p1: s, vertex: e, p2: w)
                 jointAngle = angle
-                let down = exerciseMode == .pushups ? 95 : 65
-                let up = 150
-                processCycle(angle: angle, downThreshold: down, upThreshold: up, cueDown: "Good flexion — extend cleanly")
+                let isInvertedPhase = (exerciseMode == .pullups || exerciseMode == .ohp)
+                if isInvertedPhase {
+                    processCycle(angle: angle, downThreshold: 80, upThreshold: 155, cueDown: "Strong pull/lockout — lower slow")
+                } else {
+                    let down = exerciseMode == .pushups ? 95 : 65
+                    processCycle(angle: angle, downThreshold: down, upThreshold: 150, cueDown: "Good range — extend smoothly")
+                }
             }
 
         case .jacks:
@@ -679,8 +785,8 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
                 jointAngle = wristsHigh ? 175 : 25
                 if wristsHigh && repPhase == "UP" {
                     repPhase = "DOWN"
-                    phaseStartTime = Date()
-                    guidanceCue = "Hands up — return cleanly"
+                    concentricStartTime = Date()
+                    guidanceCue = "Hands overhead — snap down"
                 } else if !wristsHigh && repPhase == "DOWN" {
                     completeRep()
                 }
@@ -690,24 +796,47 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
 
     private func processCycle(angle: Int, downThreshold: Int, upThreshold: Int, cueDown: String) {
         if angle <= downThreshold && repPhase == "UP" {
+            let eccentric = Date().timeIntervalSince(eccentricStartTime)
+            lastEccentricSeconds = min(6.0, max(0.3, (eccentric * 10).rounded() / 10))
             repPhase = "DOWN"
-            phaseStartTime = Date()
+            concentricStartTime = Date()
             guidanceCue = cueDown
         } else if angle >= upThreshold && repPhase == "DOWN" {
             completeRep()
+            eccentricStartTime = Date()
         }
     }
 
     private func completeRep() {
         repPhase = "UP"
-        let dt = max(0.35, Date().timeIntervalSince(phaseStartTime))
-        concentricVelocity = min(1.85, (0.55 / dt * 100).rounded() / 100)
+        let dt = max(0.35, Date().timeIntervalSince(concentricStartTime))
+        let vel = min(1.85, (0.55 / dt * 100).rounded() / 100)
+        concentricVelocity = vel
+        if vel > peakVelocity {
+            peakVelocity = vel
+        }
+        if baselineRepPeakVelocity == 0 {
+            baselineRepPeakVelocity = vel
+        } else if vel > baselineRepPeakVelocity && repCount <= 2 {
+            baselineRepPeakVelocity = vel
+        }
+
+        if baselineRepPeakVelocity > 0.1 {
+            let loss = max(0, Int(((baselineRepPeakVelocity - vel) / baselineRepPeakVelocity * 100.0).rounded()))
+            velocityLossPercent = min(65, loss)
+        }
+
         repCount += 1
-        guidanceCue = "Rep \(repCount) locked · \(String(format: "%.2f m/s", concentricVelocity))"
+        if velocityLossPercent >= 20 {
+            guidanceCue = "Rep \(repCount) · Fatigue -\(velocityLossPercent)% (Optimal Stop)"
+        } else {
+            guidanceCue = "Rep \(repCount) · \(String(format: "%.2f m/s", vel))"
+        }
         Haptics.tap(.medium)
 
         if voiceCoachingEnabled {
-            let utterance = AVSpeechUtterance(string: "\(repCount)")
+            let spoken = velocityLossPercent >= 20 ? "\(repCount), velocity drop" : "\(repCount)"
+            let utterance = AVSpeechUtterance(string: spoken)
             utterance.rate = 0.54
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
             synthesizer.speak(utterance)
@@ -756,7 +885,7 @@ private enum WorkoutSetStore {
     }
 
     static func save(_ entries: [WorkoutSetEntry]) {
-        if let encoded = try? JSONEncoder().encode(Array(entries.prefix(20))) {
+        if let encoded = try? JSONEncoder().encode(Array(entries.prefix(25))) {
             UserDefaults.standard.set(encoded, forKey: key)
         }
     }

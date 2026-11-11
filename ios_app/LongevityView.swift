@@ -1,9 +1,10 @@
 import SwiftUI
 import Combine
 
-// MARK: - Longevity, Circadian Intelligence & Companion Sync
+// MARK: - Longevity, Bloodwork PhenoAge, Circadian Intelligence & Bonjour Mac Continuity
 public struct LongevityView: View {
     @ObservedObject private var health = HealthKitManager.shared
+    @ObservedObject private var router = ApexNavigationRouter.shared
 
     // Interactive Dead Hang Timer State
     @AppStorage("apex_best_deadhang_sec") private var bestDeadHangSeconds: Int = 0
@@ -11,8 +12,9 @@ public struct LongevityView: View {
     @State private var isDeadHangRunning: Bool = false
 
     // Circadian Calibration
-    @AppStorage("apex_wake_minutes") private var wakeMinutesFromMidnight: Int = 390 // 6:30 AM default
+    @AppStorage("apex_wake_minutes") private var wakeMinutesFromMidnight: Int = 390
     @State private var showCompanionConfig: Bool = false
+    @State private var showBloodworkOCR: Bool = false
     @State private var syncJustCompleted: Bool = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -23,16 +25,14 @@ public struct LongevityView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
-                    // 1. BIOLOGICAL FITNESS AGE CARD
                     biologicalAgeCard
 
-                    // 2. CENTENARIAN DEAD HANG BENCHMARK
+                    bloodworkOCRCard
+
                     deadHangCard
 
-                    // 3. CIRCADIAN PEAK & CAFFEINE CUTOFF
                     circadianCard
 
-                    // 4. MAC COMPANION SYNC
                     companionSyncCard
                 }
                 .padding(.horizontal, 16)
@@ -47,21 +47,33 @@ public struct LongevityView: View {
                     deadHangSeconds += 1
                     if deadHangSeconds > bestDeadHangSeconds {
                         bestDeadHangSeconds = deadHangSeconds
+                        health.persistWidgetSnapshot()
                     }
                     if deadHangSeconds == 120 {
                         Haptics.success()
+                        health.syncEventToMac(extraPayload: ["deadHangBest": bestDeadHangSeconds])
                     }
+                }
+            }
+            .onChange(of: router.shouldAutoStartDeadHang) { _, start in
+                if start {
+                    deadHangSeconds = 0
+                    isDeadHangRunning = true
+                    router.shouldAutoStartDeadHang = false
                 }
             }
             .sheet(isPresented: $showCompanionConfig) {
                 CompanionSettingsSheet(health: health)
-                    .presentationDetents([.medium])
+                    .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showBloodworkOCR) {
+                BloodworkOCRView()
             }
         }
     }
 
-    // MARK: - 1. Biological Age Card
+    // MARK: - 1. Dual Biological Fitness Age & Clinical PhenoAge Card
     private var biologicalAgeCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -69,7 +81,7 @@ public struct LongevityView: View {
                     Text("Biological Fitness Age")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
-                    Text("Derived from Resting HR, HRV, VO₂ Max & Sleep")
+                    Text("Wearable Vitals + Epigenetic Clinical Panel")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
@@ -81,25 +93,37 @@ public struct LongevityView: View {
 
             HStack(alignment: .lastTextBaseline, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("BIOLOGICAL")
+                    Text("FITNESS AGE")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                     if let bio = health.biologicalAge {
                         Text(String(format: "%.1f yrs", bio))
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(ApexTheme.accentEmerald)
                     } else {
                         Text("—")
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let clinical = health.clinicalPhenoAge {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("LAB PHENOAGE")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.1f yrs", clinical))
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(ApexTheme.standCyan)
                     }
                 }
 
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text("Chronological Age")
+                    Text("Chronological")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                     HStack(spacing: 10) {
@@ -148,7 +172,43 @@ public struct LongevityView: View {
         .appleCard(padding: 18, cornerRadius: 22)
     }
 
-    // MARK: - 2. Centenarian Dead Hang Benchmark
+    // MARK: - 2. Native VisionKit Lab Bloodwork OCR Trigger
+    private var bloodworkOCRCard: some View {
+        Button {
+            Haptics.tap()
+            showBloodworkOCR = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(ApexTheme.moveCrimson.opacity(0.16))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "drop.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(ApexTheme.moveCrimson)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Bloodwork Lab OCR")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text(health.clinicalPhenoAge != nil
+                         ? "Clinical PhenoAge calibrated · Tap to rescan panel"
+                         : "Scan paper lab results or PDFs for Albumin, hs-CRP & Glucose")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .appleCard(padding: 16, cornerRadius: 20)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 3. Centenarian Dead Hang Benchmark
     private var deadHangCard: some View {
         let targetSeconds = 120.0
         let progress = min(1.0, Double(deadHangSeconds) / targetSeconds)
@@ -199,7 +259,11 @@ public struct LongevityView: View {
                     HStack(spacing: 10) {
                         Button {
                             Haptics.tap(.medium)
+                            let wasRunning = isDeadHangRunning
                             isDeadHangRunning.toggle()
+                            if wasRunning {
+                                health.syncEventToMac(extraPayload: ["deadHangBest": bestDeadHangSeconds])
+                            }
                         } label: {
                             Text(isDeadHangRunning ? "Pause" : (deadHangSeconds > 0 ? "Resume" : "Start"))
                                 .font(.system(size: 14, weight: .semibold))
@@ -233,7 +297,7 @@ public struct LongevityView: View {
         .appleCard(padding: 18, cornerRadius: 22)
     }
 
-    // MARK: - 3. Circadian Window Card
+    // MARK: - 4. Circadian Window Card
     private var circadianCard: some View {
         let wakeHours = Double(wakeMinutesFromMidnight) / 60.0
         let peakStart = formatHourOfDay(wakeHours + 9.5)
@@ -305,7 +369,7 @@ public struct LongevityView: View {
         }
     }
 
-    // MARK: - 4. Mac Companion Sync
+    // MARK: - 5. Bonjour Zero-Config Mac Companion Sync
     private var companionSyncCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -317,14 +381,19 @@ public struct LongevityView: View {
                         Text("APEX Mac Companion")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
-                        Text(health.isMacReachable ? "Connected · Synced automatically" : "Stream HealthKit vitals to your Mac")
+                        Text(health.isMacReachable
+                             ? "Connected · \(health.macDeviceName)"
+                             : (health.discoveredMacs.isEmpty
+                                ? "Stream vitals, workouts & scans over Wi-Fi"
+                                : "Found \(health.discoveredMacs[0].name) via Bonjour"))
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(health.isMacReachable ? ApexTheme.accentEmerald : .secondary)
                     }
                 }
                 Spacer()
                 Button {
                     Haptics.tap()
+                    health.startBonjourDiscovery()
                     showCompanionConfig = true
                 } label: {
                     Image(systemName: "gearshape.fill")
@@ -347,7 +416,7 @@ public struct LongevityView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: syncJustCompleted ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
-                    Text(syncJustCompleted ? "Telemetry Sent to Mac" : "Sync Vitals Now")
+                    Text(syncJustCompleted ? "Telemetry Sent to Mac" : "Sync Vitals & Scans Now")
                 }
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
@@ -381,6 +450,35 @@ private struct CompanionSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !health.discoveredMacs.isEmpty {
+                    Section("Discovered on Local Wi-Fi (Bonjour)") {
+                        ForEach(health.discoveredMacs) { mac in
+                            Button {
+                                Haptics.tap(.medium)
+                                health.resolveAndConnect(endpoint: mac)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "desktopcomputer")
+                                        .foregroundStyle(ApexTheme.standCyan)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mac.name)
+                                            .foregroundStyle(.white)
+                                        if let host = mac.host, let port = mac.port {
+                                            Text("\(host):\(port)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Text("Pair")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(ApexTheme.accentVolt)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section("Desktop Connection") {
                     Toggle("Auto-Sync Biometrics", isOn: $health.isSyncingToMac)
 
@@ -404,7 +502,11 @@ private struct CompanionSettingsSheet: View {
                 }
 
                 Section {
-                    Button("Send Sync Packet") {
+                    Button("Scan Network for Mac") {
+                        Haptics.tap()
+                        health.startBonjourDiscovery()
+                    }
+                    Button("Send Full Telemetry Packet") {
                         Haptics.tap()
                         health.broadcastToMac()
                         dismiss()
