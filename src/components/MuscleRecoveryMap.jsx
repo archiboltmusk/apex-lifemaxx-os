@@ -163,10 +163,13 @@ export default function MuscleRecoveryMap() {
   const [muscleData, setMuscleData] = useState(() => {
     try {
       const saved = localStorage.getItem('apex_muscle_volume_data');
-      return saved ? JSON.parse(saved) : DEFAULT_MUSCLE_DATA;
-    } catch {
-      return DEFAULT_MUSCLE_DATA;
-    }
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    const zeroed = {};
+    Object.entries(DEFAULT_MUSCLE_DATA).forEach(([k, v]) => {
+      zeroed[k] = { ...v, setsWeek: 0, recovery: null, status: 'AWAITING LOG' };
+    });
+    return zeroed;
   });
 
   const [selectedMuscle, setSelectedMuscle] = useState('upper_pecs');
@@ -177,9 +180,15 @@ export default function MuscleRecoveryMap() {
     setMuscleData((prev) => {
       const curr = prev[selectedMuscle];
       const newSets = Math.max(0, curr.setsWeek + delta);
+      const computedRec = newSets > 0 ? Math.max(40, Math.round(100 - (newSets / curr.mrv) * 55)) : null;
       const updated = {
         ...prev,
-        [selectedMuscle]: { ...curr, setsWeek: newSets },
+        [selectedMuscle]: {
+          ...curr,
+          setsWeek: newSets,
+          recovery: computedRec,
+          status: newSets === 0 ? 'AWAITING LOG' : newSets <= curr.mav ? 'OPTIMAL STIMULUS' : 'FATIGUED / OVERLOAD',
+        },
       };
       try {
         localStorage.setItem('apex_muscle_volume_data', JSON.stringify(updated));
@@ -204,6 +213,12 @@ export default function MuscleRecoveryMap() {
 
   const volumeStatus = getVolumeStatus(active.setsWeek, active.mev, active.mav, active.mrv);
 
+  const totalSetsLogged = Object.values(muscleData).reduce((sum, m) => sum + (m.setsWeek || 0), 0);
+  const systemicRecoveryText =
+    totalSetsLogged > 0
+      ? `${totalSetsLogged} WEEKLY SETS LOGGED · ACTIVE HYPERTROPHY`
+      : '0 SETS LOGGED · TAP MUSCLE TO RECORD VOLUME';
+
   return (
     <div className="space-y-6">
       {/* MUSCLE HEATMAP HERO */}
@@ -218,7 +233,7 @@ export default function MuscleRecoveryMap() {
             </h3>
           </div>
           <span className="text-xs font-mono px-3 py-1 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-bold">
-            92% WHOLE-BODY SYSTEMIC RECOVERY
+            {systemicRecoveryText}
           </span>
         </div>
 
@@ -247,7 +262,7 @@ export default function MuscleRecoveryMap() {
                     className="text-[9px] font-black px-1.5 py-0.5 rounded"
                     style={{ backgroundColor: `${m.color}20`, color: m.color }}
                   >
-                    {m.recovery}%
+                    {m.recovery != null ? `${m.recovery}%` : '—'}
                   </span>
                 </div>
                 <div className="text-[10px] text-[#8A8A8A]">

@@ -20,9 +20,9 @@ export default function OfflineModelsMonitor() {
       name: 'BlazePose Heavy 3D Kinematics',
       filename: 'pose_landmarker_heavy.task',
       size: '29.2 MB',
-      purpose: 'Real-Time Squat Depth (<90°), Push-Up & Rep Tracking',
-      framework: 'MediaPipe / TFLite (ANE Optimized)',
-      status: 'LOADED // ACTIVE',
+      purpose: 'High-Accuracy 3D Skeletal Pose Asset (Bundled)',
+      framework: 'MediaPipe / TFLite Asset',
+      status: 'BUNDLED ON DISK',
       icon: Activity,
       color: '#FA114F',
     },
@@ -30,9 +30,9 @@ export default function OfflineModelsMonitor() {
       name: 'MobileNetV4 Food & Macro Vision',
       filename: 'food_macro_vision.onnx',
       size: '37.0 MB',
-      purpose: 'Photogrammetric Meal & Macronutrient Recognition',
-      framework: 'ONNX Runtime / Metal Performance Shaders',
-      status: 'LOADED // ACTIVE',
+      purpose: 'On-Disk Visual Food Weight Package (Bundled)',
+      framework: 'ONNX Weights Asset',
+      status: 'BUNDLED ON DISK',
       icon: Camera,
       color: '#E5FE40',
     },
@@ -40,9 +40,9 @@ export default function OfflineModelsMonitor() {
       name: 'Vocal Whisper Acoustic Transformer',
       filename: 'vocal_whisper_encoder.onnx',
       size: '31.0 MB',
-      purpose: 'Pitch (F0), Formant Resonances & Thoracic Acoustics',
-      framework: 'ONNX Audio DSP / Apple Neural Engine',
-      status: 'LOADED // ACTIVE',
+      purpose: 'Acoustic Encoder Asset (Live Mic Uses Web Audio FFT)',
+      framework: 'ONNX Weights Asset',
+      status: 'BUNDLED ON DISK',
       icon: Mic,
       color: '#00F0FF',
     },
@@ -50,9 +50,9 @@ export default function OfflineModelsMonitor() {
       name: 'EfficientDet Lite2 Macro Object Vision',
       filename: 'efficientdet_lite2.tflite',
       size: '22.0 MB',
-      purpose: 'Spatial Volumetric Food Boundary Detection',
-      framework: 'CoreML / Accelerate Framework',
-      status: 'LOADED // ACTIVE',
+      purpose: 'Object Detection Weight Package (Bundled)',
+      framework: 'TFLite Weights Asset',
+      status: 'BUNDLED ON DISK',
       icon: Eye,
       color: '#F59E0B',
     },
@@ -60,9 +60,9 @@ export default function OfflineModelsMonitor() {
       name: 'BlazePose Fast Full Kinematics',
       filename: 'pose_landmarker_full.task',
       size: '9.0 MB',
-      purpose: 'High-Speed 60fps Biomechanical Fallback',
-      framework: 'MediaPipe Vision',
-      status: 'LOADED // ACTIVE',
+      purpose: 'Active Live Camera Rep & Joint Kinematics',
+      framework: 'MediaPipe Tasks Vision WASM',
+      status: 'ACTIVE RUNTIME',
       icon: Activity,
       color: '#10B981',
     },
@@ -70,19 +70,19 @@ export default function OfflineModelsMonitor() {
       name: 'Hand & Finger Joint Landmarker',
       filename: 'hand_landmarker.task',
       size: '7.5 MB',
-      purpose: 'Grip Strength Kinematics & Kinetic Gesture Control',
-      framework: 'MediaPipe / CoreML',
-      status: 'LOADED // ACTIVE',
+      purpose: 'Hand Keypoint Weight Package (Bundled)',
+      framework: 'MediaPipe Task Asset',
+      status: 'BUNDLED ON DISK',
       icon: Layers,
       color: '#A855F7',
     },
     {
-      name: 'Dense 468-Point Facial Mesh',
+      name: 'Dense 478-Point Facial Mesh',
       filename: 'face_landmarker.task',
       size: '3.6 MB',
-      purpose: 'Photogrammetric Jawline, Symmetry & Golden Ratio',
-      framework: 'MediaPipe TrueDepth',
-      status: 'LOADED // ACTIVE',
+      purpose: 'Active Camera Canthal Tilt, Symmetry & fWHR',
+      framework: 'MediaPipe Tasks Vision WASM',
+      status: 'ACTIVE RUNTIME',
       icon: Sparkles,
       color: '#38BDF8',
     },
@@ -109,7 +109,7 @@ export default function OfflineModelsMonitor() {
                 </span>
               </div>
               <h3 className="text-lg font-bold text-white tracking-tight">
-                Embedded Neural Models & Apple Silicon Acceleration
+                Embedded Neural Models & Local MediaPipe Runtime
               </h3>
             </div>
           </div>
@@ -121,23 +121,23 @@ export default function OfflineModelsMonitor() {
               <span className="text-xs font-mono text-[#00F0FF] font-bold">MB</span>
             </div>
             <span className="text-xs font-mono font-bold text-[#10B981]">
-              7 Models Loaded Locally
+              2 Active MediaPipe · 5 Bundled Assets
             </span>
           </div>
         </div>
 
         <p className="text-xs text-[#A1A1AA] font-mono leading-relaxed mb-4">
-          Unlike web apps that stream video to remote cloud servers, APEX OS bundles all computer vision, audio DSP, and biomechanical neural networks directly inside the standalone macOS application bundle. Inference runs locally on your Mac using the Apple Silicon Neural Engine (ANE) and Metal Performance Shaders.
+          Unlike cloud apps that upload your video or audio externally, APEX OS bundles all 7 model weight files inside the local app bundle. Pose and Facial Landmarker execute live via local MediaPipe WASM when you open your camera; acoustic pitch uses live Web Audio FFT.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-mono">
           <div className="p-3 rounded-[14px] bg-black/50 border border-white/10 flex items-center justify-between">
-            <span className="text-[#8A8A8A]">RUNTIME ENGINE:</span>
-            <span className="text-white font-bold">Apple Neural Engine (ANE)</span>
+            <span className="text-[#8A8A8A]">LIVE VISION ENGINE:</span>
+            <span className="text-white font-bold">MediaPipe Tasks WASM</span>
           </div>
           <div className="p-3 rounded-[14px] bg-black/50 border border-white/10 flex items-center justify-between">
-            <span className="text-[#8A8A8A]">LOCAL LATENCY:</span>
-            <span className="text-[#10B981] font-bold">~14ms per frame (60fps)</span>
+            <span className="text-[#8A8A8A]">ACTIVE MODELS:</span>
+            <span className="text-[#10B981] font-bold">Pose Full + Face Mesh</span>
           </div>
           <div className="p-3 rounded-[14px] bg-black/50 border border-white/10 flex items-center justify-between">
             <span className="text-[#8A8A8A]">TELEMETRY LEAKAGE:</span>

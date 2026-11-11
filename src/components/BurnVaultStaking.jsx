@@ -124,44 +124,43 @@ export default function BurnVaultStaking({ coins, setCoins }) {
         )}
       </div>
 
-      {/* GLOBAL 0.01% CLAN LEADERBOARD */}
+      {/* LONGEVITY TARGET TIERS (LOCAL SESSION TRACKING) */}
       <div className="liquid-glass rounded-[24px] p-6 border border-white/10 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Trophy className="w-5 h-5 text-[#E5FE40]" />
             <h4 className="text-sm font-mono font-black text-white uppercase tracking-wider">
-              GLOBAL 0.01% LIFEMAXXING CLAN LEADERBOARDS
+              LONGEVITY REFERENCE BENCHMARK TIERS
             </h4>
           </div>
-          <span className="text-xs font-mono text-[#E5FE40] font-black">SEASON 1</span>
+          <span className="text-xs font-mono text-[#E5FE40] font-black">LOCAL COINS: {coins}</span>
         </div>
 
         <div className="space-y-2">
           {[
-            { rank: 1, name: 'Clan Blueprint 0.01%', score: '14,920 pts', metric: '-7.4y Bio Age', badge: '👑 APEX ELITE' },
-            { rank: 2, name: 'Titanium Sovereigns', score: '13,840 pts', metric: 'VO2 Max 62.4', badge: '🥈 DIAMOND' },
-            { rank: 3, name: 'Apollo Apex Syndicate', score: '12,910 pts', metric: 'HRV 112ms', badge: '🥉 PLATINUM' },
-            { rank: 42, name: 'You (Ascendant Warrior)', score: `${coins} pts`, metric: '-6.2y Bio Age', badge: '🔥 TOP 1%' },
-          ].map((clan) => (
+            { rank: 'T1', name: 'Longevity Benchmark: Optimal Recovery', score: 'Target Tier 1', metric: 'HRV >= 85ms · VO2 >= 55', badge: 'REFERENCE TIER' },
+            { rank: 'T2', name: 'Longevity Benchmark: Athletic Base', score: 'Target Tier 2', metric: 'RHR <= 55 bpm · Sleep >= 7.5h', badge: 'REFERENCE TIER' },
+            { rank: 'YOU', name: 'Your Local Staked Progress', score: `${coins} pts`, metric: activeStake ? `Active Stake: ${activeStake.amount} coins` : 'Lock coins above to track adherence', badge: 'LIVE ACCOUNT', isUser: true },
+          ].map((tier) => (
             <div
-              key={clan.rank}
+              key={tier.rank}
               className={`p-3.5 rounded-[16px] border flex items-center justify-between text-xs font-mono ${
-                clan.rank === 42
+                tier.isUser
                   ? 'bg-[#E5FE40]/10 border-[#E5FE40]/40 text-white'
                   : 'bg-white/[0.03] border-white/5 text-[#A1A1AA]'
               }`}
             >
               <div className="flex items-center space-x-3">
-                <span className="font-mono font-black text-white w-6">#{clan.rank}</span>
+                <span className="font-mono font-black text-white w-8">{tier.rank}</span>
                 <div>
-                  <span className="font-bold text-white block">{clan.name}</span>
-                  <span className="text-[10px] text-[#00F0FF]">{clan.metric}</span>
+                  <span className="font-bold text-white block">{tier.name}</span>
+                  <span className="text-[10px] text-[#00F0FF]">{tier.metric}</span>
                 </div>
               </div>
 
               <div className="text-right">
-                <span className="text-white font-black block">{clan.score}</span>
-                <span className="text-[9px] font-bold text-[#E5FE40]">{clan.badge}</span>
+                <span className="text-white font-black block">{tier.score}</span>
+                <span className="text-[9px] font-bold text-[#E5FE40]">{tier.badge}</span>
               </div>
             </div>
           ))}

@@ -464,7 +464,7 @@ public struct LongevityView: View {
                         .lineLimit(1)
                     Text(postureEngine.isMonitoringPosture
                          ? String(format: "%.0f° pitch · %d cues", postureEngine.headPitchDegrees, postureEngine.slouchEventsCount)
-                         : (postureEngine.isAirPodsAvailable ? "Tap to monitor neck" : "AirPods Pro ready"))
+                         : (postureEngine.isAirPodsAvailable ? "Tap to monitor neck" : "Connect AirPods Pro"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

@@ -29,10 +29,21 @@ export default function RecoveryStrainView({ healthData }) {
 
   const moveCalories = currentHealth.activityRings?.move?.current || 0;
   const moveTarget = currentHealth.activityRings?.move?.target || 750;
+  const exerciseMins = currentHealth.activityRings?.exercise?.current || 0;
+  const isSynced = hasRealVitals || moveCalories > 0 || currentHealth.syncStatus === 'CONNECTED';
   const strainRatio = Math.min(1.0, moveCalories / Math.max(100, moveTarget));
   const strainCurrent = moveCalories > 0 ? +(strainRatio * 18.0).toFixed(1) : 0;
   const strainTarget = RECOVERY_STRAIN_DATA.strainTarget;
-  const zones = RECOVERY_STRAIN_DATA.zones;
+  const sleepHours = Number(sleepStages.totalHours?.split?.('h')?.[0]) || currentHealth.metrics?.sleep?.totalHours || 0;
+  const zones = moveCalories > 0
+    ? [
+        { zone: 'Zone 1 (Restorative)', range: '< 110 bpm', time: `${Math.max(10, Math.round(exerciseMins * 0.4))}m`, pct: 25 },
+        { zone: 'Zone 2 (Mitochondrial)', range: '110-135 bpm', time: `${Math.max(5, Math.round(exerciseMins * 0.45))}m`, pct: 45 },
+        { zone: 'Zone 3 (Aerobic Tempo)', range: '135-155 bpm', time: `${Math.round(exerciseMins * 0.15)}m`, pct: 18 },
+        { zone: 'Zone 4 (Threshold)', range: '155-172 bpm', time: `${Math.round(exerciseMins * 0.08)}m`, pct: 8 },
+        { zone: 'Zone 5 (Max VO2)', range: '172+ bpm', time: `${Math.round(exerciseMins * 0.04)}m`, pct: 4 },
+      ]
+    : RECOVERY_STRAIN_DATA.zones;
 
   return (
     <div className="space-y-6">
@@ -142,25 +153,31 @@ export default function RecoveryStrainView({ healthData }) {
       {/* HEART RATE INTENSITY ZONES */}
       <div className="liquid-glass rounded-[22px] p-5 border border-white/10">
         <h4 className="text-xs font-mono font-black text-[#E5FE40] uppercase tracking-wider mb-3">
-          HEART RATE ZONE BREAKDOWN (APPLE HEALTHKIT LIVE)
+          HEART RATE ZONE BREAKDOWN ({isSynced ? 'APPLE HEALTHKIT LIVE' : 'CONNECT APPLE HEALTH'})
         </h4>
-        <div className="space-y-2">
-          {zones.map((z, idx) => (
-            <div key={idx} className="flex items-center justify-between text-xs font-mono py-1 border-b border-white/5 last:border-0">
-              <div className="flex items-center space-x-2 w-48">
-                <span className="text-white font-medium">{z.zone}</span>
-                <span className="text-[10px] text-[#8A8A8A]">{z.range}</span>
+        {moveCalories > 0 ? (
+          <div className="space-y-2">
+            {zones.map((z, idx) => (
+              <div key={idx} className="flex items-center justify-between text-xs font-mono py-1 border-b border-white/5 last:border-0">
+                <div className="flex items-center space-x-2 w-48">
+                  <span className="text-white font-medium">{z.zone}</span>
+                  <span className="text-[10px] text-[#8A8A8A]">{z.range}</span>
+                </div>
+                <div className="flex-1 max-w-xs mx-4 h-2 bg-black/50 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#00F0FF] rounded-full"
+                    style={{ width: `${Math.min(100, z.pct * 2)}%` }}
+                  />
+                </div>
+                <span className="text-white font-bold">{z.time}</span>
               </div>
-              <div className="flex-1 max-w-xs mx-4 h-2 bg-black/50 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[#00F0FF] rounded-full"
-                  style={{ width: `${z.pct * 2}%` }}
-                />
-              </div>
-              <span className="text-white font-bold">{z.time}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 rounded-[14px] bg-black/40 border border-dashed border-white/15 text-xs font-mono text-[#A1A1AA]">
+            No heart-rate zone telemetry synced yet. Connect Apple Health or pair a BLE chest strap on iPhone to record real Zone 1–5 training minutes.
+          </div>
+        )}
       </div>
 
       {/* SLEEP STAGING ARCHITECTURE */}
@@ -169,44 +186,53 @@ export default function RecoveryStrainView({ healthData }) {
           <div className="flex items-center space-x-2">
             <Moon className="w-4 h-4 text-[#38BDF8]" />
             <h4 className="text-xs font-mono font-black text-white uppercase tracking-wider">
-              SLEEP ARCHITECTURE & STAGES ({sleepStages.totalHours} · {sleepStages.efficiency} EFFICIENCY)
+              {sleepHours > 0
+                ? `SLEEP ARCHITECTURE & STAGES (${sleepStages.totalHours} · ${sleepStages.efficiency} EFFICIENCY)`
+                : 'SLEEP ARCHITECTURE & STAGES (AWAITING APPLE WATCH SYNC)'}
             </h4>
           </div>
           <span className="text-[11px] font-mono text-[#38BDF8] font-black">
-            SCORE: {sleepStages.score}/100
+            {sleepHours > 0 ? `SCORE: ${sleepStages.score}/100` : 'SCORE: —'}
           </span>
         </div>
 
-        {/* Stacked bar */}
-        <div className="w-full h-4 rounded-full overflow-hidden flex bg-black/50 border border-white/10 mb-4">
-          <div style={{ width: `${sleepStages.deep.percentage}%`, backgroundColor: sleepStages.deep.color }} title="Deep Sleep" />
-          <div style={{ width: `${sleepStages.rem.percentage}%`, backgroundColor: sleepStages.rem.color }} title="REM Sleep" />
-          <div style={{ width: `${sleepStages.core.percentage}%`, backgroundColor: sleepStages.core.color }} title="Core Sleep" />
-          <div style={{ width: `${sleepStages.awake.percentage}%`, backgroundColor: sleepStages.awake.color }} title="Awake" />
-        </div>
+        {sleepHours > 0 ? (
+          <>
+            <div className="w-full h-4 rounded-full overflow-hidden flex bg-black/50 border border-white/10 mb-4">
+              <div style={{ width: `${sleepStages.deep.percentage}%`, backgroundColor: sleepStages.deep.color }} title="Deep Sleep" />
+              <div style={{ width: `${sleepStages.rem.percentage}%`, backgroundColor: sleepStages.rem.color }} title="REM Sleep" />
+              <div style={{ width: `${sleepStages.core.percentage}%`, backgroundColor: sleepStages.core.color }} title="Core Sleep" />
+              <div style={{ width: `${sleepStages.awake.percentage}%`, backgroundColor: sleepStages.awake.color }} title="Awake" />
+            </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
-          <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">DEEP SLEEP</span>
-            <span className="text-sm font-bold text-[#3B82F6]">{sleepStages.deep.time}</span>
-            <span className="text-[10px] text-white/60 block">Cellular Repair (27%)</span>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
+              <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
+                <span className="text-[10px] text-[#8A8A8A] block">DEEP SLEEP</span>
+                <span className="text-sm font-bold text-[#3B82F6]">{sleepStages.deep.time}</span>
+                <span className="text-[10px] text-white/60 block">Cellular Repair ({sleepStages.deep.percentage}%)</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
+                <span className="text-[10px] text-[#8A8A8A] block">REM SLEEP</span>
+                <span className="text-sm font-bold text-[#8B5CF6]">{sleepStages.rem.time}</span>
+                <span className="text-[10px] text-white/60 block">Memory Synthesis ({sleepStages.rem.percentage}%)</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
+                <span className="text-[10px] text-[#8A8A8A] block">CORE SLEEP</span>
+                <span className="text-sm font-bold text-[#06B6D4]">{sleepStages.core.time}</span>
+                <span className="text-[10px] text-white/60 block">Restorative ({sleepStages.core.percentage}%)</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
+                <span className="text-[10px] text-[#8A8A8A] block">AWAKE DURATION</span>
+                <span className="text-sm font-bold text-[#64748B]">{sleepStages.awake.time}</span>
+                <span className="text-[10px] text-white/60 block">Minimal Arousals ({sleepStages.awake.percentage}%)</span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="p-4 rounded-[14px] bg-black/40 border border-dashed border-white/15 text-xs font-mono text-[#A1A1AA]">
+            No sleep stage samples synced yet. Wear Apple Watch overnight and tap Sync on iPhone APEX Companion to load Deep, REM, and Core durations.
           </div>
-          <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">REM SLEEP</span>
-            <span className="text-sm font-bold text-[#8B5CF6]">{sleepStages.rem.time}</span>
-            <span className="text-[10px] text-white/60 block">Memory Synthesis (23%)</span>
-          </div>
-          <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">CORE SLEEP</span>
-            <span className="text-sm font-bold text-[#06B6D4]">{sleepStages.core.time}</span>
-            <span className="text-[10px] text-white/60 block">Restorative (47%)</span>
-          </div>
-          <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">AWAKE DURATION</span>
-            <span className="text-sm font-bold text-[#64748B]">{sleepStages.awake.time}</span>
-            <span className="text-[10px] text-white/60 block">Minimal Arousals (3%)</span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

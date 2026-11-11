@@ -27,7 +27,6 @@ export default function GlucoseCircadianHub() {
   // Post-Meal GLUT4 Walk Timer State
   const [glut4Seconds, setGlut4Seconds] = useState(15 * 60); // 15 mins
   const [isGlut4Running, setIsGlut4Running] = useState(false);
-  const [glut4Steps, setGlut4Steps] = useState(0);
 
   // Caffeine Adenosine Decay State
   const [caffeineDoseMg, setCaffeineDoseMg] = useState(150); // 150mg Double Espresso
@@ -42,7 +41,6 @@ export default function GlucoseCircadianHub() {
     if (isGlut4Running && glut4Seconds > 0) {
       interval = setInterval(() => {
         setGlut4Seconds((s) => s - 1);
-        setGlut4Steps((steps) => steps + 1);
       }, 1000);
     } else if (glut4Seconds === 0 && isGlut4Running) {
       setIsGlut4Running(false);
@@ -65,7 +63,6 @@ export default function GlucoseCircadianHub() {
     const handleGlut4External = () => {
       setIsGlut4Running(true);
       setGlut4Seconds(15 * 60);
-      setGlut4Steps(0);
     };
     window.addEventListener('apex:start-glut4-walk', handleGlut4External);
     return () => window.removeEventListener('apex:start-glut4-walk', handleGlut4External);
@@ -80,7 +77,6 @@ export default function GlucoseCircadianHub() {
     playPlunk();
     setIsGlut4Running(false);
     setGlut4Seconds(15 * 60);
-    setGlut4Steps(0);
   };
 
   return (
@@ -111,21 +107,41 @@ export default function GlucoseCircadianHub() {
 
         <div className="p-4 rounded-[18px] bg-black/60 border border-white/10 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono">
           <div className="p-3 rounded-[12px] bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">WAKE TIME DETECTED</span>
-            <strong className="text-white text-base">06:30 AM</strong>
-            <span className="text-[9px] text-[#10B981] block">Cortisol awakening response</span>
+            <span className="text-[10px] text-[#8A8A8A] block">YOUR WAKE TIME</span>
+            <input
+              type="time"
+              value={`${String(Math.floor(wakeHour)).padStart(2, '0')}:${String(Math.round((wakeHour % 1) * 60)).padStart(2, '0')}`}
+              onChange={(e) => {
+                const [hh, mm] = e.target.value.split(':').map(Number);
+                if (!isNaN(hh) && !isNaN(mm)) setWakeHour(hh + mm / 60);
+              }}
+              className="bg-transparent text-white text-base font-bold mt-0.5 focus:outline-none"
+            />
+            <span className="text-[9px] text-[#10B981] block">Set your wake time to calibrate windows</span>
           </div>
 
           <div className="p-3 rounded-[12px] bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#E5FE40] block">MAX STRENGTH CAPACITY</span>
-            <strong className="text-white text-base">+6.2% Peak Torque</strong>
-            <span className="text-[9px] text-[#8A8A8A] block">Between 4:00 PM - 6:00 PM</span>
+            <span className="text-[10px] text-[#E5FE40] block">PEAK STRENGTH WINDOW</span>
+            <strong className="text-white text-base">
+              {(() => {
+                const startH = Math.floor((wakeHour + 9.5) % 24);
+                const endH = Math.floor((wakeHour + 11.5) % 24);
+                const fmt = (h) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h >= 12 ? 'PM' : 'AM'}`;
+                return `${fmt(startH)} – ${fmt(endH)}`;
+              })()}
+            </strong>
+            <span className="text-[9px] text-[#8A8A8A] block">9.5–11.5h post-waking temperature peak</span>
           </div>
 
           <div className="p-3 rounded-[12px] bg-white/5 border border-white/5">
             <span className="text-[10px] text-[#FA114F] block">CAFFEINE CUTOFF</span>
-            <strong className="text-white text-base">02:00 PM</strong>
-            <span className="text-[9px] text-[#FA114F] block">Strict cutoff for delta sleep</span>
+            <strong className="text-white text-base">
+              {(() => {
+                const cutH = Math.floor((wakeHour + 7.5) % 24);
+                return `${cutH % 12 === 0 ? 12 : cutH % 12}:00 ${cutH >= 12 ? 'PM' : 'AM'}`;
+              })()}
+            </strong>
+            <span className="text-[9px] text-[#FA114F] block">7.5h post-waking cutoff for sleep depth</span>
           </div>
         </div>
       </div>
@@ -160,7 +176,11 @@ export default function GlucoseCircadianHub() {
             <div className="text-3xl font-black text-white">
               {Math.floor(glut4Seconds / 60)}:{(glut4Seconds % 60).toString().padStart(2, '0')}
             </div>
-            <span className="text-[11px] text-[#10B981]">{glut4Steps} steps estimated</span>
+            <span className="text-[11px] text-[#10B981]">
+              {glut4Seconds < 900
+                ? `${Math.floor((900 - glut4Seconds) / 60)}m ${(900 - glut4Seconds) % 60}s elapsed · Sync iPhone Health for step count`
+                : 'Ready · Pair iPhone/Watch for live step count'}
+            </span>
           </div>
 
           <div className="flex items-center space-x-2">

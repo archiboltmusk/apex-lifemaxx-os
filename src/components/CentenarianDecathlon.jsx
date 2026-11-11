@@ -110,13 +110,15 @@ const DECATHLON_EVENTS = [
   },
 ];
 
-export default function CentenarianDecathlon() {
+export default function CentenarianDecathlon({ healthData, onConnectHealth }) {
   const [events, setEvents] = useState(() => {
     try {
       const saved = localStorage.getItem('apex_decathlon_events');
-      return saved ? JSON.parse(saved) : DECATHLON_EVENTS;
+      return saved
+        ? JSON.parse(saved)
+        : DECATHLON_EVENTS.map((e) => ({ ...e, completed: false, score: 0 }));
     } catch {
-      return DECATHLON_EVENTS;
+      return DECATHLON_EVENTS.map((e) => ({ ...e, completed: false, score: 0 }));
     }
   });
 
@@ -153,6 +155,12 @@ export default function CentenarianDecathlon() {
     events.reduce((acc, curr) => acc + (curr.completed ? 100 : curr.score), 0) / events.length
   );
 
+  const chronoAge = healthData?.chronologicalAge ?? 30;
+  const bioAge = healthData?.biologicalAge ?? null;
+  const bioDelta = bioAge != null ? +(bioAge - chronoAge).toFixed(1) : null;
+  const hrr60 = healthData?.metrics?.hrr60?.value ?? healthData?.hrr60 ?? null;
+  const rhr = healthData?.metrics?.restingHeartRate?.value ?? 0;
+
   return (
     <div className="space-y-6">
       {/* CENTENARIAN DECATHLON HERO */}
@@ -170,7 +178,7 @@ export default function CentenarianDecathlon() {
                 </span>
               </div>
               <p className="text-[11px] font-mono text-[#8A8A8A]">
-                The 10 critical physical capabilities required for complete biological independence at age 100
+                Tap each benchmark below as you verify your physical capability in training
               </p>
             </div>
           </div>
@@ -181,24 +189,48 @@ export default function CentenarianDecathlon() {
           </div>
         </div>
 
-        {/* Epigenetic Pace of Aging Highlight Bar */}
+        {/* Live Synced Physiology Bar */}
         <div className="p-4 rounded-[18px] bg-black/60 border border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
           <div className="p-3 rounded-[12px] bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">DUNEDINPACE SCORE</span>
-            <strong className="text-[#10B981] text-base">0.74x / year</strong>
-            <span className="text-[9px] text-[#8A8A8A] block">Reversal Olympics Tier 1</span>
+            <span className="text-[10px] text-[#8A8A8A] block">RESTING HEART RATE</span>
+            <strong className="text-[#10B981] text-base">
+              {rhr > 0 ? `${rhr} bpm` : 'Connect Health'}
+            </strong>
+            <span className="text-[9px] text-[#8A8A8A] block">
+              {rhr > 0 ? 'HealthKit Live Telemetry' : 'Sync Apple Watch / HealthKit'}
+            </span>
           </div>
 
           <div className="p-3 rounded-[12px] bg-white/5 border border-white/5">
             <span className="text-[10px] text-[#8A8A8A] block">BIOLOGICAL AGE DELTA</span>
-            <strong className="text-[#00F0FF] text-base">-6.2 Years Younger</strong>
-            <span className="text-[9px] text-[#8A8A8A] block">PhenoAge verified</span>
+            <strong className="text-[#00F0FF] text-base">
+              {bioDelta != null
+                ? `${bioDelta <= 0 ? `${Math.abs(bioDelta)}y Younger` : `+${bioDelta}y Older`}`
+                : 'Awaiting Sync'}
+            </strong>
+            <span className="text-[9px] text-[#8A8A8A] block">
+              {bioDelta != null ? 'From synced fitness telemetry' : 'Open PhenoAge or sync iPhone'}
+            </span>
           </div>
 
-          <div className="p-3 rounded-[12px] bg-white/5 border border-white/5">
-            <span className="text-[10px] text-[#8A8A8A] block">CARDIO RECOVERY</span>
-            <strong className="text-[#E5FE40] text-base">-38 bpm in 60s</strong>
-            <span className="text-[9px] text-[#10B981] block">Optimal autonomic recovery</span>
+          <div className="p-3 rounded-[12px] bg-white/5 border border-white/5 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] text-[#8A8A8A] block">CARDIO RECOVERY (HRR-60)</span>
+              <strong className="text-[#E5FE40] text-base">
+                {hrr60 != null ? `-${Math.abs(Math.round(hrr60))} bpm in 60s` : 'Not Recorded'}
+              </strong>
+              <span className="text-[9px] text-[#10B981] block">
+                {hrr60 != null ? 'Synced autonomic recovery' : 'Pair BLE Chest Strap on iOS'}
+              </span>
+            </div>
+            {onConnectHealth && rhr <= 0 && (
+              <button
+                onClick={onConnectHealth}
+                className="px-2.5 py-1.5 rounded-lg bg-[#E5FE40] text-black font-black text-[10px]"
+              >
+                SYNC
+              </button>
+            )}
           </div>
         </div>
       </div>

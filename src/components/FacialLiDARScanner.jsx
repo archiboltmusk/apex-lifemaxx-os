@@ -34,19 +34,39 @@ export default function FacialLiDARScanner() {
   const [showMeshOverlay, setShowMeshOverlay] = useState(true);
 
   // Active or Captured Biometric Scan Result
-  const [scanResult, setScanResult] = useState({
-    midfaceRatio: 0.98,
-    canthalTilt: '+4.2°',
-    canthalCategory: 'Positive Hunter Tilt',
-    gonialAngle: '122°',
-    gonialCategory: 'Optimal Angular Mandible',
-    symmetryIndex: 94.6,
-    symmetryCategory: 'Elite Bilateral Balance',
-    fwhrRatio: 1.84,
-    facialThirds: '1.0 : 1.0 : 0.98',
-    jawDefinition: 'Hunter / Chiseled Mandible',
-    capturedAt: null,
+  const [scanResult, setScanResult] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('apex_facial_scans') || '[]');
+      return saved[0] || null;
+    } catch {
+      return null;
+    }
   });
+
+  useEffect(() => {
+    const onHealthSync = (e) => {
+      const p = e?.detail || {};
+      if (p.canthalTilt || p.symmetryPercent || p.faceScan) {
+        const fs = p.faceScan || p;
+        const incoming = {
+          midfaceRatio: fs.midfaceRatio ?? '--',
+          canthalTilt: fs.canthalTilt ?? '--',
+          canthalCategory: 'Synced from iPhone TrueDepth',
+          gonialAngle: fs.gonialAngleDeg ? `${Math.round(fs.gonialAngleDeg)}°` : (fs.gonialAngle ?? '--'),
+          gonialCategory: 'Synced 3D Mesh',
+          symmetryIndex: fs.symmetryPercent ? Number(fs.symmetryPercent.toFixed(1)) : '--',
+          symmetryCategory: 'TrueDepth 3D Verified',
+          fwhrRatio: fs.fwhrRatio ?? '--',
+          facialThirds: fs.facialThirds ?? '--',
+          jawDefinition: fs.depthEngine || 'iPhone TrueDepth',
+          capturedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setScanResult(incoming);
+      }
+    };
+    window.addEventListener('appleHealthSync', onHealthSync);
+    return () => window.removeEventListener('appleHealthSync', onHealthSync);
+  }, []);
 
   // History of captured scans
   const [scanHistory, setScanHistory] = useState(() => {
@@ -378,6 +398,7 @@ export default function FacialLiDARScanner() {
         ];
         setScanHistory(saved);
         localStorage.setItem('apex_facial_scans', JSON.stringify(saved));
+        window.dispatchEvent(new Event('apex:facial-scan-updated'));
       } catch {}
 
       playCoinChime();
@@ -594,33 +615,48 @@ export default function FacialLiDARScanner() {
               </span>
             </span>
             <span className="text-[#00F0FF] font-bold">
-              SYMMETRY: {scanResult.symmetryIndex}%
+              SYMMETRY: {scanResult ? `${scanResult.symmetryIndex}%` : '—'}
             </span>
           </div>
 
           {/* Bottom HUD Telemetry */}
           <div className="absolute bottom-3 inset-x-4 flex items-center justify-between text-xs font-mono bg-black/75 backdrop-blur-md px-3.5 py-2 rounded-[14px] border border-white/10 z-20 select-none">
             <span className="text-white font-bold">
-              MIDFACE: <strong className="text-[#E5FE40]">{scanResult.midfaceRatio}</strong>
+              MIDFACE: <strong className="text-[#E5FE40]">{scanResult ? scanResult.midfaceRatio : '—'}</strong>
             </span>
             <span className="text-white font-bold">
-              CANTHAL: <strong className="text-[#00F0FF]">{scanResult.canthalTilt}</strong>
+              CANTHAL: <strong className="text-[#00F0FF]">{scanResult ? scanResult.canthalTilt : '—'}</strong>
             </span>
             <span className="text-white font-bold">
-              GONIAL: <strong className="text-[#10B981]">{scanResult.gonialAngle}</strong>
+              GONIAL: <strong className="text-[#10B981]">{scanResult ? scanResult.gonialAngle : '—'}</strong>
             </span>
             <span className="text-white font-bold hidden sm:inline">
-              FWHR: <strong className="text-[#FA114F]">{scanResult.fwhrRatio}</strong>
+              FWHR: <strong className="text-[#FA114F]">{scanResult ? scanResult.fwhrRatio : '—'}</strong>
             </span>
           </div>
         </div>
+
+        {!scanResult && !isCameraActive && (
+          <div className="mt-4 p-4 rounded-[16px] bg-black/50 border border-[#00F0FF]/30 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+            <div>
+              <span className="text-[#00F0FF] font-black block">CAMERA / TRUEDEPTH STANDBY</span>
+              <span className="text-[#A1A1AA]">Start Webcam, Upload a headshot, or run a TrueDepth scan on iPhone APEX Companion to measure your real ratios.</span>
+            </div>
+            <button
+              onClick={startCamera}
+              className="px-3.5 py-2 rounded-[10px] bg-[#00F0FF] text-black font-black"
+            >
+              START CAMERA SCAN
+            </button>
+          </div>
+        )}
 
         {capturedImage && (
           <div className="mt-4 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
             <div className="flex items-center space-x-2">
               <span className="text-[#10B981] font-bold flex items-center space-x-1">
                 <CheckCircle className="w-4 h-4" />
-                <span>Captured at {scanResult.capturedAt || 'Just now'}</span>
+                <span>Captured at {scanResult?.capturedAt || 'Just now'}</span>
               </span>
               <button
                 onClick={() => setShowMeshOverlay(!showMeshOverlay)}
@@ -646,11 +682,11 @@ export default function FacialLiDARScanner() {
         <div className="liquid-glass rounded-[22px] p-5 border border-white/10 space-y-1.5">
           <div className="flex items-center justify-between text-[10px] font-mono text-[#8A8A8A]">
             <span>CANTHAL TILT</span>
-            <span className="text-[#00F0FF] font-bold">{scanResult.canthalCategory}</span>
+            <span className="text-[#00F0FF] font-bold">{scanResult ? scanResult.canthalCategory : 'AWAITING SCAN'}</span>
           </div>
-          <div className="text-2xl font-mono font-black text-white">{scanResult.canthalTilt}</div>
+          <div className="text-2xl font-mono font-black text-white">{scanResult ? scanResult.canthalTilt : '—'}</div>
           <p className="text-[11px] font-mono text-[#A1A1AA]">
-            Palpebral fissure inclination angle. Positive tilt signals optimal orbicularis tone.
+            Palpebral fissure inclination angle. Start camera or upload a photo to measure.
           </p>
         </div>
 
@@ -658,11 +694,11 @@ export default function FacialLiDARScanner() {
         <div className="liquid-glass rounded-[22px] p-5 border border-white/10 space-y-1.5">
           <div className="flex items-center justify-between text-[10px] font-mono text-[#8A8A8A]">
             <span>MIDFACE RATIO</span>
-            <span className="text-[#E5FE40] font-bold">COMPACT</span>
+            <span className="text-[#E5FE40] font-bold">{scanResult ? 'MEASURED' : 'AWAITING SCAN'}</span>
           </div>
-          <div className="text-2xl font-mono font-black text-[#E5FE40]">{scanResult.midfaceRatio}</div>
+          <div className="text-2xl font-mono font-black text-[#E5FE40]">{scanResult ? scanResult.midfaceRatio : '—'}</div>
           <p className="text-[11px] font-mono text-[#A1A1AA]">
-            Pupil-to-lip vertical span over interpupillary distance. Golden ratio ideal: 0.95–1.02.
+            Pupil-to-lip vertical span over interpupillary distance. Golden ratio reference: 0.95–1.02.
           </p>
         </div>
 
@@ -670,11 +706,11 @@ export default function FacialLiDARScanner() {
         <div className="liquid-glass rounded-[22px] p-5 border border-white/10 space-y-1.5">
           <div className="flex items-center justify-between text-[10px] font-mono text-[#8A8A8A]">
             <span>GONIAL ANGLE</span>
-            <span className="text-[#10B981] font-bold">{scanResult.gonialCategory}</span>
+            <span className="text-[#10B981] font-bold">{scanResult ? scanResult.gonialCategory : 'AWAITING SCAN'}</span>
           </div>
-          <div className="text-2xl font-mono font-black text-[#10B981]">{scanResult.gonialAngle}</div>
+          <div className="text-2xl font-mono font-black text-[#10B981]">{scanResult ? scanResult.gonialAngle : '—'}</div>
           <p className="text-[11px] font-mono text-[#A1A1AA]">
-            Angle between ramus and mandibular body. Hunter range: 118°–125°.
+            Angle between ramus and mandibular body. Reference range: 118°–125°.
           </p>
         </div>
 
@@ -682,9 +718,9 @@ export default function FacialLiDARScanner() {
         <div className="liquid-glass rounded-[22px] p-5 border border-white/10 space-y-1.5">
           <div className="flex items-center justify-between text-[10px] font-mono text-[#8A8A8A]">
             <span>BILATERAL SYMMETRY</span>
-            <span className="text-[#FA114F] font-bold">99th PERCENTILE</span>
+            <span className="text-[#FA114F] font-bold">{scanResult ? scanResult.symmetryCategory : 'AWAITING SCAN'}</span>
           </div>
-          <div className="text-2xl font-mono font-black text-white">{scanResult.symmetryIndex}%</div>
+          <div className="text-2xl font-mono font-black text-white">{scanResult ? `${scanResult.symmetryIndex}%` : '—'}</div>
           <p className="text-[11px] font-mono text-[#A1A1AA]">
             Co-registration of 12 bilateral landmark pairs against sagittal midline.
           </p>

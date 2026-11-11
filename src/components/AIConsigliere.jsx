@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
 
-export default function AIConsigliere() {
+export default function AIConsigliere({ healthData, onConnectHealth }) {
   // Livity AI Coach Persona: 'buddy' | 'nerd'
   const [coachPersona, setCoachPersona] = useState('buddy'); // 'buddy' | 'nerd'
 
@@ -28,14 +28,30 @@ export default function AIConsigliere() {
     }
   };
 
+  const buildLiveTelemetrySummary = () => {
+    const hrv = healthData?.metrics?.hrv?.value || 0;
+    const rhr = healthData?.metrics?.restingHeartRate?.value || 0;
+    const vo2 = healthData?.metrics?.vo2Max?.value || 0;
+    const move = healthData?.activityRings?.move?.current || 0;
+    const moveTarget = healthData?.activityRings?.move?.target || 750;
+    const sleep = healthData?.metrics?.sleep?.totalHours || 0;
+    const readiness = healthData?.readinessScore ?? (hrv > 0 && rhr > 0 ? Math.min(99, Math.max(35, Math.round(50 + (hrv - 50) * 0.5 - (rhr - 55) * 0.6))) : null);
+    let labsCount = 0;
+    let mealsCount = 0;
+    try {
+      labsCount = JSON.parse(localStorage.getItem('apex_user_bloodwork') || '[]').length;
+      mealsCount = JSON.parse(localStorage.getItem('apex_logged_meals') || '[]').length;
+    } catch {}
+    return { hrv, rhr, vo2, move, moveTarget, sleep, readiness, labsCount, mealsCount, isSynced: hrv > 0 || move > 0 };
+  };
+
   const [messages, setMessages] = useState(() => {
     const firstName = getUserFirstName();
-    return [
-      {
-        role: 'assistant',
-        text: `Hey ${firstName}! 🚀 You crushed your sleep last night (8h 22m with 2h 15m deep sleep)! Your recovery score is 94% — you're completely in the green. Today is an absolute push day. Let's hit that 18.0 strain target and lock in a workout! How are you feeling right now?`,
-      },
-    ];
+    const t = buildLiveTelemetrySummary();
+    const initialText = t.isSynced
+      ? `Hey ${firstName}! Your Apple Health sync is live: ${t.readiness != null ? `Readiness ${t.readiness}%, ` : ''}${t.hrv > 0 ? `HRV ${t.hrv}ms, ` : ''}${t.rhr > 0 ? `Resting HR ${t.rhr} bpm, ` : ''}${t.move} / ${t.moveTarget} kcal burned today. What would you like to analyze next?`
+      : `Hey ${firstName}! Connect Apple Health (via iPhone APEX Companion or export.xml) or log your first Camera Workout, Meal, or Lab panel so I can give you real biometric coaching instead of guesses.`;
+    return [{ role: 'assistant', text: initialText }];
   });
 
   const [inputPrompt, setInputPrompt] = useState('');
@@ -44,10 +60,15 @@ export default function AIConsigliere() {
   const handlePersonaSwitch = (newPersona) => {
     playPlunk();
     setCoachPersona(newPersona);
+    const t = buildLiveTelemetrySummary();
     const greeting =
       newPersona === 'buddy'
-        ? "Switched to Buddy mode! ⚡ I've got your back. I read your sleep and recovery and I'm ready to keep you fired up all day. What do you want to conquer next?"
-        : "Switched to Nerd mode (Sports Science & Clinical Precision). 🧬 Calibrated to Attia, Huberman, and Levine protocols. Standing by for biometric queries.";
+        ? t.isSynced
+          ? `Switched to Buddy mode! Reading your live telemetry (HRV ${t.hrv || '—'}ms, Move ${t.move} kcal). What goal are we tackling today?`
+          : `Switched to Buddy mode! Tap Connect Apple Health above whenever you want me to read your real HRV, sleep, and rings.`
+        : t.isSynced
+        ? `Switched to Nerd mode (Clinical Telemetry Synthesis). Active inputs: HRV ${t.hrv || '—'} ms, RHR ${t.rhr || '—'} bpm, VO2 Max ${t.vo2 || '—'}, Lab biomarkers: ${t.labsCount}.`
+        : `Switched to Nerd mode (Clinical Synthesis). Waiting on Apple HealthKit sync or uploaded bloodwork to run quantitative inference.`;
     setMessages((prev) => [...prev, { role: 'assistant', text: greeting }]);
   };
 
@@ -65,40 +86,38 @@ export default function AIConsigliere() {
       setIsTyping(false);
       playCoinChime();
 
+      const t = buildLiveTelemetrySummary();
       let reply = '';
       const lower = prompt.toLowerCase();
 
-      if (coachPersona === 'buddy') {
+      if (!t.isSynced && t.labsCount === 0 && t.mealsCount === 0) {
+        reply = `No physiological streams are connected yet for "${prompt}". Connect Apple Health in the header, start a Face/Workout camera session, or upload your bloodwork PDF/CSV so I can reference your actual numbers.`;
+      } else if (coachPersona === 'buddy') {
         if (lower.includes('push') || lower.includes('workout') || lower.includes('exercise')) {
-          reply =
-            "Heck yeah! Today is 100% a green light to PUSH! 💥 Your body is fully recharged at 94% recovery. Fire up the camera workout tracker for some deep squats or hit heavy deadlifts. You've got the energy in the tank, make it count!";
+          reply = t.readiness != null
+            ? `Your readiness is ${t.readiness}% (HRV ${t.hrv}ms, RHR ${t.rhr} bpm). ${t.readiness >= 75 ? 'Great green-light window for progressive overload in Camera Workout Tracker!' : 'Modulate volume today and focus on technical form + Zone 2 walking.'}`
+            : `You have ${t.move} kcal logged today. Sync Apple Watch sleep/HRV for an autonomic push score, or open AI Camera Workout Tracker to measure real bar velocity.`;
         } else if (lower.includes('sleep') || lower.includes('tired')) {
-          reply =
-            "Your sleep last night was phenomenal — 2h 15m of deep repair sleep! If you're feeling an afternoon dip around 2:30 PM, that's just your natural circadian rhythm. Grab some water, get 5 minutes of sunlight, and push through — no caffeine after 2 PM!";
-        } else if (lower.includes('week') || lower.includes('progress') || lower.includes('pattern')) {
-          reply =
-            "Looking at your week, you're on a 42-day streak! 🔥 You hit all three activity rings 6 out of 7 days, your fitness age dropped another 0.4 years, and your average strain was 16.8. You are crushing the top 1%!";
+          reply = t.sleep > 0
+            ? `Last synced sleep duration was ${t.sleep} hours (HRV ${t.hrv || '—'}ms). Keep a consistent wake time and cap caffeine ~8 hours before bed.`
+            : `Sleep hours haven't synced from Apple Health yet. Wear your Apple Watch overnight and sync from iPhone APEX Companion to inspect Deep & REM stages.`;
         } else {
-          reply = `Awesome question! With your current 94% recovery and 840 active calories burned, you're in prime shape. Stay hydrated, keep that momentum going, and let's crush today's protocols together! 🏆`;
+          reply = `Current real telemetry: ${t.move}/${t.moveTarget} kcal move, ${t.hrv > 0 ? `HRV ${t.hrv}ms` : 'HRV unsynced'}, ${t.labsCount} lab biomarkers, and ${t.mealsCount} meals logged today.`;
         }
       } else {
-        // Nerd Persona
         if (lower.includes('push') || lower.includes('workout') || lower.includes('exercise')) {
-          reply =
-            "Cardiovascular & Muscular Analysis: Autonomic readiness index: 94.2/100. Vagal tone supports maximal cardiac output (VO2 Max 54.2 mL/kg). Prescribed stimulus: 45 min Zone 2 aerobic base (134-142 bpm) followed by 4x4 min Zone 5 HIIT at >90% HRmax. Expected EPOC: 380 kcal.";
+          reply = `Autonomic summary: Readiness ${t.readiness ?? 'N/A'}%, HRV SDNN ${t.hrv || '—'} ms, RHR ${t.rhr || '—'} bpm, VO2 Max ${t.vo2 || '—'} mL/kg/min. ${t.readiness >= 80 ? 'Sympathovagal balance supports high-threshold recruitment or Zone 5 intervals.' : 'Recommend Zone 2 mitochondrial work or recovery mobility.'}`;
         } else if (lower.includes('sleep') || lower.includes('tired')) {
-          reply =
-            "Polysomnography breakdown: Deep N3 cellular stage 27% (135 min), REM stage 23% (115 min). Core temperature nadir occurred at 04:12 AM. Postprandial dip at 14:15 reflects circadian adenosine accumulation. Light intervention: 10,000 lux outdoor photon stimulation resets melanopsin retinal ganglion cells.";
-        } else if (lower.includes('week') || lower.includes('progress') || lower.includes('pattern')) {
-          reply =
-            "Weekly Epigenetic & Hemodynamic Retrospective: Cumulative strain 118.4 Borg units. Resting heart rate trending downward (-2 bpm delta). PhenoAge regression indicates pace of aging sustained at 0.74x/yr. DunedinPACE cohort rank: 99.9th percentile.";
+          reply = t.sleep > 0
+            ? `Synced sleep duration: ${t.sleep}h. Autonomic overnight HRV recorded at ${t.hrv || '—'} ms with RHR ${t.rhr || '—'} bpm.`
+            : `No sleep stages present in current HealthKit packet. Pair Apple Watch sleep tracking and sync to evaluate N3/REM architecture.`;
         } else {
-          reply = `Biometric evaluation for "${prompt}": Telemetry matches optimal homeostasis. Fasting insulin estimated < 3.0 uIU/mL, Hs-CRP at 0.22 mg/L. All physiological systems are within longevity target brackets.`;
+          reply = `Telemetry ledger for "${prompt}": Move ${t.move}/${t.moveTarget} kcal, HRV ${t.hrv || '—'} ms, RHR ${t.rhr || '—'} bpm, Clinical labs on file: ${t.labsCount}, Meals logged: ${t.mealsCount}.`;
         }
       }
 
       setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
-    }, 750);
+    }, 350);
   };
 
   return (
@@ -115,17 +134,29 @@ export default function AIConsigliere() {
               <div className="flex items-center space-x-2">
                 <h3 className="text-sm font-bold text-white tracking-tight">Livity AI Virtual Coach</h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 font-bold">
-                  READS LIVE RECOVERY & STRAIN
+                  {buildLiveTelemetrySummary().isSynced ? 'LIVE TELEMETRY SYNCED' : 'AWAITING HEALTHKIT'}
                 </span>
               </div>
               <span className="text-[11px] font-mono text-[#8A8A8A]">
-                Like a sports scientist in your pocket · Remembers your goals
+                Reads synced Apple HealthKit, bloodwork & logged meals
               </span>
             </div>
           </div>
 
-          {/* Persona Switcher: Buddy vs Nerd */}
-          <div className="flex items-center space-x-1 p-1 rounded-[14px] bg-black/60 border border-white/10 text-xs font-mono">
+          <div className="flex items-center space-x-2">
+            {!buildLiveTelemetrySummary().isSynced && onConnectHealth && (
+              <button
+                onClick={() => {
+                  playPlunk();
+                  onConnectHealth();
+                }}
+                className="px-3 py-1.5 rounded-[10px] bg-[#E5FE40] text-black text-[11px] font-mono font-black"
+              >
+                CONNECT HEALTH
+              </button>
+            )}
+            {/* Persona Switcher: Buddy vs Nerd */}
+            <div className="flex items-center space-x-1 p-1 rounded-[14px] bg-black/60 border border-white/10 text-xs font-mono">
             <button
               onClick={() => handlePersonaSwitch('buddy')}
               className={`px-3 py-1.5 rounded-[10px] font-bold flex items-center space-x-1.5 transition ${
@@ -149,6 +180,7 @@ export default function AIConsigliere() {
               <Glasses className="w-3.5 h-3.5" />
               <span>NERD (Data)</span>
             </button>
+          </div>
           </div>
         </div>
 

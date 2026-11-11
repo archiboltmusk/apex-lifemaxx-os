@@ -53,13 +53,9 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
-  INITIAL_PILLARS,
   DAILY_PROTOCOLS,
-  BIOMARKER_DATA,
-  LOOKSMAXXING_METRICS,
   MASTER_BLUEPRINTS,
-  APPLE_HEALTH_DATA,
-  RECOVERY_STRAIN_DATA
+  APPLE_HEALTH_DATA
 } from './utils/lifemaxxData';
 import {
   playPlunk,
@@ -121,6 +117,45 @@ export default function App() {
     }
   });
 
+  const [latestFaceScan, setLatestFaceScan] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('apex_facial_scans') || '[]');
+      return saved[0] || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [bloodworkMarkers, setBloodworkMarkers] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('apex_user_bloodwork') || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [iosPhenoAge, setIosPhenoAge] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_ios_phenoage') || 'null');
+    } catch {
+      return null;
+    }
+  });
+
+  const [loggedMealsSummary, setLoggedMealsSummary] = useState(() => {
+    try {
+      const meals = JSON.parse(localStorage.getItem('apex_logged_meals') || '[]');
+      return {
+        count: meals.length,
+        calories: meals.reduce((s, m) => s + Number(m.calories || 0), 0),
+        protein: meals.reduce((s, m) => s + Number(m.protein || 0), 0),
+      };
+    } catch {
+      return { count: 0, calories: 0, protein: 0 };
+    }
+  });
+
   const handleAddHealthData = (sample) => {
     setAppleHealthState((prev) => {
       const isAbs = sample.setAbsolute;
@@ -130,6 +165,7 @@ export default function App() {
 
       const updated = {
         ...prev,
+        syncStatus: 'SYNCED',
         deviceSource: sample.source || prev.deviceSource,
         lastSynced: 'Just now',
         activityRings: {
@@ -217,6 +253,7 @@ export default function App() {
           };
           const deduped = [syncedScan, ...existing.filter((x) => x.id !== syncedScan.id)].slice(0, 20);
           localStorage.setItem('apex_facial_scans', JSON.stringify(deduped));
+          setLatestFaceScan(syncedScan);
           showToast(`iPhone Face Scan Synced · Symmetry ${syncedScan.symmetryIndex}`);
         } catch {}
       }
@@ -234,13 +271,13 @@ export default function App() {
       // Merge iOS Bloodwork OCR Clinical PhenoAge
       if (payload.phenoAge && payload.phenoAge > 0) {
         try {
-          const prevLabs = JSON.parse(localStorage.getItem('apex_user_bloodwork') || '{}');
-          localStorage.setItem('apex_user_bloodwork', JSON.stringify({
-            ...prevLabs,
+          const phenoSnapshot = {
             phenoAge: payload.phenoAge,
             source: payload.phenoAgeSource || 'iPhone Bloodwork OCR',
             updatedAt: new Date().toISOString(),
-          }));
+          };
+          localStorage.setItem('apex_ios_phenoage', JSON.stringify(phenoSnapshot));
+          setIosPhenoAge(phenoSnapshot);
           showToast(`iPhone Clinical PhenoAge Synced · ${payload.phenoAge} yrs`);
         } catch {}
       }
@@ -305,6 +342,42 @@ export default function App() {
     return () => window.removeEventListener('apex:navigate-tab', handleNavEvent);
   }, []);
 
+  // Keep App Hub synchronized when user logs meals, facial scans, or bloodwork panels
+  useEffect(() => {
+    const syncFacial = () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('apex_facial_scans') || '[]');
+        setLatestFaceScan(Array.isArray(saved) ? saved[0] || null : null);
+      } catch {}
+    };
+    const syncLabs = () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('apex_user_bloodwork') || '[]');
+        setBloodworkMarkers(Array.isArray(saved) ? saved : []);
+        const pheno = JSON.parse(localStorage.getItem('apex_ios_phenoage') || 'null');
+        setIosPhenoAge(pheno);
+      } catch {}
+    };
+    const syncMeals = () => {
+      try {
+        const meals = JSON.parse(localStorage.getItem('apex_logged_meals') || '[]');
+        setLoggedMealsSummary({
+          count: meals.length,
+          calories: meals.reduce((s, m) => s + Number(m.calories || 0), 0),
+          protein: meals.reduce((s, m) => s + Number(m.protein || 0), 0),
+        });
+      } catch {}
+    };
+    window.addEventListener('apex:facial-scan-updated', syncFacial);
+    window.addEventListener('apex:bloodwork-updated', syncLabs);
+    window.addEventListener('apex:meals-updated', syncMeals);
+    return () => {
+      window.removeEventListener('apex:facial-scan-updated', syncFacial);
+      window.removeEventListener('apex:bloodwork-updated', syncLabs);
+      window.removeEventListener('apex:meals-updated', syncMeals);
+    };
+  }, []);
+
   // Real User Account Profile & Membership
   const [membershipPlan, setMembershipPlan] = useState('lifetime');
   const [userProfile, setUserProfile] = useState(() => {
@@ -327,11 +400,48 @@ export default function App() {
     };
   });
 
-  // Economy & Streaks
-  const [coins, setCoins] = useState(10000);
-  const [streakDays, setStreakDays] = useState(42);
-  const [protocols, setProtocols] = useState(DAILY_PROTOCOLS);
+  // Economy & Streaks (persisted cleanly from 0 until user completes real protocols)
+  const [coins, setCoins] = useState(() => {
+    try {
+      return Number(localStorage.getItem('apex_coins') || '0');
+    } catch {
+      return 0;
+    }
+  });
+  const [streakDays, setStreakDays] = useState(() => {
+    try {
+      return Number(localStorage.getItem('apex_streak_days') || '0');
+    } catch {
+      return 0;
+    }
+  });
+  const [protocols, setProtocols] = useState(() => {
+    try {
+      const saved = localStorage.getItem('apex_daily_protocols');
+      return saved ? JSON.parse(saved) : DAILY_PROTOCOLS;
+    } catch {
+      return DAILY_PROTOCOLS;
+    }
+  });
   const [toastMessage, setToastMessage] = useState('');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('apex_coins', String(coins));
+    } catch {}
+  }, [coins]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('apex_streak_days', String(streakDays));
+    } catch {}
+  }, [streakDays]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('apex_daily_protocols', JSON.stringify(protocols));
+    } catch {}
+  }, [protocols]);
 
   // 40Hz Gamma Flow State
   const [isGammaPlaying, setIsGammaPlaying] = useState(false);
@@ -455,6 +565,25 @@ export default function App() {
   const completedProtocolsCount = protocols.filter((p) => p.completed).length;
   const protocolPercentage = Math.round((completedProtocolsCount / protocols.length) * 100);
 
+  const rhrVal = appleHealthState?.metrics?.restingHeartRate?.value || 0;
+  const hrvVal = appleHealthState?.metrics?.hrv?.value || 0;
+  const vo2Val = appleHealthState?.metrics?.vo2Max?.value || 0;
+  const spo2Val = appleHealthState?.metrics?.bloodOxygen?.value || 0;
+  const moveRing = appleHealthState?.activityRings?.move || { current: 0, target: 750 };
+  const exerciseRing = appleHealthState?.activityRings?.exercise || { current: 0, target: 45 };
+  const hasSyncedHealth =
+    appleHealthState?.syncStatus === 'SYNCED' ||
+    (appleHealthState?.lastSynced && appleHealthState.lastSynced !== 'Not synced') ||
+    rhrVal > 0 ||
+    hrvVal > 0 ||
+    vo2Val > 0 ||
+    moveRing.current > 0;
+  const phenoAgeVal = iosPhenoAge?.phenoAge > 0 ? iosPhenoAge.phenoAge : null;
+  const readinessScore =
+    hasSyncedHealth && (hrvVal > 0 || rhrVal > 0)
+      ? Math.max(20, Math.min(99, Math.round(50 + (hrvVal > 0 ? (hrvVal - 50) * 0.6 : 0) + (rhrVal > 0 ? (65 - rhrVal) * 0.8 : 0))))
+      : null;
+
   const mainContent = (
     <div className="flex-1 overflow-y-auto no-scrollbar pb-28 px-4 md:px-8 pt-4 space-y-6">
       {/* ============================================================== */}
@@ -473,14 +602,44 @@ export default function App() {
                   <span className="text-[10px] font-mono font-black tracking-widest text-[#E5FE40] uppercase">
                     HUMAN OPTIMIZATION ENGINE
                   </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-ping" />
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      hasSyncedHealth ? 'bg-[#10B981] animate-ping' : 'bg-[#F59E0B]'
+                    }`}
+                  />
                 </div>
                 <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight mt-0.5">
-                  Apex Biomarker Status: <span className="holo-glow">ELITE 0.01%</span>
+                  {phenoAgeVal ? (
+                    <>
+                      Clinical PhenoAge: <span className="holo-glow">{phenoAgeVal}y</span>
+                    </>
+                  ) : hasSyncedHealth ? (
+                    <>
+                      Biometrics: <span className="holo-glow">LIVE SYNCED</span>
+                    </>
+                  ) : (
+                    <>
+                      Connect Sensors for <span className="holo-glow">REAL TELEMETRY</span>
+                    </>
+                  )}
                 </h1>
                 <p className="text-xs text-[#A1A1AA] font-mono mt-1">
-                  Chronological: 29.0y · Biological: 22.8y (-6.2y) · Pace: 0.74x/yr
+                  {hasSyncedHealth || bloodworkMarkers.length > 0
+                    ? `RHR: ${rhrVal > 0 ? `${rhrVal} bpm` : '—'} · HRV: ${hrvVal > 0 ? `${hrvVal} ms` : '—'} · VO2 Max: ${vo2Val > 0 ? vo2Val : '—'} · Labs: ${bloodworkMarkers.length}`
+                    : 'No simulated scores shown. Pair iPhone HealthKit, upload bloodwork, or run camera/mic scans.'}
                 </p>
+                {!hasSyncedHealth && (
+                  <button
+                    onClick={() => {
+                      playPlunk();
+                      setIsHealthModalOpen(true);
+                    }}
+                    className="mt-2.5 px-3 py-1.5 rounded-[10px] bg-[#E5FE40] text-black hover:bg-[#d8f030] font-mono text-[11px] font-black transition inline-flex items-center space-x-1.5"
+                  >
+                    <Activity className="w-3.5 h-3.5" />
+                    <span>CONNECT APPLE HEALTH / IPHONE</span>
+                  </button>
+                )}
               </div>
 
               {/* Apple Activity Rings Interactive Pod */}
@@ -490,7 +649,7 @@ export default function App() {
                   setIsHealthModalOpen(true);
                 }}
                 className="flex items-center space-x-4 bg-black/40 hover:bg-black/60 transition p-3 rounded-[20px] border border-white/10 cursor-pointer group"
-                title="Click to view & add Apple Health telemetry"
+                title="Click to connect Apple Health & sync real telemetry"
               >
                 <ActivityRings
                   move={appleHealthState.activityRings.move}
@@ -525,45 +684,93 @@ export default function App() {
 
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-ping" />
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      hasSyncedHealth ? 'bg-[#10B981] animate-ping' : 'bg-[#F59E0B]'
+                    }`}
+                  />
                   <span className="text-[11px] font-mono font-black text-[#E5FE40] uppercase tracking-wider">
-                    PROACTIVE AI DIRECTIVE // WHAT TO DO RIGHT NOW
+                    PROACTIVE DIRECTIVE // REAL-DATA STATUS
                   </span>
                 </div>
-                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40">
-                  AUTONOMIC RECOVERY 94% · GREEN LIGHT TO PUSH
-                </span>
+                {readinessScore !== null ? (
+                  <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40">
+                    COMPUTED READINESS {readinessScore}% · {appleHealthState.deviceSource}
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => {
+                      playPlunk();
+                      setIsHealthModalOpen(true);
+                    }}
+                    className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-[#F59E0B]/20 text-[#F59E0B] hover:bg-[#F59E0B]/30 border border-[#F59E0B]/40 transition"
+                  >
+                    AWAITING APPLE HEALTH · TAP TO CONNECT
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono mb-4">
                 <div className="p-3 rounded-[14px] bg-white/[0.04] border border-white/10 space-y-1">
-                  <span className="text-[10px] text-[#FA114F] font-bold block">1. PHYSICAL STRAIN DIRECTIVE</span>
-                  <p className="text-white font-bold text-sm">Hit 18.0 Day Strain (+1.2 needed)</p>
+                  <span className="text-[10px] text-[#FA114F] font-bold block">1. ACTIVITY & CAMERA KINEMATICS</span>
+                  <p className="text-white font-bold text-sm">
+                    {moveRing.current > 0 || exerciseRing.current > 0
+                      ? `${Math.max(0, moveRing.target - moveRing.current)} kcal & ${Math.max(0, exerciseRing.target - exerciseRing.current)}m to Target`
+                      : 'No Activity Synced Yet'}
+                  </p>
                   <p className="text-[11px] text-[#A1A1AA]">
-                    Execute 3 sets of 15 bodyweight squats using FaceTime AI Kinematics. Verify 90° depth.
+                    {moveRing.current > 0
+                      ? `${moveRing.current} kcal burned · ${exerciseRing.current}m exercise logged.`
+                      : 'Connect Apple Health or open FaceTime Camera Workout to log real sets & kcal.'}
                   </p>
                 </div>
 
                 <div className="p-3 rounded-[14px] bg-white/[0.04] border border-white/10 space-y-1">
-                  <span className="text-[10px] text-[#00F0FF] font-bold block">2. NUTRITION & ANABOLISM</span>
-                  <p className="text-white font-bold text-sm">320 kcal & 14g Protein Remaining</p>
+                  <span className="text-[10px] text-[#00F0FF] font-bold block">2. NUTRITION & MACROS</span>
+                  <p className="text-white font-bold text-sm">
+                    {loggedMealsSummary.count > 0
+                      ? `${loggedMealsSummary.calories} kcal · ${loggedMealsSummary.protein}g Protein`
+                      : '0 Meals Logged Today'}
+                  </p>
                   <p className="text-[11px] text-[#A1A1AA]">
-                    Consume grass-fed whey or Greek yogurt with 5g creatine before 7:30 PM.
+                    {loggedMealsSummary.count > 0
+                      ? `Computed across ${loggedMealsSummary.count} logged meal(s) today.`
+                      : 'Open AI Meal Scanner or enter a meal to track real daily macros.'}
                   </p>
                 </div>
 
                 <div className="p-3 rounded-[14px] bg-white/[0.04] border border-white/10 space-y-1">
-                  <span className="text-[10px] text-[#38BDF8] font-bold block">3. CIRCADIAN SLEEP ARCHITECTURE</span>
-                  <p className="text-white font-bold text-sm">Target Bedtime: 10:30 PM (8.2h Goal)</p>
+                  <span className="text-[10px] text-[#38BDF8] font-bold block">3. SLEEP & LAB TELEMETRY</span>
+                  <p className="text-white font-bold text-sm">
+                    {appleHealthState?.sleepStages?.totalHours && appleHealthState.sleepStages.totalHours !== '0h 0m'
+                      ? `Sleep: ${appleHealthState.sleepStages.totalHours}`
+                      : bloodworkMarkers.length > 0
+                      ? `${bloodworkMarkers.length} Lab Markers Loaded`
+                      : 'Awaiting Sleep / Lab Upload'}
+                  </p>
                   <p className="text-[11px] text-[#A1A1AA]">
-                    Digital sunset at 9:30 PM. 144mg Magnesium L-Threonate + palatal tongue posture.
+                    {appleHealthState?.sleepStages?.totalHours && appleHealthState.sleepStages.totalHours !== '0h 0m'
+                      ? `Deep: ${appleHealthState.sleepStages.deep.time} · REM: ${appleHealthState.sleepStages.rem.time}`
+                      : 'Sync Apple Health for sleep staging or upload CSV/text labs in Bloodwork OCR.'}
                   </p>
                 </div>
               </div>
 
               {/* Actionable Launchers */}
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10 text-xs font-mono">
-                <span className="text-[#8A8A8A] text-[11px] mr-1">EXECUTE NOW:</span>
+                <span className="text-[#8A8A8A] text-[11px] mr-1">CONNECT OR LAUNCH:</span>
+                {!hasSyncedHealth && (
+                  <button
+                    onClick={() => {
+                      playPlunk();
+                      setIsHealthModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-[10px] bg-[#E5FE40] text-black hover:bg-[#d8f030] font-black transition flex items-center space-x-1.5"
+                  >
+                    <Activity className="w-3.5 h-3.5" />
+                    <span>CONNECT APPLE HEALTH</span>
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     playPlunk();
@@ -694,10 +901,12 @@ export default function App() {
               >
                 <div className="flex items-center justify-between mb-1">
                   <Activity className="w-4 h-4 text-[#10B981]" />
-                  <span className="text-[10px] font-mono text-[#10B981] font-bold">-6.2y AGE</span>
+                  <span className="text-[10px] font-mono text-[#10B981] font-bold">
+                    {phenoAgeVal ? `${phenoAgeVal}y PHENO` : bloodworkMarkers.length > 0 ? `${bloodworkMarkers.length} LABS` : 'UPLOAD LABS'}
+                  </span>
                 </div>
                 <span className="text-xs font-mono font-bold text-white block">PhenoAge Lab</span>
-                <span className="text-[10px] font-mono text-[#8A8A8A]">Epigenetic Reversal</span>
+                <span className="text-[10px] font-mono text-[#8A8A8A]">Clinical Longevity Clock</span>
               </button>
 
               <button
@@ -899,10 +1108,17 @@ export default function App() {
           )}
           {fitnessSubTab === 'recovery' && <RecoveryStrainView healthData={appleHealthState} />}
           {fitnessSubTab === 'thermal' && <ThermalSuite />}
-          {fitnessSubTab === 'decathlon' && <CentenarianDecathlon />}
+          {fitnessSubTab === 'decathlon' && (
+            <CentenarianDecathlon
+              healthData={appleHealthState}
+              onConnectHealth={() => setIsHealthModalOpen(true)}
+            />
+          )}
           {fitnessSubTab === 'muscles' && <MuscleRecoveryMap />}
           {fitnessSubTab === 'workout' && <WorkoutLogger />}
-          {fitnessSubTab === 'strava' && <StravaActivityHub />}
+          {fitnessSubTab === 'strava' && (
+            <StravaActivityHub onConnectHealth={() => setIsHealthModalOpen(true)} />
+          )}
           {fitnessSubTab === 'cgm' && <GlucoseCircadianHub />}
           {fitnessSubTab === 'breathwork' && <BreathworkCoach />}
           {fitnessSubTab === 'habits' && <HabitCorrelations />}
@@ -1026,21 +1242,82 @@ export default function App() {
                 </div>
               </div>
 
-              {/* FACIAL RATIOS & BODY MORPHOLOGY */}
+              {/* FACIAL RATIOS & CRANIOFACIAL CAPTURE */}
+              {!latestFaceScan && (
+                <div className="liquid-glass rounded-[18px] p-4 border border-[#00F0FF]/30 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-mono text-[#00F0FF] uppercase font-black block">
+                      NO FACIAL SCAN CAPTURED YET
+                    </span>
+                    <p className="text-xs font-mono text-[#A1A1AA]">
+                      Run an optical 478-point scan or sync iPhone TrueDepth to populate facial symmetry ratios.
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => {
+                        playPlunk();
+                        setLooksSubTab('lidar');
+                      }}
+                      className="px-3 py-1.5 rounded-[10px] bg-[#00F0FF] text-black font-mono text-[11px] font-black transition"
+                    >
+                      OPEN FACE SCANNER
+                    </button>
+                    <button
+                      onClick={() => {
+                        playPlunk();
+                        setIsHealthModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-white font-mono text-[11px] font-bold transition"
+                    >
+                      SYNC IPHONE
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {Object.entries(LOOKSMAXXING_METRICS).map(([key, data]) => (
-                  <div key={key} className="liquid-glass rounded-[18px] p-4 border border-white/10">
+                {[
+                  {
+                    label: 'Canthal Tilt',
+                    value: latestFaceScan?.canthalTilt || '—',
+                    target: '+4.0° to +7.0°',
+                  },
+                  {
+                    label: 'Facial Symmetry Index',
+                    value: latestFaceScan?.symmetryIndex || '—',
+                    target: '≥ 92%',
+                  },
+                  {
+                    label: 'Midface Ratio',
+                    value: latestFaceScan?.midfaceRatio || '—',
+                    target: '0.95 - 1.05',
+                  },
+                  {
+                    label: 'Facial Width / Height (fWHR)',
+                    value: latestFaceScan?.fwhr || '—',
+                    target: '1.85 - 2.05',
+                  },
+                  {
+                    label: 'Capture Engine',
+                    value: latestFaceScan?.source || 'Not Scanned',
+                    target: 'Camera / TrueDepth',
+                  },
+                  {
+                    label: 'Mewing Session',
+                    value: `${Math.floor(mewingSeconds / 60)}m ${(mewingSeconds % 60).toString().padStart(2, '0')}s`,
+                    target: 'Daily Posture Target',
+                  },
+                ].map((metric) => (
+                  <div key={metric.label} className="liquid-glass rounded-[18px] p-4 border border-white/10">
                     <span className="text-[10px] font-mono text-[#8A8A8A] uppercase block">
-                      {data.label}
+                      {metric.label}
                     </span>
                     <div className="flex items-baseline space-x-2 my-1">
-                      <span className="text-2xl font-mono font-black text-white">{data.value}</span>
-                      <span className="text-[11px] font-mono text-[#10B981] font-bold">
-                        Target: {data.target}
+                      <span className="text-xl font-mono font-black text-white truncate">{metric.value}</span>
+                      <span className="text-[10px] font-mono text-[#10B981] font-bold shrink-0">
+                        {metric.target}
                       </span>
-                    </div>
-                    <div className="w-full h-1 bg-black/40 rounded-full overflow-hidden mt-2">
-                      <div className="h-full bg-[#00F0FF] rounded-full w-4/5" />
                     </div>
                   </div>
                 ))}
@@ -1111,26 +1388,114 @@ export default function App() {
             </div>
           </div>
 
-          {bioSubTab === 'consigliere' && <AIConsigliere />}
-          {bioSubTab === 'phenoage' && <PhenoAgeCalculator />}
-          {bioSubTab === 'ocr' && <BloodworkScanner />}
+          {bioSubTab === 'consigliere' && (
+            <AIConsigliere
+              healthData={appleHealthState}
+              onConnectHealth={() => setIsHealthModalOpen(true)}
+            />
+          )}
+          {bioSubTab === 'phenoage' && (
+            <PhenoAgeCalculator
+              healthData={appleHealthState}
+              onConnectHealth={() => setIsHealthModalOpen(true)}
+              onOpenBloodwork={() => setBioSubTab('ocr')}
+            />
+          )}
+          {bioSubTab === 'ocr' && (
+            <BloodworkScanner onPushToPhenoAge={() => setBioSubTab('phenoage')} />
+          )}
           {bioSubTab === 'overview' && (
             <div className="space-y-6">
+              {bloodworkMarkers.length === 0 && !hasSyncedHealth && (
+                <div className="liquid-glass rounded-[18px] p-5 border border-[#10B981]/30 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <span className="text-[10px] font-mono text-[#10B981] uppercase font-black block">
+                      NO BLOODWORK PANEL OR HEALTHKIT SYNCED YET
+                    </span>
+                    <p className="text-xs font-mono text-[#A1A1AA] mt-0.5">
+                      Upload lab CSV/TXT results or connect Apple Health / iPhone companion to view your real biomarker tiles.
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => {
+                        playPlunk();
+                        setBioSubTab('ocr');
+                      }}
+                      className="px-3 py-1.5 rounded-[10px] bg-[#10B981] text-black font-mono text-[11px] font-black transition"
+                    >
+                      UPLOAD BLOODWORK
+                    </button>
+                    <button
+                      onClick={() => {
+                        playPlunk();
+                        setIsHealthModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-white font-mono text-[11px] font-bold transition"
+                    >
+                      CONNECT APPLE HEALTH
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {BIOMARKER_DATA.map((bio, idx) => (
+                {[
+                  {
+                    marker: 'Resting Heart Rate',
+                    value: rhrVal > 0 ? `${rhrVal} bpm` : '—',
+                    status: rhrVal > 0 ? 'SYNCED' : 'AWAITING SYNC',
+                    target: '< 55 bpm',
+                    delta: appleHealthState?.deviceSource || 'HealthKit',
+                  },
+                  {
+                    marker: 'HRV (SDNN)',
+                    value: hrvVal > 0 ? `${hrvVal} ms` : '—',
+                    status: hrvVal > 0 ? 'SYNCED' : 'AWAITING SYNC',
+                    target: '> 75 ms',
+                    delta: appleHealthState?.lastSynced || 'Not synced',
+                  },
+                  {
+                    marker: 'VO2 Max',
+                    value: vo2Val > 0 ? `${vo2Val} mL/kg/min` : '—',
+                    status: vo2Val > 0 ? 'SYNCED' : 'AWAITING SYNC',
+                    target: '> 50',
+                    delta: 'Cardiorespiratory',
+                  },
+                  {
+                    marker: 'Blood Oxygen (SpO2)',
+                    value: spo2Val > 0 ? `${spo2Val}%` : '—',
+                    status: spo2Val > 0 ? 'SYNCED' : 'AWAITING SYNC',
+                    target: '≥ 97%',
+                    delta: 'Pulse Ox',
+                  },
+                  ...bloodworkMarkers.slice(0, 8).map((bio) => ({
+                    marker: bio.test,
+                    value: `${bio.val ?? bio.value ?? '—'} ${bio.unit || ''}`.trim(),
+                    status: bio.status || 'LOGGED',
+                    target: bio.optimal || 'Reference',
+                    delta: bio.category || 'Bloodwork',
+                  })),
+                ].map((bio, idx) => (
                   <div key={idx} className="liquid-glass rounded-[18px] p-4 border border-white/10">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[10px] font-mono text-[#8A8A8A] uppercase truncate max-w-[120px]">
                         {bio.marker}
                       </span>
-                      <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-[#10B981]/20 text-[#10B981]">
+                      <span
+                        className={`text-[9px] font-mono font-black px-1.5 py-0.5 rounded ${
+                          bio.value === '—'
+                            ? 'bg-white/10 text-[#8A8A8A]'
+                            : 'bg-[#10B981]/20 text-[#10B981]'
+                        }`}
+                      >
                         {bio.status}
                       </span>
                     </div>
                     <span className="text-xl font-mono font-black text-white block my-1">{bio.value}</span>
                     <div className="flex items-center justify-between text-[10px] font-mono text-[#A1A1AA] pt-1 border-t border-white/5">
                       <span>Target: {bio.target}</span>
-                      <span className="text-[#10B981] font-bold">{bio.delta}</span>
+                      <span className="text-[#8A8A8A] font-bold truncate max-w-[90px]">{bio.delta}</span>
                     </div>
                   </div>
                 ))}
@@ -1345,7 +1710,11 @@ export default function App() {
             </div>
           </div>
 
-          {nutritionSubTab === 'macros' ? <NutritionView /> : <MealScanner />}
+          {nutritionSubTab === 'macros' ? (
+            <NutritionView onOpenScanner={() => setNutritionSubTab('scanner')} />
+          ) : (
+            <MealScanner />
+          )}
         </div>
       )}
 
@@ -1407,7 +1776,7 @@ export default function App() {
           )}
 
           {garageSubTab === 'ios18' && (
-            <IOS18WidgetsShowcase />
+            <IOS18WidgetsShowcase healthData={appleHealthState} mewingSeconds={mewingSeconds} />
           )}
         </div>
       )}

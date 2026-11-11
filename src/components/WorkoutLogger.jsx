@@ -23,9 +23,9 @@ const INITIAL_EXERCISES = [
     name: 'Incline Barbell Bench Press',
     muscle: 'Upper Chest / Clavicular Head',
     sets: [
-      { id: 1, setNum: 1, prev: '95 kg x 8', weight: 100, reps: 8, rpe: 8.5, completed: true },
-      { id: 2, setNum: 2, prev: '95 kg x 8', weight: 100, reps: 8, rpe: 9.0, completed: true },
-      { id: 3, setNum: 3, prev: '95 kg x 7', weight: 100, reps: 7, rpe: 9.5, completed: false },
+      { id: 1, setNum: 1, prev: '—', weight: 60, reps: 8, rpe: 8.0, completed: false },
+      { id: 2, setNum: 2, prev: '—', weight: 60, reps: 8, rpe: 8.5, completed: false },
+      { id: 3, setNum: 3, prev: '—', weight: 60, reps: 8, rpe: 9.0, completed: false },
     ],
   },
   {
@@ -33,9 +33,9 @@ const INITIAL_EXERCISES = [
     name: 'Weighted V-Bar Pull-Ups',
     muscle: 'Lats / V-Taper Width',
     sets: [
-      { id: 4, setNum: 1, prev: '+20 kg x 8', weight: 25, reps: 8, rpe: 8.5, completed: true },
-      { id: 5, setNum: 2, prev: '+20 kg x 8', weight: 25, reps: 7, rpe: 9.0, completed: false },
-      { id: 6, setNum: 3, prev: '+20 kg x 6', weight: 25, reps: 6, rpe: 9.5, completed: false },
+      { id: 4, setNum: 1, prev: '—', weight: 0, reps: 8, rpe: 8.0, completed: false },
+      { id: 5, setNum: 2, prev: '—', weight: 0, reps: 8, rpe: 8.5, completed: false },
+      { id: 6, setNum: 3, prev: '—', weight: 0, reps: 8, rpe: 9.0, completed: false },
     ],
   },
   {
@@ -43,15 +43,22 @@ const INITIAL_EXERCISES = [
     name: 'Cable Lateral Raises (Strict)',
     muscle: 'Lateral Delts / Shoulder Cap',
     sets: [
-      { id: 7, setNum: 1, prev: '14 kg x 15', weight: 16, reps: 15, rpe: 9.0, completed: false },
-      { id: 8, setNum: 2, prev: '14 kg x 14', weight: 16, reps: 14, rpe: 9.5, completed: false },
-      { id: 9, setNum: 3, prev: '14 kg x 12', weight: 16, reps: 12, rpe: 10.0, completed: false },
+      { id: 7, setNum: 1, prev: '—', weight: 10, reps: 15, rpe: 8.5, completed: false },
+      { id: 8, setNum: 2, prev: '—', weight: 10, reps: 15, rpe: 9.0, completed: false },
+      { id: 9, setNum: 3, prev: '—', weight: 10, reps: 15, rpe: 9.5, completed: false },
     ],
   },
 ];
 
 export default function WorkoutLogger() {
-  const [exercises, setExercises] = useState(INITIAL_EXERCISES);
+  const [exercises, setExercises] = useState(() => {
+    try {
+      const saved = localStorage.getItem('apex_logged_workouts');
+      return saved ? JSON.parse(saved) : INITIAL_EXERCISES;
+    } catch {
+      return INITIAL_EXERCISES;
+    }
+  });
   const [isRestActive, setIsRestActive] = useState(false);
   const [restSeconds, setRestSeconds] = useState(90);
   const [calcWeight, setCalcWeight] = useState(100);
@@ -81,8 +88,8 @@ export default function WorkoutLogger() {
 
   const toggleSet = (exerciseId, setId) => {
     playPlunk();
-    setExercises((prev) =>
-      prev.map((ex) => {
+    setExercises((prev) => {
+      const updated = prev.map((ex) => {
         if (ex.id === exerciseId) {
           return {
             ...ex,
@@ -101,8 +108,12 @@ export default function WorkoutLogger() {
           };
         }
         return ex;
-      })
-    );
+      });
+      try {
+        localStorage.setItem('apex_logged_workouts', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
   };
 
   // 1RM Brzycki Calculation

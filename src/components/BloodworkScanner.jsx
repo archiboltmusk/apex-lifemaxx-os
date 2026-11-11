@@ -1,55 +1,50 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   FileText,
   Upload,
   CheckCircle,
-  ShieldCheck,
-  Sparkles,
-  Scan,
-  ArrowRight,
   Plus,
   Trash2,
   Edit2,
-  Check,
-  AlertCircle
+  Check
 } from 'lucide-react';
-import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
+import { playPlunk, playCoinChime } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
 
-const INITIAL_BIOMARKERS = [
-  { id: 'apob', test: 'Apolipoprotein B (ApoB)', val: 54, unit: 'mg/dL', ref: '< 60 mg/dL', status: 'LONGEVITY OPTIMAL', tier: 'ideal' },
-  { id: 'free_test', test: 'Free Testosterone (Equilibrium)', val: 26.4, unit: 'pg/mL', ref: '16 - 28 pg/mL', status: 'ELITE ANDROGEN', tier: 'ideal' },
-  { id: 'tot_test', test: 'Total Testosterone (LC/MS)', val: 912, unit: 'ng/dL', ref: '300 - 1000 ng/dL', status: 'TOP 1%', tier: 'ideal' },
-  { id: 'hscrp', test: 'High-Sensitivity CRP (hs-CRP)', val: 0.22, unit: 'mg/L', ref: '< 0.50 mg/L', status: 'ZERO INFLAMMATION', tier: 'ideal' },
-  { id: 'insulin', test: 'Fasting Serum Insulin', val: 2.8, unit: 'uIU/mL', ref: '< 4.0 uIU/mL', status: 'DEEP SENSITIVITY', tier: 'ideal' },
-  { id: 'homocysteine', test: 'Serum Homocysteine', val: 6.8, unit: 'umol/L', ref: '< 8.0 umol/L', status: 'MTHFR OPTIMAL', tier: 'ideal' },
-  { id: 'hba1c', test: 'Hemoglobin A1c (HbA1c)', val: 4.8, unit: '%', ref: '< 5.2%', status: 'NO GLYCATION', tier: 'ideal' },
-  { id: 'vitd', test: 'Vitamin D, 25-Hydroxy', val: 78, unit: 'ng/mL', ref: '60 - 80 ng/mL', status: 'PEAK CIRCADIAN', tier: 'ideal' },
+const LAB_PATTERNS = [
+  { id: 'apob', test: 'Apolipoprotein B (ApoB)', regex: /(?:apob|apolipoprotein\s*b)[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'mg/dL', ref: '< 60 mg/dL' },
+  { id: 'free_test', test: 'Free Testosterone', regex: /free\s*testosterone[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'pg/mL', ref: '16 - 28 pg/mL' },
+  { id: 'tot_test', test: 'Total Testosterone', regex: /total\s*testosterone[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'ng/dL', ref: '300 - 1000 ng/dL' },
+  { id: 'hscrp', test: 'hs-CRP', regex: /(?:hs-?crp|c-?reactive\s*protein)[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'mg/L', ref: '< 0.50 mg/L' },
+  { id: 'glucose', test: 'Fasting Glucose', regex: /glucose[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'mg/dL', ref: '70 - 90 mg/dL' },
+  { id: 'albumin', test: 'Albumin', regex: /albumin[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'g/dL', ref: '4.0 - 5.2 g/dL' },
+  { id: 'creatinine', test: 'Creatinine', regex: /creatinine[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'mg/dL', ref: '0.7 - 1.2 mg/dL' },
+  { id: 'hba1c', test: 'HbA1c', regex: /(?:hba1c|a1c)[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: '%', ref: '< 5.2%' },
+  { id: 'vitd', test: 'Vitamin D, 25-OH', regex: /vitamin\s*d[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)/i, unit: 'ng/mL', ref: '50 - 80 ng/mL' },
 ];
 
 export default function BloodworkScanner({ onPushToPhenoAge }) {
   const [biomarkers, setBiomarkers] = useState(() => {
     try {
       const saved = localStorage.getItem('apex_user_bloodwork');
-      return saved ? JSON.parse(saved) : INITIAL_BIOMARKERS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_BIOMARKERS;
+      return [];
     }
   });
 
   const [activeFileName, setActiveFileName] = useState(() => {
     try {
-      const savedUser = JSON.parse(localStorage.getItem('apex_user_profile') || '{}');
-      const name = (savedUser.name || 'Comprehensive').replace(/\s+/g, '_');
-      return `${name}_Metabolic_Panel.pdf`;
+      return localStorage.getItem('apex_user_bloodwork_file') || '';
     } catch {
-      return 'Comprehensive_Metabolic_Panel.pdf';
+      return '';
     }
   });
-  const [fileSize, setFileSize] = useState('2.4 MB');
+  const [fileSize, setFileSize] = useState('');
   const [isParsing, setIsParsing] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editVal, setEditVal] = useState('');
+  const [parseFeedback, setParseFeedback] = useState('');
 
   // Add custom biomarker inputs
   const [newTest, setNewTest] = useState('');
@@ -60,32 +55,78 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
 
   const fileInputRef = useRef(null);
 
-  // Real File Upload Handler
+  useEffect(() => {
+    const refreshFromStorage = () => {
+      try {
+        const saved = localStorage.getItem('apex_user_bloodwork');
+        if (saved) setBiomarkers(JSON.parse(saved));
+      } catch {}
+    };
+    window.addEventListener('appleHealthSync', refreshFromStorage);
+    return () => window.removeEventListener('appleHealthSync', refreshFromStorage);
+  }, []);
+
+  // Real File Upload & Text/CSV Parser
   const handleFileUpload = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
 
     playPlunk();
     setIsParsing(true);
+    setParseFeedback('');
     setActiveFileName(file.name);
     setFileSize(`${(file.size / (1024 * 1024)).toFixed(2)} MB`);
+    try {
+      localStorage.setItem('apex_user_bloodwork_file', file.name);
+    } catch {}
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      setTimeout(() => {
-        setIsParsing(false);
+      const rawText = typeof event.target?.result === 'string' ? event.target.result : '';
+      const extracted = [];
+      LAB_PATTERNS.forEach((p) => {
+        const m = rawText.match(p.regex);
+        if (m && m[1]) {
+          extracted.push({
+            id: `${p.id}_${Date.now()}`,
+            test: p.test,
+            val: Number(m[1]),
+            unit: p.unit,
+            ref: p.ref,
+            status: 'EXTRACTED FROM LAB',
+            tier: 'ideal',
+          });
+        }
+      });
+
+      setIsParsing(false);
+      if (extracted.length > 0) {
+        const merged = [...extracted, ...biomarkers.filter((b) => !extracted.some((ex) => ex.test === b.test))];
+        setBiomarkers(merged);
+        try {
+          localStorage.setItem('apex_user_bloodwork', JSON.stringify(merged));
+          window.dispatchEvent(new CustomEvent('apex:bloodwork-updated'));
+        } catch {}
+        setParseFeedback(`Extracted ${extracted.length} biomarker(s) from ${file.name}.`);
         playCoinChime();
         try {
-          confetti({
-            particleCount: 50,
-            spread: 60,
-            colors: ['#10B981', '#00F0FF', '#E5FE40'],
-          });
+          confetti({ particleCount: 50, spread: 60, colors: ['#10B981', '#00F0FF', '#E5FE40'] });
         } catch {}
-      }, 900);
+      } else {
+        setShowAddForm(true);
+        setParseFeedback(
+          'Uploaded file stored — automated text extraction is supported for .txt/.csv exports, or use + Add Biomarker (or iPhone Bloodwork OCR for camera PDFs/photos).'
+        );
+      }
     };
 
-    reader.readAsArrayBuffer(file);
+    if (file.type.startsWith('text/') || /\.(txt|csv|json|xml)$/i.test(file.name)) {
+      reader.readAsText(file);
+    } else {
+      setIsParsing(false);
+      setShowAddForm(true);
+      setParseFeedback('Image/PDF attached. For instant optical scanning, open Bloodwork Lab OCR on iPhone APEX Companion, or enter values manually below.');
+    }
   };
 
   // Save biomarker edit
@@ -101,6 +142,7 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
     setEditingId(null);
     try {
       localStorage.setItem('apex_user_bloodwork', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('apex:bloodwork-updated'));
     } catch {}
   };
 
@@ -124,6 +166,7 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
     setBiomarkers(updated);
     try {
       localStorage.setItem('apex_user_bloodwork', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('apex:bloodwork-updated'));
     } catch {}
 
     setNewTest('');
@@ -138,6 +181,7 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
     setBiomarkers(updated);
     try {
       localStorage.setItem('apex_user_bloodwork', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('apex:bloodwork-updated'));
     } catch {}
   };
 
@@ -197,16 +241,20 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
         </div>
 
         {/* Upload Status Card */}
-        <div className="p-4 rounded-[18px] bg-black/60 border border-white/10 flex items-center justify-between text-xs font-mono">
+        <div className="p-4 rounded-[18px] bg-black/60 border border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
           <div className="flex items-center space-x-2.5">
-            <CheckCircle className="w-4 h-4 text-[#10B981]" />
+            <CheckCircle className={`w-4 h-4 ${activeFileName || biomarkers.length > 0 ? 'text-[#10B981]' : 'text-[#8A8A8A]'}`} />
             <div>
-              <span className="text-white font-bold block">{activeFileName}</span>
-              <span className="text-[10px] text-[#8A8A8A]">Specimen Size: {fileSize} · Verified Local Record</span>
+              <span className="text-white font-bold block">
+                {activeFileName || (biomarkers.length > 0 ? 'Manual / iPhone Lab Panel' : 'No Lab File Uploaded Yet')}
+              </span>
+              <span className="text-[10px] text-[#8A8A8A]">
+                {parseFeedback || (fileSize ? `Specimen Size: ${fileSize}` : 'Upload Quest/Labcorp CSV/TXT or scan physical labs on iPhone APEX Companion')}
+              </span>
             </div>
           </div>
           <span className="text-[#10B981] font-black">
-            {isParsing ? 'ANALYZING BYTES...' : `${biomarkers.length} BIOMARKERS ACTIVE`}
+            {isParsing ? 'PARSING FILE...' : `${biomarkers.length} BIOMARKERS RECORDED`}
           </span>
         </div>
       </div>
@@ -276,10 +324,16 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
             MEASURED CLINICAL BIOMARKERS & LONGEVITY TARGETS
           </h4>
           <span className="text-xs font-mono text-[#10B981] font-bold">
-            {biomarkers.length} Real Records Synced
+            {biomarkers.length} Real Records
           </span>
         </div>
 
+        {biomarkers.length === 0 ? (
+          <div className="p-8 text-center text-xs font-mono text-[#A1A1AA] border border-dashed border-white/15 rounded-[18px] space-y-2">
+            <p className="text-white font-bold">No bloodwork records loaded yet.</p>
+            <p>Upload a .csv/.txt lab report, click + Add Biomarker above, or scan your printed labs using iPhone Bloodwork OCR and tap Sync.</p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {biomarkers.map((lab) => (
             <div
@@ -342,6 +396,7 @@ export default function BloodworkScanner({ onPushToPhenoAge }) {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

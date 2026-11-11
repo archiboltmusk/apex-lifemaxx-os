@@ -10,10 +10,10 @@ export function parseAppleHealthXML(xmlString) {
       moveCalories: 0,
       exerciseMinutes: 0,
       standHours: 0,
-      restingHeartRate: 48,
-      hrvMs: 94,
-      vo2Max: 58.4,
-      waterMl: 2400,
+      restingHeartRate: null,
+      hrvMs: null,
+      vo2Max: null,
+      waterMl: 0,
     },
     workouts: [],
     recentSamples: [],
@@ -88,9 +88,9 @@ export function parseAppleHealthXML(xmlString) {
     }
 
     result.totalRecords = count;
-    result.metrics.moveCalories = Math.round(totalMove) || 780;
-    result.metrics.exerciseMinutes = Math.round(totalExercise) || 52;
-    result.metrics.standHours = Math.max(standHoursSet.size, 12);
+    result.metrics.moveCalories = Math.round(totalMove);
+    result.metrics.exerciseMinutes = Math.round(totalExercise);
+    result.metrics.standHours = standHoursSet.size;
     if (latestRHR) result.metrics.restingHeartRate = latestRHR;
     if (latestHRV) result.metrics.hrvMs = latestHRV;
     if (latestVO2) result.metrics.vo2Max = latestVO2;

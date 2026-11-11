@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Activity,
   ShieldCheck,
@@ -18,37 +18,87 @@ import {
 import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
 
-export default function PhenoAgeCalculator() {
+const readSavedLabs = () => {
+  try {
+    return JSON.parse(localStorage.getItem('apex_user_bloodwork') || '[]');
+  } catch {
+    return [];
+  }
+};
+
+export default function PhenoAgeCalculator({ healthData, onConnectHealth, onOpenBloodwork }) {
   const [activeEngine, setActiveEngine] = useState('livity_fitness'); // 'livity_fitness' | 'morgan_levine'
+  const [hasUserSimulated, setHasUserSimulated] = useState(false);
+  const [hasRealLabs, setHasRealLabs] = useState(() => readSavedLabs().length > 0);
   const [chronoAge, setChronoAge] = useState(() => {
+    if (healthData?.chronologicalAge > 0) return healthData.chronologicalAge;
     try {
       const savedUser = JSON.parse(localStorage.getItem('apex_user_profile') || '{}');
-      return savedUser.age || 26;
+      return savedUser.age || 28;
     } catch {
-      return 26;
+      return 28;
     }
   });
 
-  // Livity 8 Key Metrics State
-  const [vo2Max, setVo2Max] = useState(54.2); // mL/kg/min (Top 1%)
-  const [restingHR, setRestingHR] = useState(48); // bpm
-  const [hrvSDNN, setHrvSDNN] = useState(94); // ms
-  const [sleepHours, setSleepHours] = useState(8.2); // hours
-  const [dailySteps, setDailySteps] = useState(12400); // steps
-  const [modActivityMin, setModActivityMin] = useState(45); // Zone 2 min/day
-  const [vigActivityMin, setVigActivityMin] = useState(25); // Zone 4/5 min/day
-  const [strengthSessions, setStrengthSessions] = useState(4); // sessions/week
+  // Livity 8 Key Metrics State (seeded ONLY from synced Apple Health telemetry, or honest baselines until synced)
+  const [vo2Max, setVo2Max] = useState(healthData?.metrics?.vo2Max?.value || 42);
+  const [restingHR, setRestingHR] = useState(healthData?.metrics?.restingHeartRate?.value || 62);
+  const [hrvSDNN, setHrvSDNN] = useState(healthData?.metrics?.hrv?.value || 55);
+  const [sleepHours, setSleepHours] = useState(healthData?.metrics?.sleep?.totalHours || 7.2);
+  const [dailySteps, setDailySteps] = useState(Number(String(healthData?.metrics?.steps?.value || '0').replace(/,/g, '')) || 6500);
+  const [modActivityMin, setModActivityMin] = useState(healthData?.activityRings?.exercise?.current || 20);
+  const [vigActivityMin, setVigActivityMin] = useState(10);
+  const [strengthSessions, setStrengthSessions] = useState(2);
 
-  // Morgan Levine Clinical Blood Panel State
-  const [albumin, setAlbumin] = useState(4.8); // g/dL
-  const [creatinine, setCreatinine] = useState(0.92); // mg/dL
-  const [glucose, setGlucose] = useState(82); // mg/dL
-  const [hsCRP, setHsCRP] = useState(0.22); // mg/L
-  const [lymphPct, setLymphPct] = useState(34); // %
-  const [mcv, setMcv] = useState(88.5); // fL
-  const [rdw, setRdw] = useState(11.8); // %
-  const [alkPhos, setAlkPhos] = useState(48); // U/L
-  const [wbc, setWbc] = useState(4.6); // 1000/uL
+  // Morgan Levine Clinical Blood Panel State (populated from apex_user_bloodwork or iPhone Bloodwork OCR)
+  const [albumin, setAlbumin] = useState(4.5);
+  const [creatinine, setCreatinine] = useState(0.92);
+  const [glucose, setGlucose] = useState(85);
+  const [hsCRP, setHsCRP] = useState(0.5);
+  const [lymphPct, setLymphPct] = useState(30);
+  const [mcv, setMcv] = useState(89.0);
+  const [rdw, setRdw] = useState(12.3);
+  const [alkPhos, setAlkPhos] = useState(64);
+  const [wbc, setWbc] = useState(5.4);
+
+  useEffect(() => {
+    if (healthData?.chronologicalAge > 0) setChronoAge(healthData.chronologicalAge);
+    if (healthData?.metrics?.vo2Max?.value > 0) setVo2Max(healthData.metrics.vo2Max.value);
+    if (healthData?.metrics?.restingHeartRate?.value > 0) setRestingHR(healthData.metrics.restingHeartRate.value);
+    if (healthData?.metrics?.hrv?.value > 0) setHrvSDNN(healthData.metrics.hrv.value);
+    if (healthData?.metrics?.sleep?.totalHours > 0) setSleepHours(healthData.metrics.sleep.totalHours);
+    const parsedSteps = Number(String(healthData?.metrics?.steps?.value || '0').replace(/,/g, ''));
+    if (parsedSteps > 0) setDailySteps(parsedSteps);
+    if (healthData?.activityRings?.exercise?.current > 0) setModActivityMin(healthData.activityRings.exercise.current);
+  }, [healthData]);
+
+  useEffect(() => {
+    const syncLabs = () => {
+      const labs = readSavedLabs();
+      setHasRealLabs(labs.length > 0);
+      labs.forEach((lab) => {
+        const name = (lab.test || '').toLowerCase();
+        const val = Number(lab.val);
+        if (isNaN(val)) return;
+        if (name.includes('albumin')) setAlbumin(val);
+        else if (name.includes('creatinine')) setCreatinine(val);
+        else if (name.includes('glucose')) setGlucose(val);
+        else if (name.includes('crp')) setHsCRP(val);
+        else if (name.includes('lymph')) setLymphPct(val);
+        else if (name.includes('mcv')) setMcv(val);
+        else if (name.includes('rdw')) setRdw(val);
+        else if (name.includes('alk')) setAlkPhos(val);
+        else if (name.includes('wbc')) setWbc(val);
+      });
+    };
+    syncLabs();
+    window.addEventListener('apex:bloodwork-updated', syncLabs);
+    window.addEventListener('appleHealthSync', syncLabs);
+    return () => {
+      window.removeEventListener('apex:bloodwork-updated', syncLabs);
+      window.removeEventListener('appleHealthSync', syncLabs);
+    };
+  }, []);
 
   // Livity Fitness Age Calculation (Based on 8 Key Health Metrics)
   const calculateLivityFitnessAge = () => {
@@ -111,9 +161,50 @@ export default function PhenoAgeCalculator() {
   const currentAge = activeEngine === 'livity_fitness' ? livityAge : phenoAge;
   const ageDelta = +(currentAge - chronoAge).toFixed(1);
   const isReversed = ageDelta < 0;
+  const hasRealHealthVitals = (healthData?.metrics?.hrv?.value || 0) > 0 || (healthData?.metrics?.restingHeartRate?.value || 0) > 0 || (healthData?.metrics?.vo2Max?.value || 0) > 0;
+  const showActiveMetrics = activeEngine === 'livity_fitness' ? (hasRealHealthVitals || hasUserSimulated) : (hasRealLabs || hasUserSimulated);
 
   return (
     <div className="space-y-6">
+      {!showActiveMetrics && (
+        <div className="liquid-glass rounded-[20px] p-4 border border-[#10B981]/30 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+          <div>
+            <span className="text-[#10B981] font-black block">
+              {activeEngine === 'livity_fitness' ? 'CONNECT APPLE HEALTH FOR REAL FITNESS AGE' : 'UPLOAD BLOODWORK OR SCAN LAB SHEET ON IPHONE'}
+            </span>
+            <span className="text-[#A1A1AA]">
+              {activeEngine === 'livity_fitness'
+                ? 'Waiting for your real VO2 Max, RHR, HRV & Sleep from Apple Health — or drag sliders below to test scenarios.'
+                : 'No lab PDF/CSV or blood chemistry entered yet. Upload labs or adjust sliders below to compute Levine PhenoAge.'}
+            </span>
+          </div>
+          <div className="flex items-center space-x-2">
+            {activeEngine === 'livity_fitness' && onConnectHealth && (
+              <button
+                onClick={() => {
+                  playPlunk();
+                  onConnectHealth();
+                }}
+                className="px-3.5 py-2 rounded-[10px] bg-[#10B981] text-black font-black"
+              >
+                CONNECT APPLE HEALTH
+              </button>
+            )}
+            {activeEngine === 'morgan_levine' && onOpenBloodwork && (
+              <button
+                onClick={() => {
+                  playPlunk();
+                  onOpenBloodwork();
+                }}
+                className="px-3.5 py-2 rounded-[10px] bg-[#00F0FF] text-black font-black"
+              >
+                UPLOAD LABS
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* HERO BIOLOGICAL / FITNESS AGE READOUT */}
       <div className="liquid-glass-elevated rounded-[26px] p-6 border border-white/20 relative overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -136,11 +227,15 @@ export default function PhenoAgeCalculator() {
               {activeEngine === 'livity_fitness' ? 'FITNESS AGE' : 'BIOLOGICAL AGE'}
             </span>
             <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-mono font-black text-white">{currentAge}</span>
-              <span className="text-xs font-mono text-[#8A8A8A]">years</span>
+              <span className="text-4xl font-mono font-black text-white">{showActiveMetrics ? currentAge : '—'}</span>
+              <span className="text-xs font-mono text-[#8A8A8A]">{showActiveMetrics ? 'years' : ''}</span>
             </div>
             <span className="text-xs font-mono font-black text-[#10B981]">
-              {isReversed ? `${Math.abs(ageDelta)} YEARS YOUNGER` : `+${ageDelta} Years Advanced`}
+              {!showActiveMetrics
+                ? 'Awaiting real telemetry'
+                : isReversed
+                ? `${Math.abs(ageDelta)} YEARS YOUNGER`
+                : `+${ageDelta} Years Advanced`}
             </span>
           </div>
         </div>
@@ -183,11 +278,13 @@ export default function PhenoAgeCalculator() {
             <ShieldCheck className="w-4 h-4 text-[#00F0FF]" />
             <span className="text-white">
               {activeEngine === 'livity_fitness'
-                ? 'Fitness age computed across VO2 Max, Sleep, Resting HR & Workouts'
-                : 'DunedinPACE Rate of Biological Aging: 0.74x / year'}
+                ? 'Fitness age computed from VO2 Max, Sleep, Resting HR & Workouts'
+                : 'Morgan Levine (2018) 9-biomarker clinical epigenetic age equation'}
             </span>
           </div>
-          <span className="text-[#10B981] font-bold">Top 0.01% Longevity Tier</span>
+          <span className="text-[#10B981] font-bold">
+            {showActiveMetrics ? (hasUserSimulated && !hasRealHealthVitals && !hasRealLabs ? 'WHAT-IF SIMULATION' : 'MEASURED DATA') : 'AWAITING SYNC'}
+          </span>
         </div>
       </div>
 
@@ -219,10 +316,10 @@ export default function PhenoAgeCalculator() {
                 max="75"
                 step="0.5"
                 value={vo2Max}
-                onChange={(e) => setVo2Max(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setVo2Max(Number(e.target.value)); }}
                 className="w-full accent-[#FA114F]"
               />
-              <span className="text-[9px] text-[#8A8A8A] block">Top 1% Longevity Indicator</span>
+              <span className="text-[9px] text-[#8A8A8A] block">Cardiorespiratory capacity indicator</span>
             </div>
 
             {/* 2. Resting HR */}
@@ -240,7 +337,7 @@ export default function PhenoAgeCalculator() {
                 max="85"
                 step="1"
                 value={restingHR}
-                onChange={(e) => setRestingHR(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setRestingHR(Number(e.target.value)); }}
                 className="w-full accent-[#10B981]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Athletic Bradycardia Baseline</span>
@@ -261,7 +358,7 @@ export default function PhenoAgeCalculator() {
                 max="160"
                 step="1"
                 value={hrvSDNN}
-                onChange={(e) => setHrvSDNN(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setHrvSDNN(Number(e.target.value)); }}
                 className="w-full accent-[#00F0FF]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Autonomic Vagal Resilience</span>
@@ -282,7 +379,7 @@ export default function PhenoAgeCalculator() {
                 max="10"
                 step="0.1"
                 value={sleepHours}
-                onChange={(e) => setSleepHours(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setSleepHours(Number(e.target.value)); }}
                 className="w-full accent-[#38BDF8]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Deep & REM restorative phase</span>
@@ -303,7 +400,7 @@ export default function PhenoAgeCalculator() {
                 max="25000"
                 step="500"
                 value={dailySteps}
-                onChange={(e) => setDailySteps(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setDailySteps(Number(e.target.value)); }}
                 className="w-full accent-[#E5FE40]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Non-exercise activity thermogenesis</span>
@@ -324,7 +421,7 @@ export default function PhenoAgeCalculator() {
                 max="90"
                 step="5"
                 value={modActivityMin}
-                onChange={(e) => setModActivityMin(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setModActivityMin(Number(e.target.value)); }}
                 className="w-full accent-[#F59E0B]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Mitochondrial lipid oxidation</span>
@@ -345,7 +442,7 @@ export default function PhenoAgeCalculator() {
                 max="60"
                 step="5"
                 value={vigActivityMin}
-                onChange={(e) => setVigActivityMin(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setVigActivityMin(Number(e.target.value)); }}
                 className="w-full accent-[#EC4899]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Myocardial contractile output</span>
@@ -366,7 +463,7 @@ export default function PhenoAgeCalculator() {
                 max="7"
                 step="1"
                 value={strengthSessions}
-                onChange={(e) => setStrengthSessions(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setStrengthSessions(Number(e.target.value)); }}
                 className="w-full accent-[#A855F7]"
               />
               <span className="text-[9px] text-[#8A8A8A] block">Bone mineral density & myokines</span>
@@ -399,7 +496,7 @@ export default function PhenoAgeCalculator() {
                 max="5.5"
                 step="0.1"
                 value={albumin}
-                onChange={(e) => setAlbumin(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setAlbumin(Number(e.target.value)); }}
                 className="w-full accent-[#00F0FF]"
               />
               <span className="text-[10px] text-[#8A8A8A] block">Liver synthesis & osmotic pressure</span>
@@ -416,7 +513,7 @@ export default function PhenoAgeCalculator() {
                 max="3.0"
                 step="0.05"
                 value={hsCRP}
-                onChange={(e) => setHsCRP(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setHsCRP(Number(e.target.value)); }}
                 className="w-full accent-[#FA114F]"
               />
               <span className="text-[10px] text-[#8A8A8A] block">Systemic vascular inflammatory load</span>
@@ -433,7 +530,7 @@ export default function PhenoAgeCalculator() {
                 max="130"
                 step="1"
                 value={glucose}
-                onChange={(e) => setGlucose(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setGlucose(Number(e.target.value)); }}
                 className="w-full accent-[#E5FE40]"
               />
               <span className="text-[10px] text-[#8A8A8A] block">Insulin sensitivity & glycation</span>
@@ -450,7 +547,7 @@ export default function PhenoAgeCalculator() {
                 max="45"
                 step="1"
                 value={lymphPct}
-                onChange={(e) => setLymphPct(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setLymphPct(Number(e.target.value)); }}
                 className="w-full accent-[#10B981]"
               />
               <span className="text-[10px] text-[#8A8A8A] block">Adaptive immune competence</span>
@@ -467,7 +564,7 @@ export default function PhenoAgeCalculator() {
                 max="1.6"
                 step="0.05"
                 value={creatinine}
-                onChange={(e) => setCreatinine(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setCreatinine(Number(e.target.value)); }}
                 className="w-full accent-[#8B5CF6]"
               />
               <span className="text-[10px] text-[#8A8A8A] block">Glomerular filtration rate</span>
@@ -484,7 +581,7 @@ export default function PhenoAgeCalculator() {
                 max="16.0"
                 step="0.1"
                 value={rdw}
-                onChange={(e) => setRdw(Number(e.target.value))}
+                onChange={(e) => { setHasUserSimulated(true); setRdw(Number(e.target.value)); }}
                 className="w-full accent-[#00D6E6]"
               />
               <span className="text-[10px] text-[#8A8A8A] block">Bone marrow cell uniformity</span>

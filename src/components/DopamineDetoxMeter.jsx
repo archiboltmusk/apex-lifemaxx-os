@@ -5,7 +5,6 @@ import confetti from 'canvas-confetti';
 
 export default function DopamineDetoxMeter() {
   const [isMonkModeOn, setIsMonkModeOn] = useState(false);
-  const [dopamineScore, setDopamineScore] = useState(91);
 
   const toggleMonkMode = () => {
     playPlunk();
@@ -22,6 +21,18 @@ export default function DopamineDetoxMeter() {
       } catch {}
     }
   };
+
+  const hasMealsOrWorkouts = (() => {
+    try {
+      const m = JSON.parse(localStorage.getItem('apex_logged_meals') || '[]');
+      const v = JSON.parse(localStorage.getItem('apex_camera_workouts') || '[]');
+      return m.length > 0 || v.length > 0;
+    } catch {
+      return false;
+    }
+  })();
+
+  const dopamineScore = isMonkModeOn ? (hasMealsOrWorkouts ? 100 : 50) : (hasMealsOrWorkouts ? 50 : 0);
 
   return (
     <div className={`space-y-6 transition-all ${isMonkModeOn ? 'filter sepia-[0.3] contrast-105' : ''}`}>
@@ -48,8 +59,10 @@ export default function DopamineDetoxMeter() {
           </div>
 
           <div className="text-right">
-            <span className="text-[10px] font-mono text-[#8A8A8A] uppercase block">D2 SENSITIVITY</span>
-            <span className="text-2xl font-mono font-black text-[#10B981]">{dopamineScore}%</span>
+            <span className="text-[10px] font-mono text-[#8A8A8A] uppercase block">SESSION DISCIPLINE</span>
+            <span className="text-2xl font-mono font-black text-[#10B981]">
+              {dopamineScore > 0 ? `${dopamineScore}%` : '—'}
+            </span>
           </div>
         </div>
 
@@ -88,41 +101,53 @@ export default function DopamineDetoxMeter() {
         </div>
       </div>
 
-      {/* DOPAMINE SOURCE BREAKDOWN */}
+      {/* PROTOCOL GUIDELINES (REAL TIME & SYNC TRACKING) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Hard Earned Dopamine */}
         <div className="liquid-glass rounded-[24px] p-5 border border-white/10 space-y-3">
           <div className="flex items-center space-x-2 text-xs font-mono text-[#10B981] font-bold">
             <CheckCircle2 className="w-4 h-4" />
-            <span>EARNED HIGH-FRICTION DOPAMINE (+420 XP)</span>
+            <span>HIGH-FRICTION PROTOCOLS</span>
           </div>
           <div className="space-y-2 text-xs font-mono">
             <div className="p-2.5 rounded-[12px] bg-black/40 border border-white/5 flex justify-between">
-              <span className="text-white">Cryo Cold Plunge (4°C for 3m)</span>
-              <span className="text-[#10B981] font-bold">+250% Sustained</span>
+              <span className="text-white">Monk Mode Lock</span>
+              <span className="text-[#10B981] font-bold">{isMonkModeOn ? 'ACTIVE NOW' : 'STANDBY'}</span>
             </div>
             <div className="p-2.5 rounded-[12px] bg-black/40 border border-white/5 flex justify-between">
-              <span className="text-white">90-Minute Unbroken Code Sprint</span>
-              <span className="text-[#10B981] font-bold">+180% Baseline</span>
+              <span className="text-white">Cryo & Sauna Suite</span>
+              <span className="text-[#8A8A8A]">Run timer in Fitness tab</span>
             </div>
             <div className="p-2.5 rounded-[12px] bg-black/40 border border-white/5 flex justify-between">
-              <span className="text-white">Heavy Overhead Press & Deadlift</span>
-              <span className="text-[#10B981] font-bold">+160% Neuro-Drive</span>
+              <span className="text-white">40Hz Flow Sprint & Strength</span>
+              <span className="text-[#8A8A8A]">Verify via Camera or Logs</span>
             </div>
           </div>
         </div>
 
-        {/* Digital Sunset */}
         <div className="liquid-glass rounded-[24px] p-5 border border-white/10 space-y-3">
           <div className="flex items-center space-x-2 text-xs font-mono text-[#F59E0B] font-bold">
             <Moon className="w-4 h-4" />
-            <span>DIGITAL SUNSET COUNTDOWN</span>
+            <span>DIGITAL SUNSET WINDOW</span>
           </div>
           <div className="p-4 rounded-[18px] bg-black/50 border border-white/10 text-center space-y-1">
-            <span className="text-2xl font-mono font-black text-white">02h 14m</span>
-            <span className="text-[10px] font-mono text-[#8A8A8A] block">
-              Until mandatory 99% Amber Blue-Blocker Eyewear & Screen Cutoff
-            </span>
+            {(() => {
+              const now = new Date();
+              const sunset = new Date(now);
+              sunset.setHours(21, 30, 0, 0);
+              const diffMin = Math.max(0, Math.round((sunset - now) / 60000));
+              const h = Math.floor(diffMin / 60);
+              const m = diffMin % 60;
+              return (
+                <>
+                  <span className="text-2xl font-mono font-black text-white">
+                    {diffMin === 0 ? 'ACTIVE NOW' : `${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m`}
+                  </span>
+                  <span className="text-[10px] font-mono text-[#8A8A8A] block">
+                    Live countdown to 9:30 PM blue-light cutoff
+                  </span>
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>

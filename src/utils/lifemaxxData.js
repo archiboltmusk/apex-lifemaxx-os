@@ -1,12 +1,12 @@
 // Comprehensive Lifemaxxing Datasets, Apple Health, CRED Rewards, Biometric Hardware & Protocols
 
 export const INITIAL_PILLARS = [
-  { id: 'looks', name: 'Looksmaxxing', score: 92, color: '#00F0FF', icon: 'Sparkles', desc: 'Facial symmetry, lean mass, skin architecture, posture' },
-  { id: 'bio', name: 'Biomaxxing', score: 96, color: '#10B981', icon: 'Activity', desc: 'Biological age reduction, VO2 max, ApoB, hormonal balance' },
-  { id: 'brain', name: 'Brainmaxxing', score: 90, color: '#8B5CF6', icon: 'Brain', desc: 'Flow state hours, dopamine detox, cognitive velocity' },
-  { id: 'wealth', name: 'Wealthmaxxing', score: 88, color: '#F59E0B', icon: 'TrendingUp', desc: 'Code/media leverage, capital velocity, freedom runway' },
-  { id: 'sleep', name: 'Sleepmaxxing', score: 95, color: '#38BDF8', icon: 'Moon', desc: 'Deep sleep %, HRV 94ms, circadian alignment' },
-  { id: 'fitness', name: 'Fitness & Strain', score: 94, color: '#FA114F', icon: 'Flame', desc: 'Whoop strain 16.8, Zone 2 cardio, 1RM strength' }
+  { id: 'looks', name: 'Looksmaxxing', score: null, color: '#00F0FF', icon: 'Sparkles', desc: 'Facial symmetry, jaw angle, vocal pitch & posture' },
+  { id: 'bio', name: 'Biomaxxing', score: null, color: '#10B981', icon: 'Activity', desc: 'Biological age, VO2 max, ApoB, bloodwork & labs' },
+  { id: 'brain', name: 'Brainmaxxing', score: null, color: '#8B5CF6', icon: 'Brain', desc: 'Flow sprints, dopamine detox, N-Back focus' },
+  { id: 'wealth', name: 'Wealthmaxxing', score: null, color: '#F59E0B', icon: 'TrendingUp', desc: 'Deep work sprints, execution streak & leverage' },
+  { id: 'sleep', name: 'Sleepmaxxing', score: null, color: '#38BDF8', icon: 'Moon', desc: 'Sleep staging, HRV, circadian light alignment' },
+  { id: 'fitness', name: 'Fitness & Strain', score: null, color: '#FA114F', icon: 'Flame', desc: 'Daily strain, workouts, VBT & cardio zones' }
 ];
 
 export const APPLE_HEALTH_DATA = {
@@ -40,91 +40,35 @@ export const APPLE_HEALTH_DATA = {
 };
 
 export const RECOVERY_STRAIN_DATA = {
-  recoveryScore: 94, // 0 - 100
-  recoveryStatus: 'PEAK RECOVERY',
-  recoveryMessage: 'High parasympathetic dominance detected (HRV 94ms). Your nervous system is primed for max cognitive & physical strain today.',
-  strainCurrent: 16.8,
+  recoveryScore: 0,
+  recoveryStatus: 'AWAITING HEALTHKIT',
+  recoveryMessage: 'Connect Apple Health or import your health export to compute readiness from HRV and resting heart rate.',
+  strainCurrent: 0,
   strainTarget: 18.0,
-  caloriesBurned: 2940,
+  caloriesBurned: 0,
   zones: [
-    { zone: 'Zone 1 (Restorative)', range: '< 110 bpm', time: '4h 12m', pct: 45 },
-    { zone: 'Zone 2 (Mitochondrial)', range: '110-135 bpm', time: '1h 15m', pct: 35 },
-    { zone: 'Zone 3 (Aerobic Tempo)', range: '135-155 bpm', time: '30m', pct: 12 },
-    { zone: 'Zone 4 (Threshold)', range: '155-172 bpm', time: '18m', pct: 6 },
-    { zone: 'Zone 5 (Max VO2)', range: '172+ bpm', time: '6m', pct: 2 },
+    { zone: 'Zone 1 (Restorative)', range: '< 110 bpm', time: '0m', pct: 0 },
+    { zone: 'Zone 2 (Mitochondrial)', range: '110-135 bpm', time: '0m', pct: 0 },
+    { zone: 'Zone 3 (Aerobic Tempo)', range: '135-155 bpm', time: '0m', pct: 0 },
+    { zone: 'Zone 4 (Threshold)', range: '155-172 bpm', time: '0m', pct: 0 },
+    { zone: 'Zone 5 (Max VO2)', range: '172+ bpm', time: '0m', pct: 0 },
   ]
 };
 
-export const HARDWARE_GARAGE = [
-  {
-    id: 'h1',
-    name: 'Apple Watch Ultra 2',
-    model: 'Titanium (49mm) · watchOS 11.2',
-    category: 'Vitals & ECG',
-    battery: '88%',
-    signal: 'Connected (BLE 5.3)',
-    status: 'ACTIVE SENSING',
-    icon: 'Watch',
-    accent: '#FA114F'
-  },
-  {
-    id: 'h2',
-    name: 'Oura Ring Gen 4',
-    model: 'Horizon Brushed Silver · Size 10',
-    category: 'Sleep & Temperature',
-    battery: '74%',
-    signal: 'Synced 8m ago',
-    status: 'OPTIMAL',
-    icon: 'Disc',
-    accent: '#8B5CF6'
-  },
-  {
-    id: 'h3',
-    name: 'Whoop 4.0 Onyx',
-    model: 'SuperKnit HydroBand',
-    category: 'Cardio Strain & HRV',
-    battery: '91%',
-    signal: 'Continuous 100Hz',
-    status: 'REAL-TIME',
-    icon: 'Activity',
-    accent: '#00F0FF'
-  },
-  {
-    id: 'h4',
-    name: 'Dexcom G7 CGM',
-    model: 'Tricep Sub-Q Sensor',
-    category: 'Continuous Glucose',
-    battery: '8 Days Left',
-    signal: '88 mg/dL Flat',
-    status: 'METABOLIC PEAK',
-    icon: 'Zap',
-    accent: '#10B981'
-  },
-  {
-    id: 'h5',
-    name: 'Eight Sleep Pod 4 Ultra',
-    model: 'Dynamic Autopilot Cover',
-    category: 'Thermal Regulation',
-    battery: 'Mains Powered',
-    signal: '-2.5°F Target',
-    status: 'READY FOR SLEEP',
-    icon: 'Moon',
-    accent: '#38BDF8'
-  }
-];
+export const HARDWARE_GARAGE = [];
 
 export const NUTRITION_MACRO_DATA = {
-  calories: { current: 2280, target: 2600, unit: 'kcal' },
-  protein: { current: 198, target: 205, unit: 'g' },
-  carbs: { current: 210, target: 240, unit: 'g' },
-  fats: { current: 62, target: 68, unit: 'g' },
-  water: { current: 3.6, target: 4.0, unit: 'L' },
+  calories: { current: 0, target: 2600, unit: 'kcal' },
+  protein: { current: 0, target: 205, unit: 'g' },
+  carbs: { current: 0, target: 240, unit: 'g' },
+  fats: { current: 0, target: 68, unit: 'g' },
+  water: { current: 0, target: 4.0, unit: 'L' },
   supplements: [
-    { name: 'NMN (Nicotinamide Mononucleotide)', dose: '1,000 mg', timing: 'Morning', taken: true },
-    { name: 'Trans-Resveratrol (with fats)', dose: '500 mg', timing: 'Morning', taken: true },
-    { name: 'Creatine Monohydrate', dose: '5,000 mg', timing: 'Post-Workout', taken: true },
-    { name: 'EPA/DHA Ultra-Pure Omega-3', dose: '2,400 mg', timing: 'With Lunch', taken: true },
-    { name: 'Vitamin D3 + K2 (MK-7)', dose: '5,000 IU', timing: 'Morning', taken: true },
+    { name: 'NMN (Nicotinamide Mononucleotide)', dose: '1,000 mg', timing: 'Morning', taken: false },
+    { name: 'Trans-Resveratrol (with fats)', dose: '500 mg', timing: 'Morning', taken: false },
+    { name: 'Creatine Monohydrate', dose: '5,000 mg', timing: 'Post-Workout', taken: false },
+    { name: 'EPA/DHA Ultra-Pure Omega-3', dose: '2,400 mg', timing: 'With Lunch', taken: false },
+    { name: 'Vitamin D3 + K2 (MK-7)', dose: '5,000 IU', timing: 'Morning', taken: false },
     { name: 'Magnesium L-Threonate', dose: '144 mg', timing: '9:00 PM', taken: false },
     { name: 'Apigenin', dose: '50 mg', timing: '9:30 PM', taken: false },
     { name: 'L-Theanine + Glycine', dose: '200mg / 3g', timing: '9:30 PM', taken: false }
@@ -140,38 +84,22 @@ export const CRED_REWARDS_POOL = [
 ];
 
 export const DAILY_PROTOCOLS = [
-  { id: 'p1', time: '06:00 AM', title: 'Circadian Lux Exposure', category: 'sleep', desc: '10-15m direct sunlight in eyes. Suppresses melatonin, spikes cortisol awakening response.', completed: true, xp: 50 },
-  { id: 'p2', time: '06:30 AM', title: '500ml Cellular Hydration & Electrolytes', category: 'bio', desc: 'Spring water + 1/2 tsp Himalayan salt + magnesium glycinate.', completed: true, xp: 40 },
-  { id: 'p3', time: '07:00 AM', title: 'Zone 2 Metabolic Flush (Apple Health Synced)', category: 'bio', desc: '45 mins steady-state nasal breathing (HR 130-140 bpm). Mitochondrial biogenesis.', completed: true, xp: 120 },
-  { id: 'p4', time: '08:15 AM', title: 'Cryo Shock Cold Plunge (4°C)', category: 'bio', desc: '3 mins cold immersion. 250% sustained dopamine elevation for 4 hours.', completed: true, xp: 90 },
-  { id: 'p5', time: '09:00 AM', title: 'Morning Neuro Longevity Stack', category: 'brain', desc: 'NMN 1000mg + L-Theanine 200mg + Lion’s Mane 1000mg + Creatine 5g.', completed: true, xp: 60 },
-  { id: 'p6', time: '09:30 AM', title: 'Deep Work Block 1 (40Hz Gamma Flow)', category: 'wealth', desc: '90m zero-distraction code or equity creation with binaural waves.', completed: false, xp: 150 },
-  { id: 'p7', time: '01:30 PM', title: 'Ancestral Refeed (High Protein, Zero Seed Oils)', category: 'looks', desc: 'Grass-fed ribeye / pasture eggs + fermented kraut + avocado.', completed: false, xp: 70 },
-  { id: 'p8', time: '03:00 PM', title: 'Deep Work Block 2 (Distribution Leverage)', category: 'wealth', desc: '90m distribution, media leverage, and systems automation.', completed: false, xp: 140 },
-  { id: 'p9', time: '05:30 PM', title: 'Heavy Compound Lift (V-Taper Overload)', category: 'looks', desc: 'Overhead press, weighted pull-ups, lateral raises for golden ratio.', completed: false, xp: 160 },
-  { id: 'p10', time: '07:30 PM', title: 'Skin & Mewing Suction Protocol', category: 'looks', desc: '10m red light 660nm + Tretinoin 0.05% + palatal tongue posture.', completed: false, xp: 80 },
-  { id: 'p11', time: '09:30 PM', title: 'Digital Sunset, Mouth Tape & Mag-Threonate', category: 'sleep', desc: 'Zero blue light, 65°F room temp, 144mg Magnesium L-Threonate.', completed: false, xp: 100 }
+  { id: 'p1', time: '06:00 AM', title: 'Circadian Lux Exposure', category: 'sleep', desc: '10-15m direct sunlight in eyes. Suppresses melatonin, spikes cortisol awakening response.', completed: false, xp: 50 },
+  { id: 'p2', time: '06:30 AM', title: '500ml Cellular Hydration & Electrolytes', category: 'bio', desc: 'Spring water + electrolytes + magnesium glycinate.', completed: false, xp: 40 },
+  { id: 'p3', time: '07:00 AM', title: 'Zone 2 Metabolic Flush (Apple Health Synced)', category: 'bio', desc: '45 mins steady-state nasal breathing (HR 130-140 bpm). Mitochondrial biogenesis.', completed: false, xp: 120 },
+  { id: 'p4', time: '08:15 AM', title: 'Cryo Shock Cold Plunge (4°C)', category: 'bio', desc: '3 mins cold immersion for norepinephrine & dopamine support.', completed: false, xp: 90 },
+  { id: 'p5', time: '09:00 AM', title: 'Morning Neuro Longevity Stack', category: 'brain', desc: 'Morning supplement stack (if applicable).', completed: false, xp: 60 },
+  { id: 'p6', time: '09:30 AM', title: 'Deep Work Block 1 (40Hz Gamma Flow)', category: 'wealth', desc: '90m zero-distraction deep focus session with binaural beats.', completed: false, xp: 150 },
+  { id: 'p7', time: '01:30 PM', title: 'Whole-Food Protein Meal (Logged in Fuel)', category: 'looks', desc: 'Nutrient-dense meal scanned & logged into MealScanner.', completed: false, xp: 70 },
+  { id: 'p8', time: '03:00 PM', title: 'Deep Work Block 2 (Execution)', category: 'wealth', desc: '90m execution sprint & cognitive training.', completed: false, xp: 140 },
+  { id: 'p9', time: '05:30 PM', title: 'Resistance / Velocity Workout', category: 'looks', desc: 'Track reps & velocity via AI Camera Workout Tracker or Hevy logger.', completed: false, xp: 160 },
+  { id: 'p10', time: '07:30 PM', title: 'Posture & Craniofacial Check', category: 'looks', desc: 'Palatal posture check + facial scan progression.', completed: false, xp: 80 },
+  { id: 'p11', time: '09:30 PM', title: 'Digital Sunset & Sleep Prep', category: 'sleep', desc: 'Dim ambient lighting & cool room temp for deep N3 sleep.', completed: false, xp: 100 }
 ];
 
-export const BIOMARKER_DATA = [
-  { marker: 'ApoB (Atherogenic Particles)', value: '54 mg/dL', target: '< 60 mg/dL', status: 'OPTIMAL', delta: '-12 mg/dL', icon: 'Heart' },
-  { marker: 'Free Testosterone', value: '26.4 pg/mL', target: '> 20 pg/mL', status: 'ELITE', delta: '+4.2 pg/mL', icon: 'Flame' },
-  { marker: 'Total Testosterone', value: '912 ng/dL', target: '> 800 ng/dL', status: 'ELITE', delta: '+120 ng/dL', icon: 'Zap' },
-  { marker: 'Fasting Insulin', value: '2.8 uIU/mL', target: '< 4.0 uIU/mL', status: 'OPTIMAL', delta: '-0.8', icon: 'Activity' },
-  { marker: 'hs-CRP (Systemic Inflammation)', value: '0.22 mg/L', target: '< 0.5 mg/L', status: 'OPTIMAL', delta: '-0.15', icon: 'ShieldCheck' },
-  { marker: 'VO2 Max', value: '58.4 mL/kg/min', target: '> 55 mL/kg/min', status: 'TOP 1%', delta: '+2.4', icon: 'Wind' },
-  { marker: 'Vitamin D3', value: '78 ng/mL', target: '60-80 ng/mL', status: 'OPTIMAL', delta: '+6', icon: 'Sun' },
-  { marker: 'HbA1c', value: '4.8%', target: '< 5.2%', status: 'OPTIMAL', delta: '-0.2%', icon: 'Check' }
-];
+export const BIOMARKER_DATA = [];
 
-export const LOOKSMAXXING_METRICS = {
-  midfaceRatio: { value: 0.98, target: '0.95 - 1.0', label: 'Midface Ratio (Compact)' },
-  canthalTilt: { value: '+4.2°', target: '+3° to +5°', label: 'Canthal Tilt (Positive Hunter)' },
-  gonialAngle: { value: '122°', target: '120° - 128°', label: 'Gonial Angle (Chiseled Jaw)' },
-  ffmi: { value: 23.6, target: '22 - 24', label: 'Fat-Free Mass Index (Natural Peak)' },
-  bodyFat: { value: '10.5%', target: '10% - 12%', label: 'Body Fat (Vascular Abs)' },
-  shoulderToWaist: { value: '1.618', target: '1.618 (Golden Ratio)', label: 'V-Taper Index (Adonis)' }
-};
+export const LOOKSMAXXING_METRICS = {};
 
 export const MASTER_BLUEPRINTS = [
   {

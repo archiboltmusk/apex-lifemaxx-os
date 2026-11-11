@@ -84,14 +84,14 @@ export default function MealScanner() {
   const [isLiveCamera, setIsLiveCamera] = useState(false);
   const [cameraError, setCameraError] = useState(null);
 
-  // Editable Meal Nutrition State
-  const [mealName, setMealName] = useState(PRESET_MEALS[0].name);
-  const [proteinG, setProteinG] = useState(PRESET_MEALS[0].protein);
-  const [carbsG, setCarbsG] = useState(PRESET_MEALS[0].carbs);
-  const [fatsG, setFatsG] = useState(PRESET_MEALS[0].fats);
-  const [calories, setCalories] = useState(PRESET_MEALS[0].calories);
-  const [giIndex, setGiIndex] = useState(PRESET_MEALS[0].gi);
-  const [leucineG, setLeucineG] = useState(PRESET_MEALS[0].leucine);
+  // Editable Meal Nutrition State (starts empty until camera scan, photo upload, or manual entry)
+  const [mealName, setMealName] = useState('');
+  const [proteinG, setProteinG] = useState(0);
+  const [carbsG, setCarbsG] = useState(0);
+  const [fatsG, setFatsG] = useState(0);
+  const [calories, setCalories] = useState(0);
+  const [giIndex, setGiIndex] = useState(0);
+  const [leucineG, setLeucineG] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
 
   // Logged meals history
@@ -171,15 +171,10 @@ export default function MealScanner() {
 
     setTimeout(() => {
       setIsScanning(false);
+      setIsEditing(true);
+      if (!mealName) setMealName('Captured Camera Meal (Enter Name & Macros)');
       playCoinChime();
-      try {
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          colors: ['#00F0FF', '#E5FE40', '#10B981'],
-        });
-      } catch {}
-    }, 900);
+    }, 600);
   };
 
   const handleImageUpload = (e) => {
@@ -196,20 +191,14 @@ export default function MealScanner() {
       setUploadedImage(event.target.result);
       setTimeout(() => {
         setIsScanning(false);
+        setIsEditing(true);
         playCoinChime();
         const detectedName = file.name
           .replace(/\.[^/.]+$/, '')
           .replace(/[-_]/g, ' ')
           .replace(/\b\w/g, (c) => c.toUpperCase());
-        setMealName(detectedName || 'Custom Macro Meal');
-        try {
-          confetti({
-            particleCount: 50,
-            spread: 60,
-            colors: ['#00F0FF', '#E5FE40', '#10B981'],
-          });
-        } catch {}
-      }, 800);
+        setMealName(detectedName || 'Uploaded Meal Specimen');
+      }, 600);
     };
     reader.readAsDataURL(file);
   };
@@ -246,6 +235,7 @@ export default function MealScanner() {
       const updated = [newEntry, ...loggedMeals];
       setLoggedMeals(updated);
       localStorage.setItem('apex_logged_meals', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('apex:meals-updated'));
 
       confetti({
         particleCount: 65,
@@ -260,6 +250,7 @@ export default function MealScanner() {
     const filtered = loggedMeals.filter((m) => m.id !== id);
     setLoggedMeals(filtered);
     localStorage.setItem('apex_logged_meals', JSON.stringify(filtered));
+    window.dispatchEvent(new CustomEvent('apex:meals-updated'));
   };
 
   const triggerGlut4Walk = () => {
@@ -400,33 +391,40 @@ export default function MealScanner() {
               {isLiveCamera
                 ? 'POINT CAMERA AT FOOD DISH & CAPTURE'
                 : uploadedImage
-                ? 'FOOD SPECIES INFERRED (99.4% CONFIDENCE)'
-                : 'READY TO SCAN MEAL'}
+                ? 'SPECIMEN CAPTURED · VERIFY / ENTER MACROS'
+                : 'AWAITING CAMERA, PHOTO, OR MANUAL MEAL'}
             </span>
           </div>
 
           {/* Food Bounding Box & Classification Overlay */}
           <div className="relative z-10 space-y-2">
-            <div className="inline-block p-3 rounded-[14px] bg-black/80 border border-[#E5FE40]/60 text-xs font-mono backdrop-blur-md shadow-lg">
-              <div className="flex items-center space-x-2 mb-1">
-                <span className="text-[#E5FE40] font-black text-sm">🥩 {mealName}</span>
-                <span
-                  className="text-[9px] px-1.5 py-0.5 rounded font-black border"
-                  style={{ color: glColor, borderColor: `${glColor}60`, backgroundColor: `${glColor}20` }}
-                >
-                  GL {glycemicLoad} · {glCategory}
-                </span>
+            {mealName || uploadedImage ? (
+              <div className="inline-block p-3 rounded-[14px] bg-black/80 border border-[#E5FE40]/60 text-xs font-mono backdrop-blur-md shadow-lg">
+                <div className="flex items-center space-x-2 mb-1">
+                  <span className="text-[#E5FE40] font-black text-sm">{mealName || 'Captured Meal Specimen'}</span>
+                  <span
+                    className="text-[9px] px-1.5 py-0.5 rounded font-black border"
+                    style={{ color: glColor, borderColor: `${glColor}60`, backgroundColor: `${glColor}20` }}
+                  >
+                    GL {glycemicLoad} · {glCategory}
+                  </span>
+                </div>
+                <div className="text-[11px] text-white flex items-center space-x-2">
+                  <span className="text-[#FA114F] font-bold">{proteinG}g Protein</span>
+                  <span className="text-white/40">·</span>
+                  <span className="text-[#00F0FF] font-bold">{carbsG}g Carbs</span>
+                  <span className="text-white/40">·</span>
+                  <span className="text-[#F59E0B] font-bold">{fatsG}g Fats</span>
+                  <span className="text-white/40">·</span>
+                  <span className="text-[#E5FE40] font-bold">{calories} kcal</span>
+                </div>
               </div>
-              <div className="text-[11px] text-white flex items-center space-x-2">
-                <span className="text-[#FA114F] font-bold">{proteinG}g Protein</span>
-                <span className="text-white/40">·</span>
-                <span className="text-[#00F0FF] font-bold">{carbsG}g Carbs</span>
-                <span className="text-white/40">·</span>
-                <span className="text-[#F59E0B] font-bold">{fatsG}g Fats</span>
-                <span className="text-white/40">·</span>
-                <span className="text-[#E5FE40] font-bold">{calories} kcal</span>
+            ) : (
+              <div className="inline-block p-3 rounded-[14px] bg-black/75 border border-white/15 text-xs font-mono backdrop-blur-md">
+                <span className="text-white font-bold block">No Meal Scanned Yet</span>
+                <span className="text-[11px] text-[#A1A1AA]">Start Webcam, upload a meal photo, or select/customize a template below to calculate glycemic load.</span>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Bottom HUD */}
@@ -541,7 +539,18 @@ export default function MealScanner() {
         </div>
 
         {isEditing && (
-          <div className="p-4 rounded-[18px] bg-black/60 border border-white/10 grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono">
+          <div className="p-4 rounded-[18px] bg-black/60 border border-white/10 space-y-3 text-xs font-mono">
+            <div>
+              <span className="text-[#E5FE40] block mb-1">MEAL NAME</span>
+              <input
+                type="text"
+                placeholder="e.g., Wild Salmon & Avocado Salad"
+                value={mealName}
+                onChange={(e) => setMealName(e.target.value)}
+                className="w-full bg-black border border-white/20 p-2 rounded text-white"
+              />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div>
               <span className="text-[#FA114F] block">PROTEIN (G)</span>
               <input
@@ -600,6 +609,7 @@ export default function MealScanner() {
                 className="w-full bg-black border border-white/20 p-2 rounded text-white"
               />
             </div>
+            </div>
           </div>
         )}
 
@@ -637,10 +647,12 @@ export default function MealScanner() {
 
         <button
           onClick={handleLogMeal}
-          disabled={mealLogged}
+          disabled={mealLogged || (!mealName.trim() && calories <= 0)}
           className={`w-full py-3.5 rounded-[16px] text-xs font-mono font-black uppercase flex items-center justify-center space-x-2 transition ${
             mealLogged
               ? 'bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40'
+              : !mealName.trim() && calories <= 0
+              ? 'bg-white/10 text-white/40 border border-white/10 cursor-not-allowed'
               : 'bg-[#E5FE40] hover:bg-[#d8f030] text-black shadow-[0_0_20px_rgba(229,254,64,0.4)]'
           }`}
         >

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Smartphone, Watch, Zap, Sparkles, Sliders, Bell, LayoutGrid, Check } from 'lucide-react';
 import { playPlunk } from '../utils/audioSynth';
 
-export default function IOS18WidgetsShowcase() {
+export default function IOS18WidgetsShowcase({ healthData, mewingSeconds = 0 }) {
   const [actionButtonSetting, setActionButtonSetting] = useState('flow');
 
   return (
@@ -70,17 +70,41 @@ export default function IOS18WidgetsShowcase() {
 
           <div className="p-4 rounded-[18px] bg-black/80 border border-white/15 flex flex-col justify-between h-40">
             <div className="flex items-center justify-between font-mono text-xs">
-              <span className="text-[#FA114F] font-bold">APEX RECOVERY: 94%</span>
-              <span className="text-white font-bold">09:41</span>
+              <span className="text-[#FA114F] font-bold">
+                {(healthData?.metrics?.hrv?.value || 0) > 0
+                  ? `HRV: ${healthData.metrics.hrv.value} ms`
+                  : 'HEALTHKIT: STANDBY'}
+              </span>
+              <span className="text-white font-bold">
+                {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
             </div>
             <div className="text-center">
-              <span className="text-3xl font-mono font-black text-white">40Hz FLOW</span>
-              <span className="text-[10px] font-mono text-[#00F0FF] block">BINAURAL AUDIO ACTIVE</span>
+              <span className="text-3xl font-mono font-black text-white">
+                {(healthData?.activityRings?.move?.current || 0) > 0
+                  ? `${healthData.activityRings.move.current} KCAL`
+                  : 'SYNC WATCH'}
+              </span>
+              <span className="text-[10px] font-mono text-[#00F0FF] block">
+                {healthData?.deviceSource || 'Connect Apple Watch / iPhone'}
+              </span>
             </div>
             <div className="flex items-center justify-between font-mono text-[10px] text-[#8A8A8A]">
-              <span>RHR: 48 BPM</span>
-              <span>STRAIN: 16.8</span>
-              <span>BIO: 22.8y</span>
+              <span>
+                RHR:{' '}
+                {(healthData?.metrics?.restingHeartRate?.value || 0) > 0
+                  ? `${healthData.metrics.restingHeartRate.value} BPM`
+                  : '—'}
+              </span>
+              <span>
+                EX: {healthData?.activityRings?.exercise?.current || 0} MIN
+              </span>
+              <span>
+                VO2:{' '}
+                {(healthData?.metrics?.vo2Max?.value || 0) > 0
+                  ? healthData.metrics.vo2Max.value
+                  : '—'}
+              </span>
             </div>
           </div>
         </div>
@@ -97,17 +121,24 @@ export default function IOS18WidgetsShowcase() {
           <div className="p-4 rounded-[18px] bg-black/80 border border-white/15 flex flex-col justify-between h-40">
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-white font-bold flex items-center space-x-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#10B981] animate-ping" />
-                <span>MEWING SUCTION ACTIVE</span>
+                <span className={`w-2 h-2 rounded-full ${(mewingSeconds || 0) > 0 ? 'bg-[#10B981] animate-ping' : 'bg-[#8A8A8A]'}`} />
+                <span>{(mewingSeconds || 0) > 0 ? 'MEWING SUCTION ACTIVE' : 'LIVE ACTIVITY STANDBY'}</span>
               </span>
-              <span className="text-[#E5FE40] font-black">+80 XP</span>
+              <span className="text-[#E5FE40] font-black">{(mewingSeconds || 0) > 0 ? 'TRACKING' : 'READY'}</span>
             </div>
             <div className="text-center">
-              <span className="text-2xl font-mono font-black text-white">04:22 ELAPSED</span>
-              <span className="text-[10px] font-mono text-[#A1A1AA] block">Palatal Suction Seal: Optimal</span>
+              <span className="text-2xl font-mono font-black text-white">
+                {String(Math.floor((mewingSeconds || 0) / 60)).padStart(2, '0')}:{String((mewingSeconds || 0) % 60).padStart(2, '0')} ELAPSED
+              </span>
+              <span className="text-[10px] font-mono text-[#A1A1AA] block">
+                {(mewingSeconds || 0) > 0 ? 'Live posture timer active' : 'Start Mewing or Camera Workout to run Live Activity'}
+              </span>
             </div>
             <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-[#00F0FF] rounded-full w-2/3" />
+              <div
+                className="h-full bg-[#00F0FF] rounded-full transition-all"
+                style={{ width: `${Math.min(100, Math.round(((mewingSeconds || 0) / 600) * 100))}%` }}
+              />
             </div>
           </div>
         </div>

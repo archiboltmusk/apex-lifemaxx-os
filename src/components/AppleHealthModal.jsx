@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { playPlunk, playHealthSyncChime, playCoinChime, playHaptic } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
-import { parseAppleHealthXML, SAMPLE_APPLE_HEALTH_EXPORT_XML } from '../utils/appleHealthParser';
+import { parseAppleHealthXML } from '../utils/appleHealthParser';
 
 export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, healthData, onAddHealthData }) {
   // Tabs: 'stream' | 'calibrate' | 'ios_app' | 'shortcuts' | 'xml_import'
@@ -48,16 +48,16 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
   const [isCheckingGateway, setIsCheckingGateway] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
-  // Calibration / Absolute Values State (Initialized from current healthData)
-  const [calibMove, setCalibMove] = useState(healthData?.activityRings?.move?.current || 840);
-  const [calibMoveTarget, setCalibMoveTarget] = useState(healthData?.activityRings?.move?.target || 750);
-  const [calibExercise, setCalibExercise] = useState(healthData?.activityRings?.exercise?.current || 54);
-  const [calibStand, setCalibStand] = useState(healthData?.activityRings?.stand?.current || 14);
-  const [calibRHR, setCalibRHR] = useState(healthData?.metrics?.restingHeartRate?.value || 48);
-  const [calibHRV, setCalibHRV] = useState(healthData?.metrics?.hrv?.value || 94);
-  const [calibVo2Max, setCalibVo2Max] = useState(healthData?.metrics?.vo2Max?.value || 58.4);
-  const [calibSleepHours, setCalibSleepHours] = useState(8.2);
-  const [calibDeepSleep, setCalibDeepSleep] = useState(2.2);
+  // Calibration / Absolute Values State (Initialized cleanly from synced healthData, never hardcoded athlete stats)
+  const [calibMove, setCalibMove] = useState(healthData?.activityRings?.move?.current ?? 0);
+  const [calibMoveTarget, setCalibMoveTarget] = useState(healthData?.activityRings?.move?.target ?? 750);
+  const [calibExercise, setCalibExercise] = useState(healthData?.activityRings?.exercise?.current ?? 0);
+  const [calibStand, setCalibStand] = useState(healthData?.activityRings?.stand?.current ?? 0);
+  const [calibRHR, setCalibRHR] = useState(healthData?.metrics?.restingHeartRate?.value ?? 0);
+  const [calibHRV, setCalibHRV] = useState(healthData?.metrics?.hrv?.value ?? 0);
+  const [calibVo2Max, setCalibVo2Max] = useState(healthData?.metrics?.vo2Max?.value ?? 0);
+  const [calibSleepHours, setCalibSleepHours] = useState(healthData?.metrics?.sleep?.totalHours ?? 0);
+  const [calibDeepSleep, setCalibDeepSleep] = useState(healthData?.metrics?.sleep?.deepHours ?? 0);
 
   // XML Import State
   const [isParsingXML, setIsParsingXML] = useState(false);
@@ -68,13 +68,15 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
   // Sync internal state when healthData changes
   useEffect(() => {
     if (healthData) {
-      setCalibMove(healthData.activityRings?.move?.current || 840);
-      setCalibMoveTarget(healthData.activityRings?.move?.target || 750);
-      setCalibExercise(healthData.activityRings?.exercise?.current || 54);
-      setCalibStand(healthData.activityRings?.stand?.current || 14);
-      setCalibRHR(healthData.metrics?.restingHeartRate?.value || 48);
-      setCalibHRV(healthData.metrics?.hrv?.value || 94);
-      setCalibVo2Max(healthData.metrics?.vo2Max?.value || 58.4);
+      setCalibMove(healthData.activityRings?.move?.current ?? 0);
+      setCalibMoveTarget(healthData.activityRings?.move?.target ?? 750);
+      setCalibExercise(healthData.activityRings?.exercise?.current ?? 0);
+      setCalibStand(healthData.activityRings?.stand?.current ?? 0);
+      setCalibRHR(healthData.metrics?.restingHeartRate?.value ?? 0);
+      setCalibHRV(healthData.metrics?.hrv?.value ?? 0);
+      setCalibVo2Max(healthData.metrics?.vo2Max?.value ?? 0);
+      setCalibSleepHours(healthData.metrics?.sleep?.totalHours ?? 0);
+      setCalibDeepSleep(healthData.metrics?.sleep?.deepHours ?? 0);
     }
     if (typeof window !== 'undefined' && window.__macDeviceTelemetry?.localIP) {
       setLocalIP(window.__macDeviceTelemetry.localIP);
@@ -203,21 +205,6 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
       }
     };
     reader.readAsText(file);
-  };
-
-  // Apply Sample Apple Health XML
-  const handleLoadSampleXml = () => {
-    playPlunk();
-    setIsParsingXML(true);
-    setXmlFileName('export.xml (Sample Apple Health Archive)');
-    setTimeout(() => {
-      const parsed = parseAppleHealthXML(SAMPLE_APPLE_HEALTH_EXPORT_XML);
-      setIsParsingXML(false);
-      if (parsed.success) {
-        setXmlResult(parsed.data);
-        playCoinChime();
-      }
-    }, 400);
   };
 
   // Commit Parsed XML Data to State
@@ -732,15 +719,9 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono text-[#8A8A8A]">Load certified HealthKit export archive:</span>
-                <button
-                  onClick={handleLoadSampleXml}
-                  disabled={isParsingXML}
-                  className="px-3 py-1.5 rounded-[10px] bg-white/10 hover:bg-white/20 text-xs font-mono font-bold text-[#E5FE40] border border-[#E5FE40]/30 transition"
-                >
-                  {isParsingXML ? 'PARSING ARCHIVE...' : 'LOAD VERIFIED HEALTH ARCHIVE'}
-                </button>
+              <div className="p-3 rounded-[12px] bg-black/50 border border-white/10 text-[10px] font-mono text-[#A1A1AA] space-y-1">
+                <span className="text-[#E5FE40] font-bold block">HOW TO EXPORT YOUR REAL APPLE HEALTH DATA:</span>
+                <span>Open iPhone <strong className="text-white">Health</strong> app → tap your Profile photo → scroll to <strong className="text-white">Export All Health Data</strong> → unzip <strong className="text-white">export.zip</strong> and drop <strong className="text-white">export.xml</strong> above.</span>
               </div>
 
               {/* Parsed Results Card */}

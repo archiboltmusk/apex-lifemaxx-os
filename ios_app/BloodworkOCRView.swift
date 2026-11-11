@@ -23,11 +23,12 @@ public struct BloodworkOCRView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var panel: LabBiomarkerPanel = LabPanelStore.load() ?? LabBiomarkerPanel()
+    @State private var hasSavedOrScannedLabData: Bool = LabPanelStore.load() != nil
     @State private var showDocScanner: Bool = false
     @State private var selectedPhoto: PhotosPickerItem? = nil
     @State private var isProcessingOCR: Bool = false
     @State private var extractedCount: Int = 0
-    @State private var statusMessage: String? = nil
+    @State private var statusMessage: String? = LabPanelStore.load() == nil ? "Scan a lab sheet or pick a photo to load your biomarkers (currently showing reference defaults)." : nil
 
     public init() {}
 
@@ -155,16 +156,22 @@ public struct BloodworkOCRView: View {
             }
 
             HStack(alignment: .lastTextBaseline, spacing: 10) {
-                Text(String(format: "%.1f yrs", pheno))
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
+                if hasSavedOrScannedLabData || extractedCount > 0 {
+                    Text(String(format: "%.1f yrs", pheno))
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
 
-                Text(delta <= 0
-                     ? String(format: "%.1f yrs younger", abs(delta))
-                     : String(format: "+%.1f yrs older", delta))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(delta <= 0 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                    Text(delta <= 0
+                         ? String(format: "%.1f yrs younger", abs(delta))
+                         : String(format: "+%.1f yrs older", delta))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(delta <= 0 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                } else {
+                    Text("Awaiting Lab Scan")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -172,12 +179,19 @@ public struct BloodworkOCRView: View {
     }
 
     private func biomarkerRow(label: String, unit: String, value: Binding<Double>) -> some View {
-        HStack {
+        let trackedBinding = Binding<Double>(
+            get: { value.wrappedValue },
+            set: { newValue in
+                value.wrappedValue = newValue
+                hasSavedOrScannedLabData = true
+            }
+        )
+        return HStack {
             Text(label)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
-            TextField("", value: value, format: .number.precision(.fractionLength(0...2)))
+            TextField("", value: trackedBinding, format: .number.precision(.fractionLength(0...2)))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .font(.system(size: 15, weight: .bold, design: .rounded))
@@ -253,6 +267,7 @@ public struct BloodworkOCRView: View {
         let fullText = recognizedLines.joined(separator: "\n").lowercased()
         let hits = parseLabText(fullText)
         extractedCount = hits
+        if hits > 0 { hasSavedOrScannedLabData = true }
         isProcessingOCR = false
         statusMessage = hits > 0
             ? "Parsed \(hits) biomarker values via Apple Vision OCR."

@@ -1,18 +1,64 @@
-import React, { useState } from 'react';
-import { Plus, Check, Droplets, Pill, Flame, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Check, Droplets, Pill } from 'lucide-react';
 import { NUTRITION_MACRO_DATA } from '../utils/lifemaxxData';
 import { playPlunk, playCoinChime } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
 
-export default function NutritionView() {
-  const [supps, setSupps] = useState(NUTRITION_MACRO_DATA.supplements);
-  const [water, setWater] = useState(NUTRITION_MACRO_DATA.water.current);
-  const { calories, protein, carbs, fats } = NUTRITION_MACRO_DATA;
+const loadLoggedMeals = () => {
+  try {
+    return JSON.parse(localStorage.getItem('apex_logged_meals') || '[]');
+  } catch {
+    return [];
+  }
+};
+
+export default function NutritionView({ onOpenScanner }) {
+  const [supps, setSupps] = useState(() => {
+    try {
+      const saved = localStorage.getItem('apex_supplements_state');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return NUTRITION_MACRO_DATA.supplements.map((s) => ({ ...s, taken: false }));
+  });
+  const [water, setWater] = useState(() => {
+    try {
+      return Number(localStorage.getItem('apex_water_liters') || '0');
+    } catch {
+      return 0;
+    }
+  });
+  const [meals, setMeals] = useState(loadLoggedMeals);
+
+  useEffect(() => {
+    const refreshMeals = () => setMeals(loadLoggedMeals());
+    window.addEventListener('storage', refreshMeals);
+    window.addEventListener('apex:meals-updated', refreshMeals);
+    return () => {
+      window.removeEventListener('storage', refreshMeals);
+      window.removeEventListener('apex:meals-updated', refreshMeals);
+    };
+  }, []);
+
+  const totals = meals.reduce(
+    (acc, m) => {
+      acc.calories += Number(m.calories) || 0;
+      acc.protein += Number(m.protein) || 0;
+      acc.carbs += Number(m.carbs) || 0;
+      acc.fats += Number(m.fats) || 0;
+      return acc;
+    },
+    { calories: 0, protein: 0, carbs: 0, fats: 0 }
+  );
+
+  const calories = { current: totals.calories, target: NUTRITION_MACRO_DATA.calories.target };
+  const protein = { current: totals.protein, target: NUTRITION_MACRO_DATA.protein.target };
+  const carbs = { current: totals.carbs, target: NUTRITION_MACRO_DATA.carbs.target };
+  const fats = { current: totals.fats, target: NUTRITION_MACRO_DATA.fats.target };
 
   const toggleSupp = (name) => {
     playPlunk();
-    setSupps((prev) =>
-      prev.map((s) => {
+    setSupps((prev) => {
+      const nextList = prev.map((s) => {
         if (s.name === name) {
           const next = !s.taken;
           if (next) {
@@ -21,14 +67,21 @@ export default function NutritionView() {
           return { ...s, taken: next };
         }
         return s;
-      })
-    );
+      });
+      try {
+        localStorage.setItem('apex_supplements_state', JSON.stringify(nextList));
+      } catch {}
+      return nextList;
+    });
   };
 
   const addWater = () => {
     playPlunk();
     setWater((w) => {
       const next = Math.min(6.0, +(w + 0.25).toFixed(2));
+      try {
+        localStorage.setItem('apex_water_liters', String(next));
+      } catch {}
       if (next >= 4.0 && w < 4.0) {
         try {
           confetti({
@@ -44,6 +97,25 @@ export default function NutritionView() {
 
   return (
     <div className="space-y-6">
+      {meals.length === 0 && (
+        <div className="liquid-glass rounded-[18px] p-4 border border-[#00D6E6]/30 flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
+          <div>
+            <span className="text-[#00D6E6] font-black block">NO MEALS LOGGED TODAY</span>
+            <span className="text-[#A1A1AA]">Totals start at 0 until you scan or log real meals.</span>
+          </div>
+          {onOpenScanner && (
+            <button
+              onClick={() => {
+                playPlunk();
+                onOpenScanner();
+              }}
+              className="px-3.5 py-2 rounded-[10px] bg-[#00D6E6] text-black font-black"
+            >
+              OPEN MEAL SCANNER
+            </button>
+          )}
+        </div>
+      )}
       {/* MACRO OVERVIEW */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="liquid-glass rounded-[20px] p-4 border border-white/10">
