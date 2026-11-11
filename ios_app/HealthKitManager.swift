@@ -1,87 +1,165 @@
 import Foundation
 import HealthKit
 import Combine
+import SwiftUI
 
-// MARK: - Real-Time Apple HealthKit Engine for iOS
+public enum HealthConnectionState: Equatable {
+    case needsPermission
+    case connecting
+    case connected
+    case unavailable
+}
+
+// MARK: - Native Apple HealthKit Telemetry Engine
 @MainActor
 public class HealthKitManager: ObservableObject {
     public static let shared = HealthKitManager()
 
     private let healthStore = HKHealthStore()
 
-    // Real-Time Published Biometric Telemetry
+    // Clean Connection State (Never leaks raw developer errors)
     @Published public var isAvailable: Bool = false
-    @Published public var isAuthorized: Bool = false
-    @Published public var statusMessage: String = "Initializing HealthKit..."
+    @Published public var connectionState: HealthConnectionState = .needsPermission
+    @Published public var statusLabel: String = "Apple Health Ready"
 
-    // Concentric Activity Rings Real-Time Data
-    @Published public var moveCalories: Double = 840.0
-    @Published public var moveTarget: Double = 750.0
-    @Published public var exerciseMinutes: Double = 54.0
-    @Published public var exerciseTarget: Double = 30.0
-    @Published public var standHours: Double = 14.0
-    @Published public var standTarget: Double = 12.0
+    // Concentric Activity Rings Data (Real-Time Today)
+    @Published public var moveCalories: Double = 0
+    @Published public var moveTarget: Double = 750
+    @Published public var exerciseMinutes: Double = 0
+    @Published public var exerciseTarget: Double = 30
+    @Published public var standHours: Double = 0
+    @Published public var standTarget: Double = 12
 
-    // Vitals & Longevity
-    @Published public var currentHeartRate: Double = 62.0
-    @Published public var restingHeartRate: Double = 48.0
-    @Published public var heartRateVariability: Double = 94.0
-    @Published public var vo2Max: Double = 58.4
-    @Published public var sleepTotalHours: Double = 8.35
-    @Published public var sleepDeepHours: Double = 2.25
+    // Measured Vitals & Longevity
+    @Published public var restingHeartRate: Double? = nil
+    @Published public var heartRateVariability: Double? = nil
+    @Published public var vo2Max: Double? = nil
+    @Published public var sleepTotalHours: Double? = nil
+    @Published public var dailySteps: Int = 0
 
-    // Real-Time Sync to Mac
-    @Published public var isSyncingToMac: Bool = true
+    // Biological Age Inputs
+    @AppStorage("apex_chronological_age") public var chronologicalAge: Double = 26.0
+
+    // Mac Companion Sync Settings
+    @AppStorage("apex_mac_host") public var macHost: String = "127.0.0.1"
+    @AppStorage("apex_mac_port") public var macServerPort: Int = 60159
+    @AppStorage("apex_sync_enabled") public var isSyncingToMac: Bool = true
+    @Published public var isMacReachable: Bool = false
     @Published public var lastSyncTimestamp: Date? = nil
-    @Published public var macServerPort: Int = 5174
 
     private var observerQueries: [HKObserverQuery] = []
 
+    public var isAuthorized: Bool {
+        connectionState == .connected
+    }
+
+    // Derived Autonomic Readiness (0–100) from real vitals when available
+    public var readinessScore: Int? {
+        guard restingHeartRate != nil || heartRateVariability != nil || sleepTotalHours != nil else {
+            return nil
+        }
+        var score = 78.0
+        if let hrv = heartRateVariability {
+            score += min(15.0, max(-15.0, (hrv - 55.0) * 0.35))
+        }
+        if let rhr = restingHeartRate {
+            score += min(10.0, max(-12.0, (62.0 - rhr) * 0.5))
+        }
+        if let sleep = sleepTotalHours {
+            if sleep >= 7.5 { score += 5.0 }
+            else if sleep < 6.0 { score -= 10.0 }
+        }
+        return Int(max(20, min(99, score.rounded())))
+    }
+
+    // Derived Biological Fitness Age (Livity / Levine composite)
+    public var biologicalAge: Double? {
+        guard restingHeartRate != nil || heartRateVariability != nil || vo2Max != nil || moveCalories > 0 else {
+            return nil
+        }
+        var delta = 0.0
+        if let vo2 = vo2Max { delta -= (vo2 - 42.0) * 0.42 }
+        if let rhr = restingHeartRate { delta += (rhr - 60.0) * 0.22 }
+        if let hrv = heartRateVariability { delta -= (hrv - 52.0) * 0.11 }
+        if let sleep = sleepTotalHours {
+            if sleep >= 7.5 && sleep <= 9.0 { delta -= 1.2 }
+            else if sleep < 6.0 { delta += 1.8 }
+        }
+        if dailySteps > 0 {
+            delta -= (Double(dailySteps - 8000) / 2500.0) * 0.5
+        }
+        let bio = chronologicalAge + delta
+        return max(18.0, (bio * 10).rounded() / 10)
+    }
+
     private init() {
         self.isAvailable = HKHealthStore.isHealthDataAvailable()
-        if self.isAvailable {
-            self.statusMessage = "HealthKit Store Available · Ready to Authorize"
+        if isAvailable {
+            self.connectionState = .needsPermission
+            self.statusLabel = "Connect Apple Health"
         } else {
-            self.statusMessage = "HealthKit unavailable on this hardware"
+            self.connectionState = .unavailable
+            self.statusLabel = "Health Data Unavailable"
         }
     }
 
-    // MARK: - Request System Authorization
+    // MARK: - Request Apple Health Permission
     public func requestAuthorization() {
-        guard isAvailable else { return }
+        guard isAvailable else {
+            connectionState = .unavailable
+            statusLabel = "Health Data Unavailable"
+            return
+        }
 
         var readTypes = Set<HKObjectType>()
-        if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) { readTypes.insert(energy) }
-        if let exercise = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) { readTypes.insert(exercise) }
-        if let stand = HKObjectType.quantityType(forIdentifier: .appleStandTime) { readTypes.insert(stand) }
-        if let hr = HKObjectType.quantityType(forIdentifier: .heartRate) { readTypes.insert(hr) }
-        if let rhr = HKObjectType.quantityType(forIdentifier: .restingHeartRate) { readTypes.insert(rhr) }
-        if let hrv = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) { readTypes.insert(hrv) }
-        if let vo2 = HKObjectType.quantityType(forIdentifier: .vo2Max) { readTypes.insert(vo2) }
-        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { readTypes.insert(sleep) }
+        let quantityIds: [HKQuantityTypeIdentifier] = [
+            .activeEnergyBurned,
+            .appleExerciseTime,
+            .appleStandTime,
+            .stepCount,
+            .heartRate,
+            .restingHeartRate,
+            .heartRateVariabilitySDNN,
+            .vo2Max
+        ]
+        for id in quantityIds {
+            if let q = HKObjectType.quantityType(forIdentifier: id) {
+                readTypes.insert(q)
+            }
+        }
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+            readTypes.insert(sleep)
+        }
 
         var shareTypes = Set<HKSampleType>()
-        if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) { shareTypes.insert(energy) }
+        if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
+            shareTypes.insert(energy)
+        }
+        if let exTime = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) {
+            shareTypes.insert(exTime)
+        }
         shareTypes.insert(HKObjectType.workoutType())
 
-        self.statusMessage = "Requesting System Permissions..."
+        connectionState = .connecting
+        statusLabel = "Connecting..."
 
-        healthStore.requestAuthorization(toShare: shareTypes, read: readTypes) { [weak self] success, error in
+        healthStore.requestAuthorization(toShare: shareTypes, read: readTypes) { [weak self] success, _ in
             Task { @MainActor in
+                guard let self = self else { return }
                 if success {
-                    self?.isAuthorized = true
-                    self?.statusMessage = "✓ HealthKit Authorized · Real-Time Observers Active"
-                    self?.startRealtimeObserverQueries()
-                    self?.fetchLiveHealthMetrics()
+                    self.connectionState = .connected
+                    self.statusLabel = "Live HealthKit"
+                    self.startRealtimeObserverQueries()
+                    self.fetchLiveHealthMetrics()
                 } else {
-                    self?.isAuthorized = false
-                    self?.statusMessage = error?.localizedDescription ?? "Authorization denied"
+                    self.connectionState = .needsPermission
+                    self.statusLabel = "Permission Required"
                 }
             }
         }
     }
 
-    // MARK: - Real-Time HKObserverQuery Setup
+    // MARK: - Background Observer Queries
     public func startRealtimeObserverQueries() {
         guard isAvailable else { return }
 
@@ -89,6 +167,7 @@ public class HealthKitManager: ObservableObject {
             .activeEnergyBurned,
             .appleExerciseTime,
             .appleStandTime,
+            .stepCount,
             .heartRate
         ]
 
@@ -106,53 +185,68 @@ public class HealthKitManager: ObservableObject {
 
             healthStore.execute(query)
             observerQueries.append(query)
-
-            // Enable immediate background delivery
             healthStore.enableBackgroundDelivery(for: quantityType, frequency: .immediate) { _, _ in }
         }
     }
 
-    // MARK: - Query Live Health Statistics (Today)
+    // MARK: - Fetch Real Today's Biometrics from HealthKit
     public func fetchLiveHealthMetrics() {
         guard isAvailable else { return }
 
         let calendar = Calendar.current
         let now = Date()
         let startOfDay = calendar.startOfDay(for: now)
-        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+        let todayPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
 
         // 1. Move Calories
         if let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
-            let energyQuery = HKStatisticsQuery(quantityType: energyType, quantitySamplePredicate: predicate, options: .cumulativeSum) { [weak self] _, stats, _ in
-                if let sum = stats?.sumQuantity() {
-                    let kcal = sum.doubleValue(for: .kilocalorie())
-                    Task { @MainActor in
-                        self?.moveCalories = kcal
-                        self?.broadcastToMac()
-                    }
+            let query = HKStatisticsQuery(quantityType: energyType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
+                let kcal = stats?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+                Task { @MainActor in
+                    self?.moveCalories = kcal
+                    self?.broadcastToMac()
                 }
             }
-            healthStore.execute(energyQuery)
+            healthStore.execute(query)
         }
 
-        // 2. Exercise Time
-        if let exerciseType = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) {
-            let exQuery = HKStatisticsQuery(quantityType: exerciseType, quantitySamplePredicate: predicate, options: .cumulativeSum) { [weak self] _, stats, _ in
-                if let sum = stats?.sumQuantity() {
-                    let mins = sum.doubleValue(for: .minute())
-                    Task { @MainActor in
-                        self?.exerciseMinutes = mins
-                        self?.broadcastToMac()
-                    }
+        // 2. Exercise Minutes
+        if let exType = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) {
+            let query = HKStatisticsQuery(quantityType: exType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
+                let mins = stats?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
+                Task { @MainActor in
+                    self?.exerciseMinutes = mins
                 }
             }
-            healthStore.execute(exQuery)
+            healthStore.execute(query)
         }
 
-        // 3. Resting Heart Rate
+        // 3. Stand Time (Convert minutes to active hours bracket cleanly)
+        if let standType = HKObjectType.quantityType(forIdentifier: .appleStandTime) {
+            let query = HKStatisticsQuery(quantityType: standType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
+                let mins = stats?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
+                Task { @MainActor in
+                    self?.standHours = floor(mins / 5.0) // Stand credit proxy when standalone stand hours aren't queried
+                }
+            }
+            healthStore.execute(query)
+        }
+
+        // 4. Daily Steps
+        if let stepsType = HKObjectType.quantityType(forIdentifier: .stepCount) {
+            let query = HKStatisticsQuery(quantityType: stepsType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
+                let count = Int(stats?.sumQuantity()?.doubleValue(for: .count()) ?? 0)
+                Task { @MainActor in
+                    self?.dailySteps = count
+                }
+            }
+            healthStore.execute(query)
+        }
+
+        // 5. Latest Resting Heart Rate
         if let rhrType = HKObjectType.quantityType(forIdentifier: .restingHeartRate) {
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            let rhrQuery = HKSampleQuery(sampleType: rhrType, predicate: nil, limit: 1, sortDescriptors: [sort]) { [weak self] _, samples, _ in
+            let query = HKSampleQuery(sampleType: rhrType, predicate: nil, limit: 1, sortDescriptors: [sort]) { [weak self] _, samples, _ in
                 if let sample = samples?.first as? HKQuantitySample {
                     let bpm = sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
                     Task { @MainActor in
@@ -160,13 +254,13 @@ public class HealthKitManager: ObservableObject {
                     }
                 }
             }
-            healthStore.execute(rhrQuery)
+            healthStore.execute(query)
         }
 
-        // 4. HRV (SDNN)
+        // 6. Latest HRV (SDNN)
         if let hrvType = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            let hrvQuery = HKSampleQuery(sampleType: hrvType, predicate: nil, limit: 1, sortDescriptors: [sort]) { [weak self] _, samples, _ in
+            let query = HKSampleQuery(sampleType: hrvType, predicate: nil, limit: 1, sortDescriptors: [sort]) { [weak self] _, samples, _ in
                 if let sample = samples?.first as? HKQuantitySample {
                     let ms = sample.quantity.doubleValue(for: .secondUnit(with: .milli))
                     Task { @MainActor in
@@ -174,67 +268,126 @@ public class HealthKitManager: ObservableObject {
                     }
                 }
             }
-            healthStore.execute(hrvQuery)
+            healthStore.execute(query)
         }
 
-        self.lastSyncTimestamp = Date()
-        self.broadcastToMac()
-    }
-
-    // MARK: - Write Workout Sample
-    public func logWorkout(calories: Double, durationMinutes: Double, workoutType: HKWorkoutActivityType = .traditionalStrengthTraining) {
-        guard isAvailable else { return }
-
-        let endDate = Date()
-        let startDate = endDate.addingTimeInterval(-durationMinutes * 60)
-
-        let energy = HKQuantity(unit: .kilocalorie(), doubleValue: calories)
-        let workout = HKWorkout(
-            activityType: workoutType,
-            start: startDate,
-            end: endDate,
-            duration: durationMinutes * 60,
-            totalEnergyBurned: energy,
-            totalDistance: nil,
-            metadata: ["App": "APEX OS iOS"]
-        )
-
-        healthStore.save(workout) { [weak self] success, _ in
-            if success {
-                Task { @MainActor in
-                    self?.fetchLiveHealthMetrics()
+        // 7. Latest VO2 Max
+        if let vo2Type = HKObjectType.quantityType(forIdentifier: .vo2Max) {
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+            let query = HKSampleQuery(sampleType: vo2Type, predicate: nil, limit: 1, sortDescriptors: [sort]) { [weak self] _, samples, _ in
+                if let sample = samples?.first as? HKQuantitySample {
+                    let mlKgMin = sample.quantity.doubleValue(for: HKUnit(from: "ml/kg*min"))
+                    Task { @MainActor in
+                        self?.vo2Max = mlKgMin
+                    }
                 }
             }
+            healthStore.execute(query)
+        }
+
+        // 8. Last Night's Sleep Analysis
+        if let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+            let yesterday = calendar.date(byAdding: .hour, value: -24, to: now) ?? startOfDay
+            let sleepPred = HKQuery.predicateForSamples(withStart: yesterday, end: now, options: .strictStartDate)
+            let query = HKSampleQuery(sampleType: sleepType, predicate: sleepPred, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { [weak self] _, samples, _ in
+                guard let categorySamples = samples as? [HKCategorySample] else { return }
+                var totalSeconds: TimeInterval = 0
+                for s in categorySamples {
+                    if s.value != HKCategoryValueSleepAnalysis.inBed.rawValue && s.value != HKCategoryValueSleepAnalysis.awake.rawValue {
+                        totalSeconds += s.endDate.timeIntervalSince(s.startDate)
+                    }
+                }
+                if totalSeconds > 0 {
+                    Task { @MainActor in
+                        self?.sleepTotalHours = totalSeconds / 3600.0
+                    }
+                }
+            }
+            healthStore.execute(query)
         }
     }
 
-    // MARK: - Real-Time Broadcast to Mac App
+    // MARK: - Save Real Workout via Modern HKWorkoutBuilder (Zero Deprecations)
+    public func logWorkout(
+        calories: Double,
+        durationMinutes: Double,
+        workoutType: HKWorkoutActivityType = .traditionalStrengthTraining
+    ) async -> Bool {
+        guard isAvailable else { return false }
+
+        let endDate = Date()
+        let startDate = endDate.addingTimeInterval(-max(1.0, durationMinutes * 60.0))
+
+        let config = HKWorkoutConfiguration()
+        config.activityType = workoutType
+        config.locationType = .indoor
+
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: config, device: .local())
+
+        do {
+            try await builder.beginCollection(at: startDate)
+
+            if let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+                let energyQty = HKQuantity(unit: .kilocalorie(), doubleValue: max(1.0, calories))
+                let energySample = HKQuantitySample(type: energyType, quantity: energyQty, start: startDate, end: endDate)
+                try await builder.addSamples([energySample])
+            }
+
+            if let exType = HKQuantityType.quantityType(forIdentifier: .appleExerciseTime) {
+                let exQty = HKQuantity(unit: .minute(), doubleValue: max(1.0, durationMinutes))
+                let exSample = HKQuantitySample(type: exType, quantity: exQty, start: startDate, end: endDate)
+                try await builder.addSamples([exSample])
+            }
+
+            try await builder.endCollection(at: endDate)
+            _ = try await builder.finishWorkout()
+
+            self.fetchLiveHealthMetrics()
+            return true
+        } catch {
+            // Update local telemetry gracefully even if Health write permission is declined
+            self.moveCalories += calories
+            self.exerciseMinutes += durationMinutes
+            self.broadcastToMac()
+            return false
+        }
+    }
+
+    // MARK: - Sync Biometrics to APEX Mac Desktop App
     public func broadcastToMac() {
         guard isSyncingToMac else { return }
+
+        let cleanHost = macHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanHost.isEmpty,
+              let url = URL(string: "http://\(cleanHost):\(macServerPort)/api/healthkit-sync") else {
+            return
+        }
 
         let payload: [String: Any] = [
             "move": Int(moveCalories),
             "exercise": Int(exerciseMinutes),
             "stand": Int(standHours),
-            "hr": Int(restingHeartRate),
-            "hrv": Int(heartRateVariability),
-            "vo2Max": vo2Max,
-            "source": "Apple Watch Ultra & iPhone (Real-Time HealthKit Live)",
+            "steps": dailySteps,
+            "hr": Int(restingHeartRate ?? 0),
+            "hrv": Int(heartRateVariability ?? 0),
+            "vo2Max": vo2Max ?? 0,
+            "source": "iPhone · Apple HealthKit Live",
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
 
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
-              let url = URL(string: "http://127.0.0.1:\(macServerPort)/api/healthkit-sync") else { return }
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = jsonData
-        request.timeoutInterval = 1.0
+        request.timeoutInterval = 1.5
 
         let task = URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
-            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                Task { @MainActor in
+            let ok = (response as? HTTPURLResponse)?.statusCode == 200
+            Task { @MainActor in
+                self?.isMacReachable = ok
+                if ok {
                     self?.lastSyncTimestamp = Date()
                 }
             }

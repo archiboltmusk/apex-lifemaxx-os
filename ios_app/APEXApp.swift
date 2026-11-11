@@ -9,7 +9,10 @@ struct APEXApp: App {
             ContentView()
                 .preferredColorScheme(.dark)
                 .onAppear {
-                    health.requestAuthorization()
+                    // Refresh live Apple HealthKit metrics silently if previously authorized
+                    if health.isAvailable {
+                        health.fetchLiveHealthMetrics()
+                    }
                 }
         }
     }

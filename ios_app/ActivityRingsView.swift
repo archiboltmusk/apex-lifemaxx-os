@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Native SwiftUI Concentric Apple Activity Rings
+// MARK: - Artisanal Apple Watch Concentric Activity Rings
 public struct ActivityRingsView: View {
     public var moveCurrent: Double
     public var moveTarget: Double
@@ -8,7 +8,7 @@ public struct ActivityRingsView: View {
     public var exerciseTarget: Double
     public var standCurrent: Double
     public var standTarget: Double
-    public var size: CGFloat = 180
+    public var size: CGFloat
 
     public init(
         moveCurrent: Double,
@@ -17,7 +17,7 @@ public struct ActivityRingsView: View {
         exerciseTarget: Double,
         standCurrent: Double,
         standTarget: Double,
-        size: CGFloat = 180
+        size: CGFloat = 148
     ) {
         self.moveCurrent = moveCurrent
         self.moveTarget = max(moveTarget, 1)
@@ -28,91 +28,92 @@ public struct ActivityRingsView: View {
         self.size = size
     }
 
-    private var moveProgress: Double {
-        min(moveCurrent / moveTarget, 2.0)
-    }
+    private var ringThickness: CGFloat { size * 0.105 }
 
-    private var exerciseProgress: Double {
-        min(exerciseCurrent / exerciseTarget, 2.0)
-    }
-
-    private var standProgress: Double {
-        min(standCurrent / standTarget, 2.0)
-    }
+    private var moveProgress: Double { max(0, min(moveCurrent / moveTarget, 2.0)) }
+    private var exerciseProgress: Double { max(0, min(exerciseCurrent / exerciseTarget, 2.0)) }
+    private var standProgress: Double { max(0, min(standCurrent / standTarget, 2.0)) }
 
     public var body: some View {
         ZStack {
-            // Background Tracks
-            RingTrack(size: size, strokeWidth: size * 0.10, color: Color(red: 0.98, green: 0.07, blue: 0.31).opacity(0.18))
-            RingTrack(size: size * 0.78, strokeWidth: size * 0.10, color: Color(red: 0.57, green: 0.91, blue: 0.16).opacity(0.18))
-            RingTrack(size: size * 0.56, strokeWidth: size * 0.10, color: Color(red: 0.0, green: 0.84, blue: 0.90).opacity(0.18))
-
-            // 1. Move Ring (Red: Active Calories)
-            RingProgress(
-                size: size,
-                strokeWidth: size * 0.10,
+            // Outer: Move (Crimson)
+            SingleAppleRing(
+                diameter: size - ringThickness,
+                thickness: ringThickness,
                 progress: moveProgress,
-                gradient: Gradient(colors: [
-                    Color(red: 1.0, green: 0.22, blue: 0.38),
-                    Color(red: 0.98, green: 0.07, blue: 0.31)
-                ])
+                startColor: Color(red: 1.0, green: 0.18, blue: 0.36),
+                endColor: ApexTheme.moveCrimson
             )
 
-            // 2. Exercise Ring (Green: Active Minutes)
-            RingProgress(
-                size: size * 0.78,
-                strokeWidth: size * 0.10,
+            // Middle: Exercise (Electric Lime)
+            SingleAppleRing(
+                diameter: (size - ringThickness) * 0.74,
+                thickness: ringThickness,
                 progress: exerciseProgress,
-                gradient: Gradient(colors: [
-                    Color(red: 0.72, green: 0.98, blue: 0.25),
-                    Color(red: 0.57, green: 0.91, blue: 0.16)
-                ])
+                startColor: Color(red: 0.70, green: 1.0, blue: 0.25),
+                endColor: ApexTheme.exerciseLime
             )
 
-            // 3. Stand Ring (Blue/Cyan: Active Stand Hours)
-            RingProgress(
-                size: size * 0.56,
-                strokeWidth: size * 0.10,
+            // Inner: Stand (Arctic Cyan)
+            SingleAppleRing(
+                diameter: (size - ringThickness) * 0.48,
+                thickness: ringThickness,
                 progress: standProgress,
-                gradient: Gradient(colors: [
-                    Color(red: 0.0, green: 0.94, blue: 1.0),
-                    Color(red: 0.0, green: 0.75, blue: 0.85)
-                ])
+                startColor: Color(red: 0.12, green: 0.92, blue: 1.0),
+                endColor: ApexTheme.standCyan
             )
         }
         .frame(width: size, height: size)
+        .animation(.spring(response: 0.85, dampingFraction: 0.82), value: moveProgress)
+        .animation(.spring(response: 0.85, dampingFraction: 0.82), value: exerciseProgress)
+        .animation(.spring(response: 0.85, dampingFraction: 0.82), value: standProgress)
     }
 }
 
-// Single Ring Track Background
-struct RingTrack: View {
-    var size: CGFloat
-    var strokeWidth: CGFloat
-    var color: Color
+private struct SingleAppleRing: View {
+    let diameter: CGFloat
+    let thickness: CGFloat
+    let progress: Double
+    let startColor: Color
+    let endColor: Color
 
     var body: some View {
-        Circle()
-            .stroke(color, style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round))
-            .frame(width: size, height: size)
-    }
-}
+        let clampedProgress = min(progress, 1.0)
+        let tipAngle = Angle.degrees(progress * 360.0 - 90.0)
+        let radius = diameter / 2.0
 
-// Single Ring Progress Arc with Specular Glow & Rounded Caps
-struct RingProgress: View {
-    var size: CGFloat
-    var strokeWidth: CGFloat
-    var progress: Double
-    var gradient: Gradient
+        ZStack {
+            // Subtle Recessed Track
+            Circle()
+                .stroke(endColor.opacity(0.16), lineWidth: thickness)
+                .frame(width: diameter, height: diameter)
 
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: CGFloat(min(progress, 1.0)))
-            .stroke(
-                AngularGradient(gradient: gradient, center: .center, startAngle: .degrees(-90), endAngle: .degrees(270)),
-                style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
-            )
-            .rotationEffect(.degrees(-90))
-            .frame(width: size, height: size)
-            .shadow(color: gradient.stops.first?.color.opacity(0.35) ?? .clear, radius: 6, x: 0, y: 0)
+            // Primary Progress Arc
+            if progress > 0.005 {
+                Circle()
+                    .trim(from: 0, to: CGFloat(clampedProgress))
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(colors: [startColor, endColor]),
+                            center: .center,
+                            startAngle: .degrees(0),
+                            endAngle: .degrees(360)
+                        ),
+                        style: StrokeStyle(lineWidth: thickness, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: diameter, height: diameter)
+
+                // Signature Apple Ring Overlap Shadow Tip (> 100% OR Leading Edge Highlight)
+                Circle()
+                    .fill(endColor)
+                    .frame(width: thickness, height: thickness)
+                    .shadow(color: Color.black.opacity(0.45), radius: 2.5, x: 0, y: 1)
+                    .offset(
+                        x: radius * CGFloat(cos(tipAngle.radians)),
+                        y: radius * CGFloat(sin(tipAngle.radians))
+                    )
+            }
+        }
     }
 }

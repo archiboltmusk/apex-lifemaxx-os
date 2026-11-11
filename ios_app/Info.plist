@@ -7,36 +7,44 @@
     <key>CFBundleIdentifier</key>
     <string>club.apex.lifemaxx.ios</string>
     <key>CFBundleName</key>
-    <string>APEX OS</string>
+    <string>APEX</string>
     <key>CFBundleDisplayName</key>
-    <string>APEX OS</string>
+    <string>APEX</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBackground</string>
+    </dict>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>
-        <string>healthkit</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
     <key>NSHealthShareUsageDescription</key>
-    <string>APEX OS connects to Apple HealthKit in real time to monitor active energy, heart rate, HRV, and concentric activity rings.</string>
+    <string>APEX reads your active energy, heart rate, HRV, VO₂ max, and sleep from Apple Health to track recovery and biological fitness age.</string>
     <key>NSHealthUpdateUsageDescription</key>
-    <string>APEX OS writes workout sets, active energy, and functional strength records directly into your HealthKit store in real time.</string>
+    <string>APEX saves your completed strength workouts and active energy directly into Apple Health.</string>
     <key>NSCameraUsageDescription</key>
-    <string>APEX OS uses front-facing camera computer vision to track workout kinematics, validate squat depth, and count repetitions in real time.</string>
+    <string>APEX uses the front camera with on-device Apple Vision to analyze exercise form and craniofacial symmetry.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>APEX OS analyzes acoustic vocal pitch and thoracic resonance.</string>
+    <string>APEX analyzes vocal resonance for voice biomarkers.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>APEX lets you select a portrait photo from your library for on-device craniofacial symmetry analysis.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
