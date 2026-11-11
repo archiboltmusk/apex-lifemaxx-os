@@ -5,6 +5,9 @@ import Combine
 public struct LongevityView: View {
     @ObservedObject private var health = HealthKitManager.shared
     @ObservedObject private var router = ApexNavigationRouter.shared
+    @ObservedObject private var postureEngine = SpatialPostureHapticsEngine.shared
+    @ObservedObject private var experimentStore = ExperimentLabStore.shared
+    @ObservedObject private var voiceStore = VoiceBiomarkerStore.shared
 
     // Interactive Dead Hang Timer State
     @AppStorage("apex_best_deadhang_sec") private var bestDeadHangSeconds: Int = 0
@@ -15,6 +18,8 @@ public struct LongevityView: View {
     @AppStorage("apex_wake_minutes") private var wakeMinutesFromMidnight: Int = 390
     @State private var showCompanionConfig: Bool = false
     @State private var showBloodworkOCR: Bool = false
+    @State private var showExperimentLab: Bool = false
+    @State private var showVoiceCheck: Bool = false
     @State private var syncJustCompleted: Bool = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -28,6 +33,10 @@ public struct LongevityView: View {
                     biologicalAgeCard
 
                     bloodworkOCRCard
+
+                    experimentLabCard
+
+                    spatialPostureAndVoiceRow
 
                     deadHangCard
 
@@ -69,6 +78,16 @@ public struct LongevityView: View {
             }
             .sheet(isPresented: $showBloodworkOCR) {
                 BloodworkOCRView()
+            }
+            .sheet(isPresented: $showExperimentLab) {
+                ExperimentLabSheet()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showVoiceCheck) {
+                VoiceBiomarkerSheet()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -366,6 +385,122 @@ public struct LongevityView: View {
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - 3B. 14-Day N-of-1 Experiment Lab
+    private var experimentLabCard: some View {
+        let active = experimentStore.activeProtocol
+        let summary = experimentStore.correlation(for: active.id, health: health)
+
+        return Button {
+            Haptics.tap()
+            showExperimentLab = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(ApexTheme.accentAmber.opacity(0.16))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: active.icon)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(ApexTheme.accentAmber)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("N-of-1 Experiment Lab")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("\(active.title) · \(summary.onDaysCount)/14 days logged")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+
+                Spacer()
+
+                if let hrvDelta = summary.hrvDeltaPct {
+                    Text(String(format: "%+.0f%% HRV", hrvDelta))
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        .foregroundStyle(hrvDelta >= 0 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(ApexTheme.elevatedSurface)
+                        .clipShape(Capsule())
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .appleCard(padding: 16, cornerRadius: 20)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 3C. AirPods Spatial Posture & Morning Voice Biomarker Row
+    private var spatialPostureAndVoiceRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                Haptics.tap(.medium)
+                postureEngine.togglePostureMonitoring()
+            } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "airpodspro")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(postureEngine.isForwardHeadSlouching ? ApexTheme.accentAmber : ApexTheme.standCyan)
+                        Spacer()
+                        Circle()
+                            .fill(postureEngine.isMonitoringPosture ? ApexTheme.accentEmerald : Color.gray.opacity(0.4))
+                            .frame(width: 7, height: 7)
+                    }
+                    Text("Cervical Posture")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(postureEngine.isMonitoringPosture
+                         ? String(format: "%.0f° pitch · %d cues", postureEngine.headPitchDegrees, postureEngine.slouchEventsCount)
+                         : (postureEngine.isAirPodsAvailable ? "Tap to monitor neck" : "AirPods Pro ready"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appleCard(padding: 14, cornerRadius: 18)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                Haptics.tap()
+                showVoiceCheck = true
+            } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(ApexTheme.accentIndigo)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text("Vocal Resonance")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(voiceStore.latest.map { String(format: "%.0f Hz · %.1f%% jit", $0.fundamentalPitchHz, $0.jitterPercent) } ?? "5s F0 morning check")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appleCard(padding: 14, cornerRadius: 18)
+            }
+            .buttonStyle(.plain)
         }
     }
 

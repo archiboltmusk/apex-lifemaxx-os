@@ -244,6 +244,40 @@ export default function App() {
           showToast(`iPhone Clinical PhenoAge Synced · ${payload.phenoAge} yrs`);
         } catch {}
       }
+
+      // Merge iOS N-of-1 Experiment, Vocal F0, 3D Twin Bloat & Chest Strap Telemetry
+      if (payload.experimentProtocol) {
+        try {
+          localStorage.setItem('apex_active_experiment', JSON.stringify({
+            protocol: payload.experimentProtocol,
+            adheredToday: payload.experimentAdheredToday,
+            onDays: payload.experimentOnDays,
+            hrvDeltaPct: payload.experimentHrvDeltaPct,
+            rhrDeltaBpm: payload.experimentRhrDeltaBpm,
+            updatedAt: new Date().toISOString(),
+          }));
+          showToast(`Experiment Logged · ${payload.experimentProtocol}`);
+        } catch {}
+      }
+
+      if (payload.vocalPitchHz && payload.vocalPitchHz > 0) {
+        try {
+          localStorage.setItem('apex_vocal_biomarker', JSON.stringify({
+            pitchHz: payload.vocalPitchHz,
+            jitterPct: payload.vocalJitterPct,
+            updatedAt: new Date().toISOString(),
+          }));
+          showToast(`Vocal F0 Synced · ${payload.vocalPitchHz} Hz`);
+        } catch {}
+      }
+
+      if (payload.hrr60DropBpm && payload.hrr60DropBpm > 0) {
+        showToast(`BLE Chest Strap HRR-60 · -${payload.hrr60DropBpm} bpm`);
+      }
+
+      if (payload.cheekBloatDeltaMm !== undefined) {
+        showToast(`3D Twin Delta · Cheek ${payload.cheekBloatDeltaMm >= 0 ? '+' : ''}${Number(payload.cheekBloatDeltaMm).toFixed(1)} mm`);
+      }
     };
 
     window.addEventListener('appleHealthSync', handleGlobalHealthKitPacket);

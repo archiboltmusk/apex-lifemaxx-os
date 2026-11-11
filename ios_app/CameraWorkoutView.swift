@@ -21,12 +21,15 @@ public struct CameraWorkoutView: View {
     @ObservedObject private var health = HealthKitManager.shared
     @ObservedObject private var activityMgr = WorkoutActivityManager.shared
     @ObservedObject private var router = ApexNavigationRouter.shared
+    @ObservedObject private var postureHaptics = SpatialPostureHapticsEngine.shared
+    @ObservedObject private var bleHR = BLEHeartRateMonitor.shared
     @StateObject private var poseController = BodyPoseController()
 
     @State private var selectedExercise: ExerciseMode = .squats
     @State private var isVoiceEnabled: Bool = true
     @State private var isSavingWorkout: Bool = false
     @State private var savedBanner: String? = nil
+    @State private var showWatchStrapSheet: Bool = false
 
     // Live Workout Timer
     @State private var sessionSeconds: Int = 0
@@ -97,16 +100,54 @@ public struct CameraWorkoutView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        isVoiceEnabled.toggle()
-                        poseController.voiceCoachingEnabled = isVoiceEnabled
-                    } label: {
-                        Image(systemName: isVoiceEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(isVoiceEnabled ? ApexTheme.accentVolt : .secondary)
+                    HStack(spacing: 10) {
+                        Button {
+                            Haptics.tap()
+                            postureHaptics.isTempoHapticsEnabled.toggle()
+                            if postureHaptics.isTempoHapticsEnabled {
+                                postureHaptics.startEccentricMetronome()
+                            } else {
+                                postureHaptics.stopEccentricMetronome()
+                            }
+                        } label: {
+                            Image(systemName: "metronome.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(postureHaptics.isTempoHapticsEnabled ? ApexTheme.standCyan : .secondary)
+                        }
+                        .accessibilityLabel("3-1-1s Tactile Tempo Metronome")
+
+                        Button {
+                            Haptics.tap()
+                            showWatchStrapSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "applewatch")
+                                    .font(.system(size: 13, weight: .semibold))
+                                if let bpm = bleHR.liveBPM {
+                                    Text("\(bpm)")
+                                        .font(.system(size: 12, weight: .bold).monospacedDigit())
+                                }
+                            }
+                            .foregroundStyle(bleHR.isConnected ? ApexTheme.moveCrimson : .white)
+                        }
+                        .accessibilityLabel("Apple Watch & BLE Chest Strap")
+
+                        Button {
+                            Haptics.tap()
+                            isVoiceEnabled.toggle()
+                            poseController.voiceCoachingEnabled = isVoiceEnabled
+                        } label: {
+                            Image(systemName: isVoiceEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(isVoiceEnabled ? ApexTheme.accentVolt : .secondary)
+                        }
                     }
                 }
+            }
+            .sheet(isPresented: $showWatchStrapSheet) {
+                ChestStrapWatchSheet(activeWorkoutTitle: selectedExercise.rawValue)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
             .onReceive(timer) { _ in
                 if isTimerRunning {
@@ -211,7 +252,10 @@ public struct CameraWorkoutView: View {
                     PoseCameraPreview(session: poseController.session)
                         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
 
-                    PoseSkeletonCanvas(joints: poseController.detectedJoints)
+                    PoseSkeletonCanvas(
+                        joints: poseController.detectedJoints,
+                        wristPathTrace: poseController.wristPathTrace
+                    )
                 }
             } else {
                 VStack(spacing: 14) {
@@ -349,17 +393,28 @@ public struct CameraWorkoutView: View {
                 .appleCard(padding: 14, cornerRadius: 18)
             }
 
-            // Secondary Tempo & Joint Angle Pill Row
-            HStack {
-                Label("Joint \(poseController.jointAngle)°", systemImage: "angle")
+            // Secondary Tempo, Power, 3D Depth & BLE Heart Rate Row
+            HStack(spacing: 8) {
+                Label("\(poseController.jointAngle)°", systemImage: "angle")
                 Spacer()
-                Label(String(format: "Eccentric %.1fs", poseController.lastEccentricSeconds), systemImage: "arrow.down.circle")
+                Label(String(format: "%.1fs ecc", poseController.lastEccentricSeconds), systemImage: "arrow.down.circle")
                 Spacer()
-                Label(String(format: "Peak %.2f m/s", poseController.peakVelocity), systemImage: "bolt")
+                Label("\(poseController.estimatedPowerWatts)W · \(poseController.estimated1RMPercent)%", systemImage: "bolt")
+                if let bpm = bleHR.liveBPM {
+                    Spacer()
+                    Label("\(bpm)", systemImage: "heart.fill")
+                        .foregroundStyle(ApexTheme.moveCrimson)
+                } else if poseController.is3DPoseActive {
+                    Spacer()
+                    Label("3D", systemImage: "cube.transparent")
+                        .foregroundStyle(ApexTheme.standCyan)
+                }
             }
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .appleCard(padding: 12, cornerRadius: 14)
         }
     }
@@ -563,9 +618,10 @@ public struct CameraWorkoutView: View {
     }
 }
 
-// MARK: - SwiftUI Optical Skeleton Overlay Canvas
+// MARK: - SwiftUI Optical Skeleton & Bar Path Trace Canvas
 private struct PoseSkeletonCanvas: View {
     let joints: [VNHumanBodyPoseObservation.JointName: CGPoint]
+    let wristPathTrace: [CGPoint]
 
     private let bonePairs: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
         (.leftShoulder, .rightShoulder),
@@ -581,6 +637,19 @@ private struct PoseSkeletonCanvas: View {
         Canvas { ctx, size in
             func map(_ p: CGPoint) -> CGPoint {
                 CGPoint(x: p.x * size.width, y: p.y * size.height)
+            }
+
+            if wristPathTrace.count >= 2 {
+                var barPath = Path()
+                barPath.move(to: map(wristPathTrace[0]))
+                for pt in wristPathTrace.dropFirst() {
+                    barPath.addLine(to: map(pt))
+                }
+                ctx.stroke(
+                    barPath,
+                    with: .color(ApexTheme.accentVolt.opacity(0.65)),
+                    style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round)
+                )
             }
 
             for (a, b) in bonePairs {
@@ -601,7 +670,7 @@ private struct PoseSkeletonCanvas: View {
     }
 }
 
-// MARK: - Live AVFoundation Camera + Apple Vision Body Pose & VBT Engine
+// MARK: - Live AVFoundation Camera + Apple Vision 2D/3D Body Pose & VBT Engine
 private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var isCameraRunning: Bool = false
     @Published var repCount: Int = 0
@@ -610,6 +679,10 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     @Published var peakVelocity: Double = 0.0
     @Published var velocityLossPercent: Int = 0
     @Published var lastEccentricSeconds: Double = 0.0
+    @Published var estimatedPowerWatts: Int = 0
+    @Published var estimated1RMPercent: Int = 0
+    @Published var is3DPoseActive: Bool = false
+    @Published var wristPathTrace: [CGPoint] = []
     @Published var guidanceCue: String = "Position full body in frame"
     @Published var formFaultCue: String? = nil
     @Published var detectedJoints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
@@ -625,6 +698,7 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     private var eccentricStartTime: Date = Date()
     private var concentricStartTime: Date = Date()
     private var baselineRepPeakVelocity: Double = 0.0
+    private var frameCounter: Int = 0
     private var isConfigured = false
 
     override init() {
@@ -650,6 +724,10 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
         velocityLossPercent = 0
         baselineRepPeakVelocity = 0.0
         lastEccentricSeconds = 0.0
+        estimatedPowerWatts = 0
+        estimated1RMPercent = 0
+        wristPathTrace = []
+        is3DPoseActive = false
         formFaultCue = nil
         repPhase = "UP"
     }
@@ -709,15 +787,27 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
             DispatchQueue.main.async {
                 self?.isCameraRunning = false
                 self?.detectedJoints = [:]
+                self?.wristPathTrace = []
+                self?.is3DPoseActive = false
             }
         }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        frameCounter += 1
         let request = VNDetectHumanBodyPoseRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         try? handler.perform([request])
+
+        var found3D = false
+        if #available(iOS 17.0, *), frameCounter % 5 == 0 {
+            let req3D = VNDetectHumanBodyPose3DRequest()
+            try? handler.perform([req3D])
+            if let obs3D = req3D.results?.first, obs3D.bodyHeight > 0.5 {
+                found3D = true
+            }
+        }
 
         guard let obs = request.results?.first,
               let recognized = try? obs.recognizedPoints(.all) else {
@@ -730,12 +820,29 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
         }
 
         DispatchQueue.main.async {
+            if found3D { self.is3DPoseActive = true }
             self.detectedJoints = mapped
             self.evaluateKinematics(mapped)
         }
     }
 
     private func evaluateKinematics(_ joints: [VNHumanBodyPoseObservation.JointName: CGPoint]) {
+        // Track dominant wrist/shoulder anchor for bar-path trajectory trace
+        let tracePoint: CGPoint? = {
+            switch exerciseMode {
+            case .squats, .lunges, .rdl:
+                return joints[.leftHip] ?? joints[.rightHip] ?? joints[.leftShoulder]
+            default:
+                return joints[.rightWrist] ?? joints[.leftWrist]
+            }
+        }()
+        if let pt = tracePoint {
+            wristPathTrace.append(pt)
+            if wristPathTrace.count > 28 {
+                wristPathTrace.removeFirst(wristPathTrace.count - 28)
+            }
+        }
+
         // Check horizontal shoulder balance for bilateral form warning
         if let ls = joints[.leftShoulder], let rs = joints[.rightShoulder] {
             let shoulderTilt = abs(ls.y - rs.y)
@@ -825,6 +932,11 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
             let loss = max(0, Int(((baselineRepPeakVelocity - vel) / baselineRepPeakVelocity * 100.0).rounded()))
             velocityLossPercent = min(65, loss)
         }
+
+        // Gonzalez-Badillo velocity-to-%1RM load-velocity profile + concentric power (Watts)
+        let pct1RM = max(45, min(98, Int(((1.45 - vel) / 1.15 * 100.0).rounded())))
+        estimated1RMPercent = pct1RM
+        estimatedPowerWatts = Int((60.0 * 9.81 * vel).rounded())
 
         repCount += 1
         if velocityLossPercent >= 20 {

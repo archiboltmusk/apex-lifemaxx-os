@@ -60,6 +60,10 @@
     <string>APEX lets you select portraits or bloodwork lab photos for on-device Apple Vision analysis.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>APEX discovers your Mac Companion app over local Wi-Fi via Bonjour to synchronize Apple Health telemetry and scans privately.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>APEX connects directly to Polar and Garmin BLE heart rate straps (0x180D) for real-time beat-to-beat R-R intervals and 60s HRR recovery tracking.</string>
+    <key>NSMotionUsageDescription</key>
+    <string>APEX uses AirPods Pro spatial head motion sensors to detect cervical forward-head posture during desk and training sessions.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_apexos._tcp</string>

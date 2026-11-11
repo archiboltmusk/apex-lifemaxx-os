@@ -9,9 +9,11 @@ public enum SelectedBiometricDetail: String, Identifiable {
 // MARK: - Today Summary View (Apple Fitness & Vitals Aesthetic + 7-Day Swift Charts)
 public struct SummaryView: View {
     @ObservedObject private var health = HealthKitManager.shared
+    @ObservedObject private var watchScheduler = WatchWorkoutScheduler.shared
     @Binding var selectedTab: Int
 
     @State private var detailMetric: SelectedBiometricDetail? = nil
+    @State private var showCoachSheet: Bool = false
 
     public init(selectedTab: Binding<Int>) {
         self._selectedTab = selectedTab
@@ -54,29 +56,47 @@ public struct SummaryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        if health.isAuthorized {
-                            health.fetchLiveHealthMetrics()
-                        } else {
-                            health.requestAuthorization()
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(health.isAuthorized ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
-                                .frame(width: 7, height: 7)
-                            Text(health.isAuthorized ? "Live" : "Connect")
+                    HStack(spacing: 8) {
+                        Button {
+                            Haptics.tap()
+                            showCoachSheet = true
+                        } label: {
+                            Image(systemName: "sparkles")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(ApexTheme.accentVolt)
+                                .padding(7)
+                                .background(ApexTheme.cardSurface)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                                )
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(ApexTheme.cardSurface)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
-                        )
+                        .accessibilityLabel("Open APEX Coach")
+
+                        Button {
+                            Haptics.tap()
+                            if health.isAuthorized {
+                                health.fetchLiveHealthMetrics()
+                            } else {
+                                health.requestAuthorization()
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(health.isAuthorized ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                                    .frame(width: 7, height: 7)
+                                Text(health.isAuthorized ? "Live" : "Connect")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(ApexTheme.cardSurface)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                            )
+                        }
                     }
                 }
             }
@@ -87,6 +107,11 @@ public struct SummaryView: View {
             .sheet(item: $detailMetric) { metric in
                 BiometricDetailSheet(metric: metric, health: health)
                     .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showCoachSheet) {
+                ApexCoachSheet()
+                    .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
         }
@@ -397,6 +422,38 @@ public struct SummaryView: View {
                 .background(ApexTheme.elevatedSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+
+            Button {
+                Task {
+                    await watchScheduler.pushStrengthProtocolToWatch(
+                        title: coach.title,
+                        durationMinutes: 35,
+                        activity: .traditionalStrengthTraining
+                    )
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "applewatch.radiowaves.left.and.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ApexTheme.exerciseLime)
+                    Text(watchScheduler.statusMessage ?? (watchScheduler.isScheduling ? "Pushing to Apple Watch..." : "Push Protocol to Apple Watch"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Spacer()
+                    if watchScheduler.statusMessage == nil {
+                        Text("WorkoutKit")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(ApexTheme.exerciseLime)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(ApexTheme.exerciseLime.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .disabled(watchScheduler.isScheduling)
         }
         .appleCard(padding: 18, cornerRadius: 22)
     }

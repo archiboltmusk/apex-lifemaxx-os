@@ -98,6 +98,14 @@ xcrun --sdk iphonesimulator swiftc \
     -framework WidgetKit \
     -framework ActivityKit \
     -framework AppIntents \
+    -framework CoreBluetooth \
+    -framework CoreMotion \
+    -framework CoreHaptics \
+    -framework Accelerate \
+    -framework RealityKit \
+    -framework SoundAnalysis \
+    -framework WorkoutKit \
+    -Xlinker -weak_framework -Xlinker FoundationModels \
     -parse-as-library \
     -O \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "$SIM_ENTITLEMENTS" \
@@ -106,6 +114,13 @@ xcrun --sdk iphonesimulator swiftc \
     ios_app/HealthKitManager.swift \
     ios_app/WorkoutActivityManager.swift \
     ios_app/ActivityRingsView.swift \
+    ios_app/ApexIntelligenceEngine.swift \
+    ios_app/OpticalPulseEngine.swift \
+    ios_app/TrueDepthTwinView.swift \
+    ios_app/SpatialPostureHapticsEngine.swift \
+    ios_app/BLEHeartRateMonitor.swift \
+    ios_app/ExperimentLabView.swift \
+    ios_app/VoiceBiomarkerView.swift \
     ios_app/FaceScanView.swift \
     ios_app/CameraWorkoutView.swift \
     ios_app/BloodworkOCRView.swift \

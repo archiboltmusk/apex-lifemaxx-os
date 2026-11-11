@@ -36,6 +36,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: club.apex.lifemaxx.ios
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        OTHER_LDFLAGS: "-weak_framework FoundationModels"
 
   APEXWidgets:
     type: app-extension

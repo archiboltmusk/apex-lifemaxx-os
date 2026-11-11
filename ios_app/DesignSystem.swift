@@ -19,6 +19,17 @@ public enum ApexTheme {
     public static let accentEmerald = Color(red: 0.19, green: 0.82, blue: 0.35)     // #30D158
     public static let accentIndigo = Color(red: 0.37, green: 0.36, blue: 0.90)      // #5E5CE6
     public static let accentAmber = Color(red: 1.00, green: 0.62, blue: 0.04)       // #FF9F0A
+
+    // Semantic Aliases for Extension Modules
+    public static let bg = background
+    public static let cardElevated = elevatedSurface
+    public static let green = accentEmerald
+    public static let blue = standCyan
+    public static let orange = accentAmber
+    public static let red = moveCrimson
+    public static let purple = accentIndigo
+    public static let secondaryText = Color.secondary
+    public static let tertiaryText = Color(white: 0.42)
 }
 
 // MARK: - Apple Taptic Feedback Engine
@@ -27,6 +38,12 @@ public enum Haptics {
         let generator = UIImpactFeedbackGenerator(style: style)
         generator.prepare()
         generator.impactOccurred()
+    }
+
+    public static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        generator.selectionChanged()
     }
 
     public static func shutter() {

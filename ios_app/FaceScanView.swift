@@ -60,6 +60,8 @@ public struct FaceScanView: View {
     @State private var noFaceAlert: String? = nil
     @State private var showCompareSheet: Bool = false
     @State private var showTrueDepthSheet: Bool = false
+    @State private var showOpticalPulseSheet: Bool = false
+    @State private var showTwinSheet: Bool = false
 
     @State private var currentResult: FaceScanRecord? = nil
     @State private var scanHistory: [FaceScanRecord] = FaceScanStore.load()
@@ -139,6 +141,16 @@ public struct FaceScanView: View {
                     FaceScanStore.save(scanHistory)
                     syncScanToMac(record)
                 }
+            }
+            .sheet(isPresented: $showOpticalPulseSheet) {
+                OpticalPulseSheet()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showTwinSheet) {
+                TrueDepthTwinSheet()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -411,6 +423,60 @@ public struct FaceScanView: View {
                             .foregroundStyle(.secondary)
                     }
                     .appleCard(padding: 13, cornerRadius: 16)
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    Haptics.tap()
+                    controller.stop()
+                    showOpticalPulseSheet = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(ApexTheme.moveCrimson)
+                        Text("10s PPG Pulse")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(ApexTheme.cardSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Haptics.tap()
+                    controller.stop()
+                    showTwinSheet = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "faceid")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(ApexTheme.standCyan)
+                        Text("3D Digital Twin")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(ApexTheme.cardSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                    )
                 }
                 .buttonStyle(.plain)
             }
