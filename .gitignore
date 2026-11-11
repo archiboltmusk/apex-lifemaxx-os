@@ -36,3 +36,7 @@ APEXWatch.app
 public/models/*.task
 public/models/*.tflite
 public/models/*.onnx
+*.ipa
+.ipa_build/
+ios_app/APEX_iOS.xcodeproj/xcuserdata/
+ios_app/APEX_iOS.xcodeproj/project.xcworkspace/

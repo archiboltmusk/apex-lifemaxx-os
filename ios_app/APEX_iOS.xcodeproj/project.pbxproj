@@ -1,0 +1,549 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3110DEBF3CECB1E422D01B0B /* APEXApp.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 6C10EADF3EED3CB6249070F5 /* APEXApp.swift */; };
+		6CB7435BD17FAB9C08F8B8C0 /* ActivityRingsView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 2D174C4ABEA7C2A707B82D25 /* ActivityRingsView.swift */; };
+		84EF50CE3279F5FBF30B833B /* ApexIntelligenceEngine.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = E05F33F639823F68601F8EFA /* ApexIntelligenceEngine.swift */; };
+		134B57FC3545B82FFCAD495A /* ApexIntents.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = D6F828E3E993B430CCB09B7A /* ApexIntents.swift */; };
+		C46A15206FE2A709AB4483CD /* ApexNotificationsEngine.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 3D017CED1A103BD35F71FAE9 /* ApexNotificationsEngine.swift */; };
+		F2CB4026517BBB1BB9642EE9 /* ApexSharedTypes.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 3BF3F40777BCF54A2DF13E2D /* ApexSharedTypes.swift */; };
+		AA11C22CA12CA269F6FBE973 /* ApexWatchConnectivity.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 860617C30C8F9AF62097CFD3 /* ApexWatchConnectivity.swift */; };
+		775C335EDF5CF89FFEDB3194 /* BLEHeartRateMonitor.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = B4801EC080F4DA4329437116 /* BLEHeartRateMonitor.swift */; };
+		4D3C191ECF4E20CBC9EA4515 /* BevelMetricsViews.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = DB0237F60F41B39EB5FE0880 /* BevelMetricsViews.swift */; };
+		6424B6BBBB6C854DE7E9EEBB /* BloodworkOCRView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 2D9589B1C49078D0056D45C8 /* BloodworkOCRView.swift */; };
+		8C66F32C0181B30C22F90590 /* BreathworkHapticsView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = B06155F80BE9002846B4D9D5 /* BreathworkHapticsView.swift */; };
+		BF6DEE4CAD8A8F036017887A /* CameraWorkoutView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 4047D65AC64147FDCC6149F4 /* CameraWorkoutView.swift */; };
+		0F6D9560263E98334B25535E /* ClinicalReportEngine.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = C12D0A990136FAFF77716B6F /* ClinicalReportEngine.swift */; };
+		20DE6504F5938379AE1535CA /* ContentView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = BE1CD5EAD37EE7672BF0382E /* ContentView.swift */; };
+		9C1B4E9433EC722D0B00C707 /* DesignSystem.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = D395890CBF1C08B7FD55B5AD /* DesignSystem.swift */; };
+		F30EDCBE486A87D10E699A68 /* ExperimentLabView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = DFA17EB20881036CBF27B481 /* ExperimentLabView.swift */; };
+		EFCCC31CE77FCBDAF4C7101A /* FaceScanView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 644B1B6155F80922718D2780 /* FaceScanView.swift */; };
+		272AB9AAAF352FF7B7A6B908 /* HealthKitManager.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 05B5DDC31AC39948A69ECF40 /* HealthKitManager.swift */; };
+		000C823D7E8E46238F3049C2 /* LongevityView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = A62D3F46AAF28BA81C66E975 /* LongevityView.swift */; };
+		140F4DAC88259E06F7DB7EE6 /* NutritionCGMView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 1B0F993C3F07D7F5C68E0CF0 /* NutritionCGMView.swift */; };
+		48228E28F07895FF0B92CC7C /* OnboardingAndPrefsView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 966CB9F27C91894C0DB5CC40 /* OnboardingAndPrefsView.swift */; };
+		9EFFD8506F30B1C432F40A3A /* OpticalPulseEngine.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = B7DF1CAF594AEB674658AC72 /* OpticalPulseEngine.swift */; };
+		61FD4D8951C65850636F99F7 /* SpatialPostureHapticsEngine.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 9DB708E35C8B329E3DAFCE37 /* SpatialPostureHapticsEngine.swift */; };
+		AF8B879C2FCFB3ACA9CC9931 /* StrengthBuilderView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = FF53872D49950BB18133A67D /* StrengthBuilderView.swift */; };
+		527CA2D898A393771A18A472 /* SummaryView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = B22834A745015328075BC724 /* SummaryView.swift */; };
+		F1E269D8AFA45A6520656088 /* TrueDepthTwinView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 7C4D4E80F948F01F1CAB66D3 /* TrueDepthTwinView.swift */; };
+		28F180FE32270CA994275DB1 /* VoiceBiomarkerView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = BB2F770BA1CAE29E366AD813 /* VoiceBiomarkerView.swift */; };
+		B3598624ED0B21A690EE9131 /* WorkoutActivityManager.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 9977483F3B27A264251C5E93 /* WorkoutActivityManager.swift */; };
+		35E78F94B0AA324BA6BA930F /* ApexSharedTypes.swift in APEXWidgets_Sources */ = {isa = PBXBuildFile; fileRef = 3BF3F40777BCF54A2DF13E2D /* ApexSharedTypes.swift */; };
+		7F0B0DC6CBCC67B53B490395 /* ApexWidgetIntents.swift in APEXWidgets_Sources */ = {isa = PBXBuildFile; fileRef = BE84BE759602725A2CDA4EC2 /* ApexWidgetIntents.swift */; };
+		C62CBC8ED16E40E30E25A932 /* ApexWidgets.swift in APEXWidgets_Sources */ = {isa = PBXBuildFile; fileRef = DB71739A105B2CE3E0FA2123 /* ApexWidgets.swift */; };
+		700BB0718D4A42D28AB8D88C /* ApexSharedTypes.swift in APEXWatch_Sources */ = {isa = PBXBuildFile; fileRef = 3BF3F40777BCF54A2DF13E2D /* ApexSharedTypes.swift */; };
+		D082D3117F8C0D7D4D93C3C8 /* APEXWatchApp.swift in APEXWatch_Sources */ = {isa = PBXBuildFile; fileRef = 7AC01893ABBB85A07102CE07 /* APEXWatchApp.swift */; };
+		51C62A85AED68EA2360C65E4 /* Assets.xcassets in APEX_iOS_Resources */ = {isa = PBXBuildFile; fileRef = CFDBAC21689581B04CB7ABB5 /* Assets.xcassets */; };
+		7702EEE02DDD526B47187691 /* APEXWidgets.appex in EmbedExtensions */ = {isa = PBXBuildFile; fileRef = 8397CC00EB22AB0810985D10 /* APEXWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F98AC533F9953150B1F2D672 /* APEXWatch.app in EmbedWatch */ = {isa = PBXBuildFile; fileRef = BB92CACF367999BA73AFFD33 /* APEXWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0DD22CB6C2E8E29B0AF6C12D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CAD6C6E74EC9E8E8826CF52D;
+			remoteInfo = APEXWidgets;
+		};
+		FB3FFD61B7D6B9712B621E64 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0C8A80B9D0C162EF46432E6B;
+			remoteInfo = APEXWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AA7D5091AA674449B369F627 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7702EEE02DDD526B47187691 /* APEXWidgets.appex in EmbedExtensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B85531C52175FB6E36010BB1 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				F98AC533F9953150B1F2D672 /* APEXWatch.app in EmbedWatch */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		6C10EADF3EED3CB6249070F5 /* APEXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "APEXApp.swift"; sourceTree = "<group>"; };
+		2D174C4ABEA7C2A707B82D25 /* ActivityRingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ActivityRingsView.swift"; sourceTree = "<group>"; };
+		E05F33F639823F68601F8EFA /* ApexIntelligenceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ApexIntelligenceEngine.swift"; sourceTree = "<group>"; };
+		D6F828E3E993B430CCB09B7A /* ApexIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ApexIntents.swift"; sourceTree = "<group>"; };
+		3D017CED1A103BD35F71FAE9 /* ApexNotificationsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ApexNotificationsEngine.swift"; sourceTree = "<group>"; };
+		3BF3F40777BCF54A2DF13E2D /* ApexSharedTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ApexSharedTypes.swift"; sourceTree = "<group>"; };
+		860617C30C8F9AF62097CFD3 /* ApexWatchConnectivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ApexWatchConnectivity.swift"; sourceTree = "<group>"; };
+		B4801EC080F4DA4329437116 /* BLEHeartRateMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BLEHeartRateMonitor.swift"; sourceTree = "<group>"; };
+		DB0237F60F41B39EB5FE0880 /* BevelMetricsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BevelMetricsViews.swift"; sourceTree = "<group>"; };
+		2D9589B1C49078D0056D45C8 /* BloodworkOCRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BloodworkOCRView.swift"; sourceTree = "<group>"; };
+		B06155F80BE9002846B4D9D5 /* BreathworkHapticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BreathworkHapticsView.swift"; sourceTree = "<group>"; };
+		4047D65AC64147FDCC6149F4 /* CameraWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CameraWorkoutView.swift"; sourceTree = "<group>"; };
+		C12D0A990136FAFF77716B6F /* ClinicalReportEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClinicalReportEngine.swift"; sourceTree = "<group>"; };
+		BE1CD5EAD37EE7672BF0382E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ContentView.swift"; sourceTree = "<group>"; };
+		D395890CBF1C08B7FD55B5AD /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignSystem.swift"; sourceTree = "<group>"; };
+		DFA17EB20881036CBF27B481 /* ExperimentLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExperimentLabView.swift"; sourceTree = "<group>"; };
+		644B1B6155F80922718D2780 /* FaceScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FaceScanView.swift"; sourceTree = "<group>"; };
+		05B5DDC31AC39948A69ECF40 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HealthKitManager.swift"; sourceTree = "<group>"; };
+		A62D3F46AAF28BA81C66E975 /* LongevityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LongevityView.swift"; sourceTree = "<group>"; };
+		1B0F993C3F07D7F5C68E0CF0 /* NutritionCGMView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionCGMView.swift"; sourceTree = "<group>"; };
+		966CB9F27C91894C0DB5CC40 /* OnboardingAndPrefsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingAndPrefsView.swift"; sourceTree = "<group>"; };
+		B7DF1CAF594AEB674658AC72 /* OpticalPulseEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpticalPulseEngine.swift"; sourceTree = "<group>"; };
+		9DB708E35C8B329E3DAFCE37 /* SpatialPostureHapticsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SpatialPostureHapticsEngine.swift"; sourceTree = "<group>"; };
+		FF53872D49950BB18133A67D /* StrengthBuilderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StrengthBuilderView.swift"; sourceTree = "<group>"; };
+		B22834A745015328075BC724 /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SummaryView.swift"; sourceTree = "<group>"; };
+		7C4D4E80F948F01F1CAB66D3 /* TrueDepthTwinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrueDepthTwinView.swift"; sourceTree = "<group>"; };
+		BB2F770BA1CAE29E366AD813 /* VoiceBiomarkerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceBiomarkerView.swift"; sourceTree = "<group>"; };
+		9977483F3B27A264251C5E93 /* WorkoutActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkoutActivityManager.swift"; sourceTree = "<group>"; };
+		BE84BE759602725A2CDA4EC2 /* ApexWidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Widgets/ApexWidgetIntents.swift"; sourceTree = "<group>"; };
+		DB71739A105B2CE3E0FA2123 /* ApexWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Widgets/ApexWidgets.swift"; sourceTree = "<group>"; };
+		7AC01893ABBB85A07102CE07 /* APEXWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Watch/APEXWatchApp.swift"; sourceTree = "<group>"; };
+		CFDBAC21689581B04CB7ABB5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>"; };
+		3FB6BD64A997C517BC11CC6E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
+		7A319D5730FCA08BE486FE5D /* APEX_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "APEX_iOS.entitlements"; sourceTree = "<group>"; };
+		E04CE310A1E19C383AA5B02B /* Widgets/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Widgets/Info.plist"; sourceTree = "<group>"; };
+		3609CF3AF34F0A5C8EF447C9 /* Watch/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Watch/Info.plist"; sourceTree = "<group>"; };
+		0550FDA0774F736EBFB3035E /* APEX_iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "APEX_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8397CC00EB22AB0810985D10 /* APEXWidgets.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = "APEXWidgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB92CACF367999BA73AFFD33 /* APEXWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "APEXWatch.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		ADCF10F76EBF2A74473E9DC4 = {
+			isa = PBXGroup;
+			children = (
+				13A114BC02AEA3E7964EB54E /* APEX_iOS */,
+				440A78DFB4FE55E488E37A65 /* Widgets */,
+				AAB3A8DEC28BCCF6E577C065 /* Watch */,
+				00C45FD35CB0F9C5F764F070 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		13A114BC02AEA3E7964EB54E /* APEX_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				6C10EADF3EED3CB6249070F5 /* APEXApp.swift */,
+				2D174C4ABEA7C2A707B82D25 /* ActivityRingsView.swift */,
+				E05F33F639823F68601F8EFA /* ApexIntelligenceEngine.swift */,
+				D6F828E3E993B430CCB09B7A /* ApexIntents.swift */,
+				3D017CED1A103BD35F71FAE9 /* ApexNotificationsEngine.swift */,
+				3BF3F40777BCF54A2DF13E2D /* ApexSharedTypes.swift */,
+				860617C30C8F9AF62097CFD3 /* ApexWatchConnectivity.swift */,
+				B4801EC080F4DA4329437116 /* BLEHeartRateMonitor.swift */,
+				DB0237F60F41B39EB5FE0880 /* BevelMetricsViews.swift */,
+				2D9589B1C49078D0056D45C8 /* BloodworkOCRView.swift */,
+				B06155F80BE9002846B4D9D5 /* BreathworkHapticsView.swift */,
+				4047D65AC64147FDCC6149F4 /* CameraWorkoutView.swift */,
+				C12D0A990136FAFF77716B6F /* ClinicalReportEngine.swift */,
+				BE1CD5EAD37EE7672BF0382E /* ContentView.swift */,
+				D395890CBF1C08B7FD55B5AD /* DesignSystem.swift */,
+				DFA17EB20881036CBF27B481 /* ExperimentLabView.swift */,
+				644B1B6155F80922718D2780 /* FaceScanView.swift */,
+				05B5DDC31AC39948A69ECF40 /* HealthKitManager.swift */,
+				A62D3F46AAF28BA81C66E975 /* LongevityView.swift */,
+				1B0F993C3F07D7F5C68E0CF0 /* NutritionCGMView.swift */,
+				966CB9F27C91894C0DB5CC40 /* OnboardingAndPrefsView.swift */,
+				B7DF1CAF594AEB674658AC72 /* OpticalPulseEngine.swift */,
+				9DB708E35C8B329E3DAFCE37 /* SpatialPostureHapticsEngine.swift */,
+				FF53872D49950BB18133A67D /* StrengthBuilderView.swift */,
+				B22834A745015328075BC724 /* SummaryView.swift */,
+				7C4D4E80F948F01F1CAB66D3 /* TrueDepthTwinView.swift */,
+				BB2F770BA1CAE29E366AD813 /* VoiceBiomarkerView.swift */,
+				9977483F3B27A264251C5E93 /* WorkoutActivityManager.swift */,
+				CFDBAC21689581B04CB7ABB5 /* Assets.xcassets */,
+				3FB6BD64A997C517BC11CC6E /* Info.plist */,
+				7A319D5730FCA08BE486FE5D /* APEX_iOS.entitlements */,
+			);
+			sourceTree = "<group>";
+		};
+		440A78DFB4FE55E488E37A65 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				BE84BE759602725A2CDA4EC2 /* Widgets/ApexWidgetIntents.swift */,
+				DB71739A105B2CE3E0FA2123 /* Widgets/ApexWidgets.swift */,
+				E04CE310A1E19C383AA5B02B /* Widgets/Info.plist */,
+			);
+			sourceTree = "<group>";
+		};
+		AAB3A8DEC28BCCF6E577C065 /* Watch */ = {
+			isa = PBXGroup;
+			children = (
+				7AC01893ABBB85A07102CE07 /* Watch/APEXWatchApp.swift */,
+				3609CF3AF34F0A5C8EF447C9 /* Watch/Info.plist */,
+			);
+			sourceTree = "<group>";
+		};
+		00C45FD35CB0F9C5F764F070 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0550FDA0774F736EBFB3035E /* APEX_iOS.app */,
+				8397CC00EB22AB0810985D10 /* APEXWidgets.appex */,
+				BB92CACF367999BA73AFFD33 /* APEXWatch.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		44C7A4C3C9D0516FD403A11D /* APEX_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 99CCB8CFB18C76B09E5F2FC8 /* Build configuration list for PBXNativeTarget "APEX_iOS" */;
+			buildPhases = (
+				1472AD77AD67C42E70D17FF5 /* Sources */,
+				5F16594F9E014752338BF769 /* Resources */,
+				AA7D5091AA674449B369F627 /* Embed Foundation Extensions */,
+				B85531C52175FB6E36010BB1 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D4A9F4575995553F848634DB /* PBXTargetDependency */,
+				4D6FC66A63FC28E93730BC03 /* PBXTargetDependency */,
+			);
+			name = APEX_iOS;
+			productName = APEX_iOS;
+			productReference = 0550FDA0774F736EBFB3035E /* APEX_iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CAD6C6E74EC9E8E8826CF52D /* APEXWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0FE9D88A879543BBEB61FB72 /* Build configuration list for PBXNativeTarget "APEXWidgets" */;
+			buildPhases = (
+				85B53C7A615CCE39E04693F3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = APEXWidgets;
+			productName = APEXWidgets;
+			productReference = 8397CC00EB22AB0810985D10 /* APEXWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		0C8A80B9D0C162EF46432E6B /* APEXWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6DB3724B6AB526265234B59F /* Build configuration list for PBXNativeTarget "APEXWatch" */;
+			buildPhases = (
+				8CA58B3836539C87BAF378EB /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = APEXWatch;
+			productName = APEXWatch;
+			productReference = BB92CACF367999BA73AFFD33 /* APEXWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = B0D3B7D22269663DD77FCD84 /* Build configuration list for PBXProject "APEX_iOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = ADCF10F76EBF2A74473E9DC4;
+			productRefGroup = 00C45FD35CB0F9C5F764F070 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				44C7A4C3C9D0516FD403A11D /* APEX_iOS */,
+				CAD6C6E74EC9E8E8826CF52D /* APEXWidgets */,
+				0C8A80B9D0C162EF46432E6B /* APEXWatch */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5F16594F9E014752338BF769 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51C62A85AED68EA2360C65E4,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1472AD77AD67C42E70D17FF5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3110DEBF3CECB1E422D01B0B,
+				6CB7435BD17FAB9C08F8B8C0,
+				84EF50CE3279F5FBF30B833B,
+				134B57FC3545B82FFCAD495A,
+				C46A15206FE2A709AB4483CD,
+				F2CB4026517BBB1BB9642EE9,
+				AA11C22CA12CA269F6FBE973,
+				775C335EDF5CF89FFEDB3194,
+				4D3C191ECF4E20CBC9EA4515,
+				6424B6BBBB6C854DE7E9EEBB,
+				8C66F32C0181B30C22F90590,
+				BF6DEE4CAD8A8F036017887A,
+				0F6D9560263E98334B25535E,
+				20DE6504F5938379AE1535CA,
+				9C1B4E9433EC722D0B00C707,
+				F30EDCBE486A87D10E699A68,
+				EFCCC31CE77FCBDAF4C7101A,
+				272AB9AAAF352FF7B7A6B908,
+				000C823D7E8E46238F3049C2,
+				140F4DAC88259E06F7DB7EE6,
+				48228E28F07895FF0B92CC7C,
+				9EFFD8506F30B1C432F40A3A,
+				61FD4D8951C65850636F99F7,
+				AF8B879C2FCFB3ACA9CC9931,
+				527CA2D898A393771A18A472,
+				F1E269D8AFA45A6520656088,
+				28F180FE32270CA994275DB1,
+				B3598624ED0B21A690EE9131,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		85B53C7A615CCE39E04693F3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				35E78F94B0AA324BA6BA930F,
+				7F0B0DC6CBCC67B53B490395,
+				C62CBC8ED16E40E30E25A932,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8CA58B3836539C87BAF378EB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				700BB0718D4A42D28AB8D88C,
+				D082D3117F8C0D7D4D93C3C8,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D4A9F4575995553F848634DB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CAD6C6E74EC9E8E8826CF52D /* APEXWidgets */;
+			targetProxy = 0DD22CB6C2E8E29B0AF6C12D /* PBXContainerItemProxy */;
+		};
+		4D6FC66A63FC28E93730BC03 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0C8A80B9D0C162EF46432E6B /* APEXWatch */;
+			targetProxy = FB3FFD61B7D6B9712B621E64 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		EB6E5D967270059D7AFB70E6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				MARKETING_VERSION = 1.0.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E945B431F0654FF7B8A22491 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				MARKETING_VERSION = 1.0.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		29A6429676AEED9A0FB787DA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = APEX_iOS.entitlements;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"-weak_framework",
+					FoundationModels,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			};
+			name = Debug;
+		};
+		56737F7C5079865BF7918679 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = APEX_iOS.entitlements;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"-weak_framework",
+					FoundationModels,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			};
+			name = Release;
+		};
+		DFF2C4BC096616730E654AF9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			};
+			name = Debug;
+		};
+		AAA3F1CB9C405830E9B0C398 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			};
+			name = Release;
+		};
+		F5BAF4B2BDA9887CF15D2A30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = Watch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		21DA6EB792355EB03B5DF577 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = Watch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B0D3B7D22269663DD77FCD84 /* Build configuration list for PBXProject "APEX_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EB6E5D967270059D7AFB70E6 /* Debug */,
+				E945B431F0654FF7B8A22491 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		99CCB8CFB18C76B09E5F2FC8 /* Build configuration list for PBXNativeTarget "APEX_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				29A6429676AEED9A0FB787DA /* Debug */,
+				56737F7C5079865BF7918679 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0FE9D88A879543BBEB61FB72 /* Build configuration list for PBXNativeTarget "APEXWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DFF2C4BC096616730E654AF9 /* Debug */,
+				AAA3F1CB9C405830E9B0C398 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6DB3724B6AB526265234B59F /* Build configuration list for PBXNativeTarget "APEXWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F5BAF4B2BDA9887CF15D2A30 /* Debug */,
+				21DA6EB792355EB03B5DF577 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+}

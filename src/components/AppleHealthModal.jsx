@@ -99,6 +99,33 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
       .catch(() => {});
   }, [isOpen, localPort]);
 
+  const [ipaPackageInfo, setIpaPackageInfo] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const probeUrls = ['/api/ios-package', `http://127.0.0.1:${localPort}/api/ios-package`];
+    (async () => {
+      for (const url of probeUrls) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            const ct = res.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const info = await res.json();
+              if (info && typeof info.available === 'boolean') {
+                setIpaPackageInfo(info);
+                return;
+              }
+            }
+          }
+        } catch {
+          // Try next endpoint
+        }
+      }
+      setIpaPackageInfo({ available: false });
+    })();
+  }, [isOpen, localPort]);
+
   // Listen for Real-Time Incoming HealthKit Webhook Packets
   useEffect(() => {
     if (!isOpen) return;
@@ -601,40 +628,75 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
               <div className="p-4 rounded-[20px] bg-black/60 border border-white/15 space-y-2 text-xs font-mono">
                 <div className="flex items-center space-x-2 text-[#E5FE40] font-bold">
                   <Cpu className="w-4 h-4" />
-                  <span>NATIVE iOS COMPANION APP ARCHITECTURE</span>
+                  <span>PHYSICAL iPHONE &amp; APPLE WATCH COMPANION (.IPA + XCODE)</span>
                 </div>
                 <p className="text-[11px] text-[#A1A1AA]">
-                  HealthKit stores reside natively on iOS (iPhone & Apple Watch). The native APEX OS iOS App uses <code className="text-white font-bold">HKObserverQuery</code> with <code className="text-white font-bold">.immediate</code> background delivery to capture every heartbeat, active calorie, and stand hour, continuously broadcasting to your Mac.
+                  Apple iOS devices require an ARM64 <code className="text-white font-bold">iphoneos</code> build signed with your Apple ID (<code className="text-white font-bold">APEX-OS.ipa</code> or Xcode Automatic Signing). Simulator <code className="text-white font-bold">.zip</code> binaries cannot run on physical iPhone hardware.
                 </p>
               </div>
 
               <div className="p-3.5 rounded-[16px] bg-white/[0.04] border border-white/10 text-xs font-mono space-y-2">
                 <div className="flex items-center justify-between text-white font-bold">
-                  <span>SWIFT SOURCE:</span>
-                  <span className="text-[#10B981]">ios_app/HealthKitManager.swift</span>
+                  <span>iOS DEVICE PACKAGE:</span>
+                  <span className={ipaPackageInfo?.available ? 'text-[#10B981]' : 'text-[#F59E0B]'}>
+                    {ipaPackageInfo?.available ? `APEX-OS.ipa (${ipaPackageInfo.sizeMB || 'ARM64'})` : 'Run bash scripts/build_ios.sh'}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-[#8A8A8A]">
-                  <span>STANDALONE ZIP:</span>
-                  <span className="text-white font-bold">APEX-OS-iOS.zip</span>
+                  <span>EMBEDDED BUNDLES:</span>
+                  <span className="text-[#00F0FF]">APEX_iOS + APEXWidgets + APEXWatch</span>
                 </div>
                 <div className="flex items-center justify-between text-[#8A8A8A]">
-                  <span>FRAMEWORKS:</span>
-                  <span className="text-[#00F0FF]">HealthKit.framework · SwiftUI</span>
+                  <span>XCODE PROJECT:</span>
+                  <span className="text-white font-bold">ios_app/APEX_iOS.xcodeproj</span>
                 </div>
                 <div className="flex items-center justify-between text-[#8A8A8A]">
-                  <span>SYNC PROTOCOL:</span>
-                  <span className="text-[#FA114F]">Zero-Config Bonjour / HTTP Post</span>
+                  <span>LAN DOWNLOAD URL:</span>
+                  <span className="text-[#FA114F] select-all">http://{localIP}:{localPort}/APEX-OS.ipa</span>
+                </div>
+                <div className="flex items-center justify-between text-[#8A8A8A]">
+                  <span>PAIRING TOKEN:</span>
+                  <span className="text-[#E5FE40] select-all">{syncToken || 'Verify Gateway First'}</span>
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-[14px] bg-[#10B981]/10 border border-[#10B981]/30 flex items-center justify-between text-xs font-mono">
+              <div className="p-3.5 rounded-[14px] bg-white/[0.04] border border-white/10 text-[11px] font-mono text-[#A1A1AA] space-y-1.5">
+                <div className="text-white font-bold">2 Ways to Install on Your Physical iPhone:</div>
                 <div>
-                  <span className="text-white font-bold block">Pre-compiled iOS Binary</span>
-                  <span className="text-[#8A8A8A] text-[10px]">Ready for Xcode & Simulator deployment</span>
+                  1. <span className="text-[#E5FE40] font-bold">Sideload .ipa (No Paid Dev Account):</span> Download <code className="text-white">APEX-OS.ipa</code> below and drag it into <span className="text-white">Sideloadly</span> / <span className="text-white">AltStore</span> / <span className="text-white">SideStore</span> with your Apple ID.
                 </div>
-                <span className="text-[#10B981] font-black px-2 py-1 rounded bg-[#10B981]/20 border border-[#10B981]/40">
-                  INSTALLED
-                </span>
+                <div>
+                  2. <span className="text-[#00F0FF] font-bold">1-Click Xcode + Apple Watch:</span> Open <code className="text-white">ios_app/APEX_iOS.xcodeproj</code> in Xcode &rarr; Signing &amp; Capabilities &rarr; select your Apple ID Team &rarr; Run on iPhone.
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-[14px] bg-[#10B981]/10 border border-[#10B981]/30 flex items-center justify-between gap-3 text-xs font-mono">
+                <div>
+                  <span className="text-white font-bold block">
+                    {ipaPackageInfo?.available ? 'Physical iPhone IPA Ready' : 'Physical iPhone IPA Not Built Yet'}
+                  </span>
+                  <span className="text-[#8A8A8A] text-[10px]">
+                    {ipaPackageInfo?.available
+                      ? `ARM64 iphoneos · watchOS · WidgetKit (${ipaPackageInfo.sizeMB || 'ready'})`
+                      : 'Build with: bash scripts/build_ios.sh'}
+                  </span>
+                </div>
+                {ipaPackageInfo?.available ? (
+                  <a
+                    href={`http://${localIP}:${localPort}/APEX-OS.ipa`}
+                    download="APEX-OS.ipa"
+                    onClick={() => {
+                      fetch('/api/reveal-ipa', { method: 'POST' }).catch(() => {});
+                    }}
+                    className="text-black bg-[#E5FE40] hover:bg-[#d8f325] font-black px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    GET .IPA FILE
+                  </a>
+                ) : (
+                  <span className="text-[#F59E0B] font-black px-2 py-1 rounded bg-[#F59E0B]/15 border border-[#F59E0B]/40">
+                    NEEDS BUILD
+                  </span>
+                )}
               </div>
             </div>
           )}

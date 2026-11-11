@@ -97,6 +97,16 @@ if [ -d "public/wasm" ]; then
     cp -R public/wasm/* "$APP_BUNDLE/Contents/Resources/wasm/"
 fi
 
+# Bundle Physical iOS Companion .ipa inside Resources/dist so iPhone Safari can download http://<Mac-IP>:<port>/APEX-OS.ipa directly
+if [ ! -f "$PROJECT_DIR/APEX-OS.ipa" ] && [ -x "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" ]; then
+    echo -e "  Building APEX-OS.ipa for companion distribution..."
+    bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" || true
+fi
+if [ -f "$PROJECT_DIR/APEX-OS.ipa" ]; then
+    cp "$PROJECT_DIR/APEX-OS.ipa" "$APP_BUNDLE/Contents/Resources/dist/APEX-OS.ipa"
+    echo -e "${COLOR_GREEN}  ✓ Physical iOS APEX-OS.ipa bundled inside app resources${COLOR_RESET}"
+fi
+
 APP_SIZE=$(du -sh "$APP_BUNDLE" | awk '{print $1}')
 echo -e "${COLOR_GREEN}  ✓ Complete Standalone App Bundle assembled: $APP_SIZE${COLOR_RESET}"
 

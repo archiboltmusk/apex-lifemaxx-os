@@ -24,11 +24,11 @@ if [ "$BUILD_DEVICE" -eq 1 ]; then
     echo "======================================================================"
     echo "   🍏 APEX — Physical iPhone / App Store Archive Build (.xcarchive)"
     echo "======================================================================"
-    if ! command -v xcodegen >/dev/null 2>&1; then
-        echo "Missing xcodegen (brew install xcodegen) for device archive generation."
-        exit 1
-    fi
-    (cd ios_app && xcodegen generate)
+    python3 "$PROJECT_DIR/scripts/generate_xcodeproj.py"
+    bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" "${SIGN_TEAM:-}"
+    echo -e "• Xcode Project  : ${COLOR_BOLD}$PROJECT_DIR/ios_app/APEX_iOS.xcodeproj${COLOR_RESET}"
+    echo -e "• Physical IPA   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS.ipa${COLOR_RESET}\n"
+    exit 0
     TEAM_FLAG=""
     if [ -n "$TEAM_ID" ]; then
         TEAM_FLAG="DEVELOPMENT_TEAM=$TEAM_ID"
@@ -230,8 +230,24 @@ with open('/tmp/apex_ios_assets_info.plist', 'rb') as f:
     asset_plist = plistlib.load(f)
 for k, v in asset_plist.items():
     main_plist[k] = v
+main_plist['CFBundleSupportedPlatforms'] = ['iPhoneSimulator']
 with open('$APP_BUNDLE/Info.plist', 'wb') as f:
     plistlib.dump(main_plist, f)
+
+with open('$WIDGET_APPEX/Info.plist', 'rb') as f:
+    wid_plist = plistlib.load(f)
+wid_plist['CFBundleSupportedPlatforms'] = ['iPhoneSimulator']
+with open('$WIDGET_APPEX/Info.plist', 'wb') as f:
+    plistlib.dump(wid_plist, f)
+
+watch_plist_path = '$APP_BUNDLE/Watch/APEXWatch.app/Info.plist'
+import os
+if os.path.exists(watch_plist_path):
+    with open(watch_plist_path, 'rb') as f:
+        wat_plist = plistlib.load(f)
+    wat_plist['CFBundleSupportedPlatforms'] = ['WatchSimulator']
+    with open(watch_plist_path, 'wb') as f:
+        plistlib.dump(wat_plist, f)
 "
 
 codesign --force --sign - "$WIDGET_APPEX"
@@ -239,13 +255,16 @@ codesign --force --sign - "$APP_BUNDLE"
 codesign -v "$APP_BUNDLE"
 echo -e "${COLOR_GREEN}  ✓ $APP_BUNDLE & $WIDGET_APPEX packaged & signed cleanly!${COLOR_RESET}"
 
-# Step 6: Create Standalone Distribution Archive
-echo -e "\n${COLOR_YELLOW}[6/7] Packaging APEX-OS-iOS.zip...${COLOR_RESET}"
+# Step 6: Create Standalone Distribution Archive + Physical Device .ipa + Xcode Project
+echo -e "\n${COLOR_YELLOW}[6/7] Packaging APEX-OS-iOS.zip, APEX-OS.ipa & Xcode Project...${COLOR_RESET}"
 ZIP_NAME="APEX-OS-iOS.zip"
 rm -f "$ZIP_NAME"
 zip -q -r -y "$ZIP_NAME" "$APP_BUNDLE"
 ZIP_SIZE=$(ls -lh "$ZIP_NAME" | awk '{print $5}')
-echo -e "${COLOR_GREEN}  ✓ iOS distribution archive created: $ZIP_NAME ($ZIP_SIZE)${COLOR_RESET}"
+echo -e "${COLOR_GREEN}  ✓ iOS Simulator archive created: $ZIP_NAME ($ZIP_SIZE)${COLOR_RESET}"
+
+python3 "$PROJECT_DIR/scripts/generate_xcodeproj.py"
+bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" "${SIGN_TEAM:-}"
 
 # Step 7: Install & Launch on iOS Simulator
 echo -e "\n${COLOR_YELLOW}[7/7] Installing & Launching on iOS Simulator...${COLOR_RESET}"
@@ -272,6 +291,7 @@ fi
 echo -e "\n${COLOR_GREEN}${COLOR_BOLD}======================================================================${COLOR_RESET}"
 echo -e "${COLOR_GREEN}${COLOR_BOLD}   🎉 iOS APP, WIDGETKIT & LIVE ACTIVITY BUILD COMPLETE!               ${COLOR_RESET}"
 echo -e "${COLOR_GREEN}${COLOR_BOLD}======================================================================${COLOR_RESET}"
-echo -e "• iOS App Bundle : ${COLOR_BOLD}$PROJECT_DIR/$APP_BUNDLE${COLOR_RESET}"
+echo -e "• iOS Sim Bundle : ${COLOR_BOLD}$PROJECT_DIR/$APP_BUNDLE${COLOR_RESET}"
+echo -e "• Physical IPA   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS.ipa${COLOR_RESET}"
 echo -e "• Standalone Zip : ${COLOR_BOLD}$PROJECT_DIR/$ZIP_NAME${COLOR_RESET}"
-echo -e "• XcodeGen Spec  : ${COLOR_BOLD}$PROJECT_DIR/ios_app/project.yml${COLOR_RESET}\n"
+echo -e "• Xcode Project  : ${COLOR_BOLD}$PROJECT_DIR/ios_app/APEX_iOS.xcodeproj${COLOR_RESET}\n"

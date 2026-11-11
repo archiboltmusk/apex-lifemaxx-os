@@ -322,6 +322,91 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             return
         }
 
+        // 2a. Physical iOS IPA Download & Package Status: GET /api/ios-package & GET /APEX-OS.ipa
+        func locateIPAURL() -> URL? {
+            let candidates = [
+                self.rootDir.appendingPathComponent("APEX-OS.ipa"),
+                self.rootDir.deletingLastPathComponent().appendingPathComponent("APEX-OS.ipa"),
+                self.rootDir.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("APEX-OS.ipa"),
+                URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("APEX-OS.ipa")
+            ]
+            return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        }
+
+        if path == "api/ios-package" {
+            var resObj: [String: Any] = [
+                "available": false,
+                "filename": "APEX-OS.ipa",
+                "downloadPath": "/APEX-OS.ipa",
+                "xcodeprojPath": "ios_app/APEX_iOS.xcodeproj",
+                "buildCommand": "bash scripts/build_ios.sh"
+            ]
+            if let ipaURL = locateIPAURL(),
+               let attrs = try? FileManager.default.attributesOfItem(atPath: ipaURL.path),
+               let sizeBytes = attrs[.size] as? NSNumber {
+                let mb = Double(sizeBytes.int64Value) / (1024.0 * 1024.0)
+                resObj["available"] = true
+                resObj["sizeBytes"] = sizeBytes.int64Value
+                resObj["sizeMB"] = String(format: "%.1f MB", mb)
+                resObj["path"] = ipaURL.path
+            }
+            let jsonData = (try? JSONSerialization.data(withJSONObject: resObj)) ?? Data()
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(jsonString)"
+            _ = res.utf8CString.withUnsafeBufferPointer {
+                write(clientSocket, $0.baseAddress, $0.count - 1)
+            }
+            return
+        }
+
+        if path == "api/reveal-ipa" && method == "POST" {
+            guard let ipaURL = locateIPAURL() else {
+                let res = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"error\":\"missing\"}"
+                _ = res.utf8CString.withUnsafeBufferPointer { write(clientSocket, $0.baseAddress, $0.count - 1) }
+                return
+            }
+            let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            let exportURL = downloadsDir?.appendingPathComponent("APEX-OS.ipa") ?? ipaURL
+            if exportURL != ipaURL {
+                try? FileManager.default.removeItem(at: exportURL)
+                try? FileManager.default.copyItem(at: ipaURL, to: exportURL)
+            }
+            let targetURL = FileManager.default.fileExists(atPath: exportURL.path) ? exportURL : ipaURL
+            DispatchQueue.main.async {
+                NSWorkspace.shared.activateFileViewerSelecting([targetURL])
+            }
+            let okJSON = "{\"revealed\":true,\"path\":\"\(targetURL.path)\"}"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(okJSON)"
+            _ = res.utf8CString.withUnsafeBufferPointer { write(clientSocket, $0.baseAddress, $0.count - 1) }
+            return
+        }
+
+        if path == "APEX-OS.ipa" || path == "downloads/APEX-OS.ipa" {
+            guard let ipaURL = locateIPAURL(), let ipaData = try? Data(contentsOf: ipaURL) else {
+                let msg = "{\"error\":\"APEX-OS.ipa not built yet. Run: bash scripts/build_ios.sh\"}"
+                let res = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(msg)"
+                _ = res.utf8CString.withUnsafeBufferPointer {
+                    write(clientSocket, $0.baseAddress, $0.count - 1)
+                }
+                return
+            }
+            let header = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"APEX-OS.ipa\"\r\nContent-Length: \(ipaData.count)\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n"
+            _ = header.utf8CString.withUnsafeBufferPointer {
+                write(clientSocket, $0.baseAddress, $0.count - 1)
+            }
+            ipaData.withUnsafeBytes { rawBuf in
+                guard let base = rawBuf.baseAddress else { return }
+                var offset = 0
+                while offset < ipaData.count {
+                    let chunk = min(ipaData.count - offset, 65536)
+                    let written = write(clientSocket, base.advanced(by: offset), chunk)
+                    if written <= 0 { break }
+                    offset += written
+                }
+            }
+            return
+        }
+
         // 3. Local Neural Models Registry: GET /api/models
         if path == "api/models" {
             let modelsDir = rootDir.appendingPathComponent("models")
