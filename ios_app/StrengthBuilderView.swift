@@ -278,6 +278,56 @@ public final class StrengthBuilderStore: ObservableObject {
         return (prCount, kcal)
     }
 
+    public func logExternalWatchSet(exerciseName: String, weightKg: Double, reps: Int, rpe: Double, health: HealthKitManager) {
+        let matched = BevelExercise.library.first(where: { $0.name.lowercased() == exerciseName.lowercased() })
+            ?? BevelExercise(
+                id: "watch_\(exerciseName.lowercased().replacingOccurrences(of: " ", with: "_"))",
+                name: exerciseName,
+                category: "Strength",
+                primaryMuscle: "Full Body",
+                secondaryMuscle: nil,
+                equipment: "Watch",
+                isBodyweight: weightKg <= 0
+            )
+        let effWeight = weightKg > 0 ? weightKg : (health.bodyWeightKg ?? 75.0)
+        let est1RM = ApexBiometricMath.brzycki1RM(weightKg: effWeight, reps: reps)
+        let prevBest = bestRecords[matched.id]?.best1RM ?? 0
+        if est1RM >= prevBest && weightKg > 0 {
+            bestRecords[matched.id] = ExerciseBestRecord(best1RM: est1RM, lastWeightKg: weightKg, lastReps: reps, updatedAt: Date())
+        }
+        let entry = LoggedStrengthWorkout(
+            id: UUID(),
+            title: "Watch · \(matched.name)",
+            date: Date(),
+            totalVolumeKg: (effWeight * Double(reps)).rounded(),
+            completedSets: 1,
+            totalReps: reps,
+            durationMinutes: 3.0,
+            calories: 18.0,
+            muscleSets: [matched.primaryMuscle: 1]
+        )
+        completedWorkouts.insert(entry, at: 0)
+        health.strengthStrainBonusToday += 0.45
+        persist()
+        health.syncEventToMac(extraPayload: [
+            "workoutSet": [
+                "id": entry.id.uuidString,
+                "exercise": entry.title,
+                "reps": reps,
+                "durationSeconds": 180,
+                "calories": 18,
+                "volumeKg": entry.totalVolumeKg,
+                "sets": 1,
+                "date": ISO8601DateFormatter().string(from: entry.date)
+            ],
+            "muscleVolumes7d": muscleVolume7Days
+        ])
+    }
+
+    public func reloadFromDisk() {
+        load()
+    }
+
     private func load() {
         if let d = UserDefaults.standard.data(forKey: customKey),
            let dec = try? JSONDecoder().decode([BevelExercise].self, from: d) {

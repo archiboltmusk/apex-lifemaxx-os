@@ -213,6 +213,64 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             return
         }
 
+        // 1a. Encrypted Snapshot Continuity Endpoint: GET / POST /api/backup-sync
+        if path == "api/backup-sync" {
+            if syncTokenHeader != pairingToken {
+                let unauth = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"error\":\"invalid_pairing_token\"}"
+                _ = unauth.utf8CString.withUnsafeBufferPointer {
+                    write(clientSocket, $0.baseAddress, $0.count - 1)
+                }
+                return
+            }
+
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            let backupDir = appSupport.appendingPathComponent("APEX OS", isDirectory: true)
+            let backupURL = backupDir.appendingPathComponent("latest_backup.apexbackup.json")
+
+            if method == "POST" {
+                guard !bodyData.isEmpty,
+                      bodyData.count <= 2_000_000,
+                      let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
+                    let bad = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"error\":\"invalid_backup_json\"}"
+                    _ = bad.utf8CString.withUnsafeBufferPointer {
+                        write(clientSocket, $0.baseAddress, $0.count - 1)
+                    }
+                    return
+                }
+                try? FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
+                try? bodyData.write(to: backupURL, options: .atomic)
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSyncPayload?([
+                        "backupSnapshot": json,
+                        "backupSizeBytes": bodyData.count,
+                        "backupReceivedAt": ISO8601DateFormatter().string(from: Date())
+                    ])
+                }
+                let okRes = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"status\":\"stored\",\"bytes\":\(bodyData.count)}"
+                _ = okRes.utf8CString.withUnsafeBufferPointer {
+                    write(clientSocket, $0.baseAddress, $0.count - 1)
+                }
+                return
+            }
+
+            if method == "GET" {
+                if let saved = try? Data(contentsOf: backupURL),
+                   let savedStr = String(data: saved, encoding: .utf8) {
+                    let okRes = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(savedStr)"
+                    _ = okRes.utf8CString.withUnsafeBufferPointer {
+                        write(clientSocket, $0.baseAddress, $0.count - 1)
+                    }
+                } else {
+                    let miss = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"error\":\"no_backup_stored\"}"
+                    _ = miss.utf8CString.withUnsafeBufferPointer {
+                        write(clientSocket, $0.baseAddress, $0.count - 1)
+                    }
+                }
+                return
+            }
+        }
+
         // 1b. Pairing Discovery Info: GET /api/pairing-info
         if path == "api/pairing-info" {
             let tele = AppDelegate.gatherDeviceTelemetry()

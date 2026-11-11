@@ -11,6 +11,7 @@ public struct BevelScoresDetailSheet: View {
     public let focus: BevelDetailFocus
     @ObservedObject var health: HealthKitManager
     @Environment(\.dismiss) private var dismiss
+    @State private var showBreathwork = false
 
     public init(focus: BevelDetailFocus, health: HealthKitManager) {
         self.focus = focus
@@ -35,6 +36,9 @@ public struct BevelScoresDetailSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showBreathwork) {
+                BreathworkHapticsView()
             }
         }
     }
@@ -137,6 +141,19 @@ public struct BevelScoresDetailSheet: View {
                 Text("No intraday Apple Watch heart rate samples captured today yet.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+            }
+
+            Button {
+                Haptics.tap(.medium)
+                showBreathwork = true
+            } label: {
+                Label("Down-Regulate with Haptic Breathwork", systemImage: "wind")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(ApexTheme.standCyan)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .appleCard(padding: 16, cornerRadius: 20)

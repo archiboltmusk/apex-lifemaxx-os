@@ -9,6 +9,8 @@ public struct LongevityView: View {
     @ObservedObject private var postureEngine = SpatialPostureHapticsEngine.shared
     @ObservedObject private var experimentStore = ExperimentLabStore.shared
     @ObservedObject private var voiceStore = VoiceBiomarkerStore.shared
+    @ObservedObject private var watch = ApexWatchConnectivity.shared
+    @ObservedObject private var proStore = ApexStoreManager.shared
 
     // Interactive Dead Hang Timer State
     @AppStorage("apex_best_deadhang_sec") private var bestDeadHangSeconds: Int = 0
@@ -22,6 +24,11 @@ public struct LongevityView: View {
     @State private var showExperimentLab: Bool = false
     @State private var showVoiceCheck: Bool = false
     @State private var showTrends60Sheet: Bool = false
+    @State private var showClinicalPDF: Bool = false
+    @State private var showBreathworkCoach: Bool = false
+    @State private var showBackupSheet: Bool = false
+    @State private var showPrefsSheet: Bool = false
+    @State private var showPaywallSheet: Bool = false
     @State private var syncJustCompleted: Bool = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -41,6 +48,8 @@ public struct LongevityView: View {
                     experimentLabCard
 
                     spatialPostureAndVoiceRow
+
+                    clinicalAndProSuiteCard
 
                     deadHangCard
 
@@ -97,6 +106,21 @@ public struct LongevityView: View {
                 Biology60DayTrendsSheet(health: health)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showClinicalPDF) {
+                ClinicalPDFReportSheet()
+            }
+            .sheet(isPresented: $showBreathworkCoach) {
+                BreathworkHapticsView()
+            }
+            .sheet(isPresented: $showBackupSheet) {
+                BackupContinuitySheet()
+            }
+            .sheet(isPresented: $showPrefsSheet) {
+                AlertsAndPreferencesSheet()
+            }
+            .sheet(isPresented: $showPaywallSheet) {
+                ApexProPaywallSheet()
             }
         }
     }
@@ -613,6 +637,99 @@ public struct LongevityView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - 4. Clinical PDF Dossier, Haptic Breathwork, Alerts, Backup & Pro Membership
+    private var clinicalAndProSuiteCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("CLINICAL SUITE & PREFERENCES")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(ApexUnitPreferences.current.displayLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ApexTheme.standCyan)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                Button {
+                    Haptics.tap(.medium)
+                    showClinicalPDF = true
+                } label: {
+                    suiteTile(icon: "doc.richtext.fill", title: "Physician PDF", sub: "Share lab & recovery", tint: ApexTheme.accentVolt)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Haptics.tap(.medium)
+                    showBreathworkCoach = true
+                } label: {
+                    suiteTile(icon: "wind", title: "HRV Breathwork", sub: "CoreHaptics pacer", tint: ApexTheme.standCyan)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Haptics.tap()
+                    showBackupSheet = true
+                } label: {
+                    suiteTile(icon: "externaldrive.badge.icloud", title: "Backup & Sync", sub: ".apexbackup + Mac", tint: ApexTheme.exerciseLime)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Haptics.tap()
+                    showPrefsSheet = true
+                } label: {
+                    suiteTile(icon: "bell.and.waves.left.and.right.fill", title: "Alerts & Units", sub: watch.isPaired ? "Watch Paired" : "Watch + Vitals", tint: ApexTheme.accentIndigo)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                Haptics.tap(.medium)
+                showPaywallSheet = true
+            } label: {
+                HStack {
+                    Image(systemName: proStore.isProUnlocked ? "crown.fill" : "sparkles")
+                        .foregroundStyle(ApexTheme.accentAmber)
+                    Text(proStore.isProUnlocked ? "APEX Pro Active (App Store)" : "APEX Pro Membership · StoreKit 2")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(12)
+                .background(ApexTheme.elevatedSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func suiteTile(icon: String, title: String, sub: String, tint: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(sub)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(ApexTheme.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - 5. Bonjour Zero-Config Mac Companion Sync

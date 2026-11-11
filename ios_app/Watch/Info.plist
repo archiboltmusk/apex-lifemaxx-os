@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>APEX</string>
+    <key>CFBundleExecutable</key>
+    <string>APEXWatch</string>
+    <key>CFBundleIdentifier</key>
+    <string>club.apex.lifemaxx.ios.watchkitapp</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>APEXWatch</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>3</string>
+    <key>MinimumOSVersion</key>
+    <string>10.0</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>APEX reads Watch heart rate during workouts and HRR-60 recovery sets.</string>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>4</integer>
+    </array>
+    <key>WKApplication</key>
+    <true/>
+    <key>WKCompanionAppBundleIdentifier</key>
+    <string>club.apex.lifemaxx.ios</string>
+</dict>
+</plist>

@@ -93,26 +93,56 @@ struct ApexReadinessWidgetView: View {
     }
 
     private var mediumWidget: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("READINESS")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color(red: 0.90, green: 0.99, blue: 0.25))
-                Text(entry.snapshot.readinessScore.map { "\($0)%" } ?? "—")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                Text(entry.snapshot.biologicalAge.map { String(format: "Bio Age %.1fy", $0) } ?? "Connect Health")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("READINESS")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color(red: 0.90, green: 0.99, blue: 0.25))
+                    Text(entry.snapshot.readinessScore.map { "\($0)%" } ?? "—")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                    Text(entry.snapshot.energyBank.map { "Bank \($0)% · Strain \(entry.snapshot.strainScore.map { String(format: "%.1f", $0) } ?? "—")" }
+                         ?? (entry.snapshot.biologicalAge.map { String(format: "Bio Age %.1fy", $0) } ?? "Connect Health"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 5) {
+                    statLine("Move", "\(Int(entry.snapshot.moveCalories)) kcal", Color(red: 0.98, green: 0.07, blue: 0.31))
+                    statLine("Exercise", "\(Int(entry.snapshot.exerciseMinutes)) min", Color(red: 0.58, green: 0.98, blue: 0.16))
+                    statLine("HRV", entry.snapshot.hrv.map { "\(Int($0.rounded())) ms" } ?? "—", Color(red: 0.00, green: 0.84, blue: 0.96))
+                }
             }
 
-            Spacer()
+            if #available(iOS 17.0, *) {
+                HStack(spacing: 8) {
+                    Button(intent: WidgetLogHydrationIntent()) {
+                        Label("+250 mL Water", systemImage: "drop.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(Color(red: 0.00, green: 0.84, blue: 0.96))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 8) {
-                statLine("Move", "\(Int(entry.snapshot.moveCalories)) kcal", Color(red: 0.98, green: 0.07, blue: 0.31))
-                statLine("Exercise", "\(Int(entry.snapshot.exerciseMinutes)) min", Color(red: 0.58, green: 0.98, blue: 0.16))
-                statLine("HRV", entry.snapshot.hrv.map { "\(Int($0.rounded())) ms" } ?? "—", Color(red: 0.00, green: 0.84, blue: 0.96))
+                    Button(intent: WidgetToggleSunlightIntent()) {
+                        Label("Log Sunlight", systemImage: "sun.max.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(Color(red: 0.90, green: 0.99, blue: 0.25))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }

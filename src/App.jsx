@@ -92,6 +92,7 @@ import AccountTesterModal from './components/AccountTesterModal';
 import AIConsigliere from './components/AIConsigliere';
 import ThermalSuite from './components/ThermalSuite';
 import OfflineModelsMonitor from './components/OfflineModelsMonitor';
+import MembershipPaywall from './components/MembershipPaywall';
 
 export default function App() {
   // Navigation & View mode
@@ -106,6 +107,22 @@ export default function App() {
   const [isMobileFrame, setIsMobileFrame] = useState(false);
   const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
   const [isAccountTesterOpen, setIsAccountTesterOpen] = useState(false);
+  const [isPaywallOpen, setIsPaywallOpen] = useState(false);
+  const [unitSystem, setUnitSystem] = useState(() => {
+    try {
+      return localStorage.getItem('apex_unit_system_v1') || 'metric';
+    } catch {
+      return 'metric';
+    }
+  });
+  const toggleUnitSystem = () => {
+    setUnitSystem((prev) => {
+      const next = prev === 'metric' ? 'imperial' : 'metric';
+      try { localStorage.setItem('apex_unit_system_v1', next); } catch {}
+      showToast(`Units switched to ${next === 'metric' ? 'Metric (kg · mg/dL)' : 'Imperial (lbs · mmol/L)'}`);
+      return next;
+    });
+  };
 
   // Apple Health Live State
   const [appleHealthState, setAppleHealthState] = useState(() => {
@@ -432,6 +449,18 @@ export default function App() {
       if (payload.cheekBloatDeltaMm !== undefined) {
         showToast(`3D Twin Delta · Cheek ${payload.cheekBloatDeltaMm >= 0 ? '+' : ''}${Number(payload.cheekBloatDeltaMm).toFixed(1)} mm`);
       }
+
+      if (payload.backupSnapshot) {
+        try {
+          localStorage.setItem('apex_latest_ios_backup_v1', JSON.stringify({
+            snapshot: payload.backupSnapshot,
+            sizeBytes: payload.backupSizeBytes || 0,
+            receivedAt: payload.backupReceivedAt || new Date().toISOString(),
+          }));
+          window.dispatchEvent(new CustomEvent('apex:backup-synced'));
+          showToast('Encrypted Snapshot Synced from iPhone (.apexbackup)');
+        } catch {}
+      }
     };
 
     window.addEventListener('appleHealthSync', handleGlobalHealthKitPacket);
@@ -496,7 +525,13 @@ export default function App() {
   }, []);
 
   // Real User Account Profile & Membership
-  const [membershipPlan, setMembershipPlan] = useState('lifetime');
+  const [membershipPlan, setMembershipPlan] = useState(() => {
+    try {
+      return localStorage.getItem('apex_membership_plan_v1') || 'lifetime';
+    } catch {
+      return 'lifetime';
+    }
+  });
   const [userProfile, setUserProfile] = useState(() => {
     try {
       const saved = localStorage.getItem('apex_user_profile');
@@ -1932,6 +1967,19 @@ export default function App() {
         streakDays={streakDays}
         setStreakDays={setStreakDays}
         onCompleteAllProtocols={completeAllProtocols}
+        unitSystem={unitSystem}
+        onToggleUnitSystem={toggleUnitSystem}
+      />
+
+      <MembershipPaywall
+        isOpen={isPaywallOpen}
+        onClose={() => setIsPaywallOpen(false)}
+        currentPlan={membershipPlan}
+        onMembershipActivated={(plan) => {
+          setMembershipPlan(plan);
+          try { localStorage.setItem('apex_membership_plan_v1', plan); } catch {}
+          showToast(`APEX Pro Plan Updated: ${plan.toUpperCase()}`);
+        }}
       />
 
       {/* TOP DESKTOP UTILITY BAR */}
@@ -1964,10 +2012,27 @@ export default function App() {
             </span>
           </div>
 
-          <div className="px-3 py-1 rounded-[10px] bg-[#10B981]/15 text-[#10B981] flex items-center space-x-1.5 border border-[#10B981]/40 font-bold">
+          <button
+            onClick={() => {
+              playPlunk();
+              setIsPaywallOpen(true);
+            }}
+            className="px-3 py-1 rounded-[10px] bg-[#10B981]/15 hover:bg-[#10B981]/25 text-[#10B981] flex items-center space-x-1.5 border border-[#10B981]/40 font-bold transition"
+          >
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>ALL UNLOCKED</span>
-          </div>
+            <span>PRO · {membershipPlan.toUpperCase()}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playPlunk();
+              toggleUnitSystem();
+            }}
+            className="px-2.5 py-1 rounded-[10px] bg-white/10 hover:bg-white/15 text-white font-bold border border-white/10 transition"
+            title="Switch Metric / Imperial Units"
+          >
+            {unitSystem === 'metric' ? 'KG · MG/DL' : 'LBS · MMOL'}
+          </button>
 
           <button
             onClick={() => {

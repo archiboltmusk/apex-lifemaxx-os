@@ -143,6 +143,27 @@ export function parseAppleHealthXML(xmlString) {
       result.metrics.leanMassKg = latestVitals.HKQuantityTypeIdentifierLeanBodyMass;
     }
 
+    // 4. Extract Workout entries
+    const workoutRegex = /<Workout\s+([^>]+)\/?>/gi;
+    let wMatch;
+    while ((wMatch = workoutRegex.exec(xmlString)) !== null && result.workouts.length < 500) {
+      const attrStr = wMatch[1];
+      const actMatch = attrStr.match(/workoutActivityType="([^"]+)"/i);
+      const durMatch = attrStr.match(/duration="([^"]+)"/i);
+      const distMatch = attrStr.match(/totalDistance="([^"]+)"/i);
+      const calMatch = attrStr.match(/totalEnergyBurned="([^"]+)"/i);
+      const startMatch = attrStr.match(/startDate="([^"]+)"/i);
+      if (actMatch) {
+        result.workouts.push({
+          activity: actMatch[1].replace(/^HKWorkoutActivityType/, ''),
+          durationMinutes: durMatch ? Number(parseFloat(durMatch[1]).toFixed(1)) : 0,
+          distanceKm: distMatch ? Number(parseFloat(distMatch[1]).toFixed(2)) : 0,
+          calories: calMatch ? Math.round(parseFloat(calMatch[1])) : 0,
+          startDate: startMatch ? startMatch[1] : '',
+        });
+      }
+    }
+
     return { success: true, data: result };
   } catch (err) {
     console.error('Apple Health XML parsing error:', err);

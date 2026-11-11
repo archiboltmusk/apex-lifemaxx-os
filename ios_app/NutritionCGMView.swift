@@ -1,6 +1,6 @@
 import SwiftUI
 import AVFoundation
-import Vision
+@preconcurrency import Vision
 import PhotosUI
 import Charts
 
@@ -17,6 +17,7 @@ public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
     public var sodiumMg: Double
     public var sourceEngine: String
     public var date: Date
+    public var photoData: Data?
 
     public init(
         id: UUID = UUID(),
@@ -29,7 +30,8 @@ public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
         sugarG: Double = 0,
         sodiumMg: Double = 0,
         sourceEngine: String,
-        date: Date = Date()
+        date: Date = Date(),
+        photoData: Data? = nil
     ) {
         self.id = id
         self.name = name
@@ -42,6 +44,7 @@ public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
         self.sodiumMg = sodiumMg
         self.sourceEngine = sourceEngine
         self.date = date
+        self.photoData = photoData
     }
 }
 
@@ -92,22 +95,21 @@ public final class NutritionLogStore: ObservableObject {
     // Bevel Nutrition Quality Score (0–100) computed strictly from logged meals today
     public var nutritionQualityScore: Int? {
         guard !todaysMeals.isEmpty else { return nil }
-        let calRatio = calorieTarget > 0 ? min(1.2, todayCalories / calorieTarget) : 1.0
-        let proteinRatio = min(1.0, todayProtein / max(60.0, proteinTargetG))
-        let fiberRatio = min(1.0, todayFiber / max(15.0, fiberTargetG))
-        let sugarPenalty = max(0.0, (todaySugar - 38.0) * 0.45)
         let wholeFoodCount = todaysMeals.filter {
             $0.sourceEngine.contains("Describe") || $0.sourceEngine.contains("Recipe") || ($0.fiberG >= 3 && $0.sugarG < 12)
         }.count
         let wholeFoodRatio = Double(wholeFoodCount) / Double(todaysMeals.count)
-
-        let raw = 28.0
-            + proteinRatio * 34.0
-            + fiberRatio * 18.0
-            + wholeFoodRatio * 15.0
-            + (calRatio >= 0.7 && calRatio <= 1.15 ? 5.0 : 0.0)
-            - sugarPenalty
-        return Int(max(12, min(100, raw.rounded())))
+        return ApexBiometricMath.nutritionQualityScore(
+            calories: todayCalories,
+            calorieTarget: calorieTarget,
+            proteinG: todayProtein,
+            proteinTargetG: proteinTargetG,
+            fiberG: todayFiber,
+            fiberTargetG: fiberTargetG,
+            sugarG: todaySugar,
+            wholeFoodRatio: wholeFoodRatio,
+            mealCount: todaysMeals.count
+        )
     }
 
     public func logMeal(_ entry: LoggedFoodEntry, health: HealthKitManager) {
@@ -188,6 +190,10 @@ public final class NutritionLogStore: ObservableObject {
             ]
         }
         health.syncEventToMac(extraPayload: extra)
+    }
+
+    public func reloadFromDisk() {
+        load()
     }
 
     private func load() {
@@ -355,6 +361,99 @@ public enum NutritionLabelOCREngine {
     }
 }
 
+// MARK: - On-Device Vision Plate Macro Recognizer & Meal Thumbnail Compression
+public enum MealPlateVisionEstimator {
+    private struct PlatePreset {
+        let keywords: [String]
+        let label: String
+        let calories: Double
+        let protein: Double
+        let carbs: Double
+        let fat: Double
+        let fiber: Double
+        let sugar: Double
+    }
+
+    private static let catalog: [PlatePreset] = [
+        PlatePreset(keywords: ["salad", "caesar", "greens", "vegetable"], label: "Mixed Salad Bowl", calories: 380, protein: 24, carbs: 22, fat: 22, fiber: 7, sugar: 6),
+        PlatePreset(keywords: ["steak", "meat", "beef", "roast"], label: "Grilled Steak Plate", calories: 560, protein: 48, carbs: 8, fat: 36, fiber: 2, sugar: 1),
+        PlatePreset(keywords: ["salmon", "fish", "seafood", "sushi"], label: "Salmon / Seafood Plate", calories: 470, protein: 38, carbs: 26, fat: 22, fiber: 3, sugar: 3),
+        PlatePreset(keywords: ["chicken", "poultry", "turkey"], label: "Grilled Chicken Meal", calories: 440, protein: 46, carbs: 24, fat: 14, fiber: 3, sugar: 2),
+        PlatePreset(keywords: ["egg", "omelette", "omelet", "breakfast"], label: "Egg Breakfast Plate", calories: 350, protein: 24, carbs: 14, fat: 22, fiber: 2, sugar: 2),
+        PlatePreset(keywords: ["rice", "grain", "bowl", "burrito"], label: "Protein Grain Bowl", calories: 580, protein: 34, carbs: 64, fat: 18, fiber: 8, sugar: 4),
+        PlatePreset(keywords: ["oatmeal", "porridge", "cereal", "yogurt"], label: "Oats / Yogurt Bowl", calories: 360, protein: 22, carbs: 46, fat: 9, fiber: 7, sugar: 12),
+        PlatePreset(keywords: ["pasta", "spaghetti", "noodle", "ramen"], label: "Pasta / Noodle Bowl", calories: 610, protein: 24, carbs: 84, fat: 18, fiber: 5, sugar: 6),
+        PlatePreset(keywords: ["sandwich", "burger", "taco", "wrap"], label: "Sandwich / Wrap Plate", calories: 540, protein: 28, carbs: 46, fat: 26, fiber: 4, sugar: 6),
+        PlatePreset(keywords: ["pizza", "flatbread"], label: "Pizza / Flatbread", calories: 640, protein: 26, carbs: 72, fat: 28, fiber: 4, sugar: 7),
+        PlatePreset(keywords: ["fruit", "berry", "banana", "apple"], label: "Fresh Fruit Plate", calories: 165, protein: 2, carbs: 40, fat: 0.5, fiber: 6, sugar: 24),
+        PlatePreset(keywords: ["soup", "stew", "broth"], label: "Hearty Soup Bowl", calories: 320, protein: 20, carbs: 34, fat: 11, fiber: 5, sugar: 4)
+    ]
+
+    public static func makeThumbnailData(from image: UIImage) -> Data? {
+        let maxDim: CGFloat = 220
+        let scale = min(1.0, maxDim / max(image.size.width, image.size.height, 1))
+        let newSize = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        return resized.jpegData(compressionQuality: 0.65)
+    }
+
+    public static func recognizePlate(from image: UIImage) async -> (entry: LoggedFoodEntry, didMatchFood: Bool, detectedTag: String?) {
+        let thumbData = makeThumbnailData(from: image)
+        guard let cg = image.cgImage else {
+            return (LoggedFoodEntry(name: "", calories: 0, proteinG: 0, carbsG: 0, fatG: 0, sourceEngine: "Plate Photo · Enter Macros", photoData: thumbData), false, nil)
+        }
+
+        let observations: [VNClassificationObservation] = await withCheckedContinuation { continuation in
+            let req = VNClassifyImageRequest { request, _ in
+                let results = (request.results as? [VNClassificationObservation]) ?? []
+                continuation.resume(returning: Array(results.prefix(12)))
+            }
+            let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try handler.perform([req])
+                } catch {
+                    continuation.resume(returning: [])
+                }
+            }
+        }
+
+        let confident = observations.filter { $0.confidence >= 0.20 }
+        for obs in confident {
+            let ident = obs.identifier.lowercased()
+            if let preset = catalog.first(where: { entry in entry.keywords.contains(where: { ident.contains($0) }) }) {
+                let entry = LoggedFoodEntry(
+                    name: preset.label,
+                    calories: preset.calories,
+                    proteinG: preset.protein,
+                    carbsG: preset.carbs,
+                    fatG: preset.fat,
+                    fiberG: preset.fiber,
+                    sugarG: preset.sugar,
+                    sourceEngine: "Vision Plate AI · \(Int((obs.confidence * 100).rounded()))%",
+                    photoData: thumbData
+                )
+                return (entry, true, obs.identifier)
+            }
+        }
+
+        let topLabel = confident.first?.identifier.replacingOccurrences(of: "_", with: " ").capitalized
+        let draft = LoggedFoodEntry(
+            name: topLabel ?? "",
+            calories: 0,
+            proteinG: 0,
+            carbsG: 0,
+            fatG: 0,
+            sourceEngine: "Plate Photo · Verify Macros",
+            photoData: thumbData
+        )
+        return (draft, false, topLabel)
+    }
+}
+
 // MARK: - Bevel Fuel / Nutrition & CGM Tab View
 public struct NutritionCGMView: View {
     @ObservedObject private var store = NutritionLogStore.shared
@@ -364,7 +463,9 @@ public struct NutritionCGMView: View {
     @State private var showDescribeSheet = false
     @State private var showRecipeSheet = false
     @State private var showGlucoseLogSheet = false
+    @State private var showPlateCameraSheet = false
     @State private var selectedLabelPhoto: PhotosPickerItem? = nil
+    @State private var selectedPlatePhoto: PhotosPickerItem? = nil
     @State private var scannedDraft: LoggedFoodEntry? = nil
     @State private var statusBanner: String? = nil
 
@@ -411,10 +512,25 @@ public struct NutritionCGMView: View {
                     selectedLabelPhoto = nil
                 }
             }
+            .onChange(of: selectedPlatePhoto) { _, item in
+                guard let item else { return }
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let img = UIImage(data: data) {
+                        await handlePlateImage(img)
+                    }
+                    selectedPlatePhoto = nil
+                }
+            }
             .sheet(item: $scannedDraft) { draft in
                 MealReviewEditSheet(entry: draft) { final in
                     store.logMeal(final, health: health)
                     Haptics.success()
+                }
+            }
+            .sheet(isPresented: $showPlateCameraSheet) {
+                PlateCameraCaptureSheet { captured in
+                    Task { await handlePlateImage(captured) }
                 }
             }
             .sheet(isPresented: $showBarcodeSheet) {
@@ -504,18 +620,52 @@ public struct NutritionCGMView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
+    private func handlePlateImage(_ image: UIImage) async {
+        let result = await MealPlateVisionEstimator.recognizePlate(from: image)
+        if !result.didMatchFood {
+            statusBanner = result.detectedTag.map {
+                "Plate photo saved (\($0)). Enter exact macros before saving."
+            } ?? "Plate photo saved. Enter meal name & macros before saving."
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { statusBanner = nil }
+        }
+        scannedDraft = result.entry
+    }
+
     private var captureActionsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            PhotosPicker(selection: $selectedPlatePhoto, matching: .images) {
+                captureTile(icon: "camera.metering.center.weighted", title: "Plate AI Photo", sub: "Vision macro + thumb", tint: ApexTheme.accentVolt)
+            }
+            .buttonStyle(.plain)
+
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button {
+                    Haptics.tap(.medium)
+                    showPlateCameraSheet = true
+                } label: {
+                    captureTile(icon: "camera.fill", title: "Snap Plate Cam", sub: "Live plate capture", tint: ApexTheme.exerciseLime)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    Haptics.tap(.medium)
+                    scannedDraft = LoggedFoodEntry(name: "", calories: 0, proteinG: 0, carbsG: 0, fatG: 0, sourceEngine: "Quick Manual Entry")
+                } label: {
+                    captureTile(icon: "plus.circle.fill", title: "Quick Log", sub: "Manual meal macros", tint: ApexTheme.exerciseLime)
+                }
+                .buttonStyle(.plain)
+            }
+
             Button {
                 Haptics.tap(.medium)
                 showBarcodeSheet = true
             } label: {
-                captureTile(icon: "barcode.viewfinder", title: "Scan Barcode", sub: "UPC / OpenFoodFacts", tint: ApexTheme.accentVolt)
+                captureTile(icon: "barcode.viewfinder", title: "Scan Barcode", sub: "UPC / OpenFoodFacts", tint: ApexTheme.standCyan)
             }
             .buttonStyle(.plain)
 
             PhotosPicker(selection: $selectedLabelPhoto, matching: .images) {
-                captureTile(icon: "text.viewfinder", title: "Label OCR", sub: "Scan Nutrition Facts", tint: ApexTheme.standCyan)
+                captureTile(icon: "text.viewfinder", title: "Label OCR", sub: "Scan Nutrition Facts", tint: ApexTheme.accentIndigo)
             }
             .buttonStyle(.plain)
 
@@ -523,7 +673,7 @@ public struct NutritionCGMView: View {
                 Haptics.tap(.medium)
                 showDescribeSheet = true
             } label: {
-                captureTile(icon: "text.bubble.fill", title: "Describe Meal", sub: "Natural gram parser", tint: ApexTheme.exerciseLime)
+                captureTile(icon: "text.bubble.fill", title: "Describe Meal", sub: "Natural gram parser", tint: ApexTheme.accentEmerald)
             }
             .buttonStyle(.plain)
 
@@ -615,7 +765,7 @@ public struct NutritionCGMView: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
                     if let latest = health.glucoseSamples24h.last {
-                        Text("Latest: \(Int(latest.value)) mg/dL · \(latest.label)")
+                        Text("Latest: \(ApexUnitPreferences.formatGlucose(mgDl: latest.value)) · \(latest.label)")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(latest.value > 140 ? ApexTheme.accentAmber : ApexTheme.accentEmerald)
                     } else {
@@ -692,7 +842,14 @@ public struct NutritionCGMView: View {
                     .appleCard(padding: 16, cornerRadius: 18)
             } else {
                 ForEach(store.todaysMeals) { meal in
-                    HStack {
+                    HStack(spacing: 12) {
+                        if let data = meal.photoData, let img = UIImage(data: data) {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 46, height: 46)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
                         VStack(alignment: .leading, spacing: 3) {
                             Text(meal.name)
                                 .font(.system(size: 15, weight: .semibold))
@@ -1034,6 +1191,16 @@ private struct MealReviewEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let data = entry.photoData, let img = UIImage(data: data) {
+                    Section("Captured Meal Photo") {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 160)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
                 Section("Food Details (\(entry.sourceEngine))") {
                     TextField("Meal Name", text: $entry.name)
                     HStack { Text("Calories"); Spacer(); TextField("0", value: $entry.calories, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
@@ -1091,6 +1258,38 @@ private struct LogGlucoseSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { dismiss() } }
             }
+        }
+    }
+}
+
+private struct PlateCameraCaptureSheet: UIViewControllerRepresentable {
+    var onCaptured: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let parent: PlateCameraCaptureSheet
+        init(parent: PlateCameraCaptureSheet) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let img = info[.originalImage] as? UIImage {
+                parent.onCaptured(img)
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
         }
     }
 }

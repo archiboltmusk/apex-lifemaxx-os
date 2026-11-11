@@ -192,21 +192,15 @@ public class HealthKitManager: ObservableObject {
 
     // MARK: - Bevel Pro Engine: Strain (0–21), Adaptive Target, Intraday Stress, Energy Bank & Sleep Coach
     public var todayStrainScore: Double? {
-        let totalMove = moveCalories
-        let totalEx = exerciseMinutes
-        guard totalMove > 5 || totalEx > 1 || strengthStrainBonusToday > 0 else { return nil }
-        let kcalComponent = log1p(totalMove / 160.0) * 5.2
-        let exComponent = log1p(totalEx / 18.0) * 3.8
-        let loadComponent = min(4.5, strengthStrainBonusToday * 0.45)
-        let raw = min(21.0, kcalComponent + exComponent + loadComponent)
-        return (raw * 10).rounded() / 10
+        ApexBiometricMath.dailyStrain(
+            moveKcal: moveCalories,
+            exerciseMinutes: exerciseMinutes,
+            strengthSetsBonus: strengthStrainBonusToday
+        )
     }
 
     public var targetStrainRange: ClosedRange<Double>? {
-        guard let readiness = readinessScore else { return nil }
-        if readiness >= 78 { return 13.5...17.5 }
-        if readiness >= 58 { return 9.5...13.5 }
-        return 5.0...9.0
+        ApexBiometricMath.targetStrainRange(readiness: readinessScore)
     }
 
     public var stressHourlyCurve: [HourlyMetricPoint] {
@@ -356,6 +350,9 @@ public class HealthKitManager: ObservableObject {
 
         var readTypes = Set<HKObjectType>()
         readTypes.insert(HKObjectType.activitySummaryType())
+        if let mindful = HKObjectType.categoryType(forIdentifier: .mindfulSession) {
+            readTypes.insert(mindful)
+        }
 
         var quantityIds: [HKQuantityTypeIdentifier] = [
             .activeEnergyBurned,
@@ -418,6 +415,9 @@ public class HealthKitManager: ObservableObject {
             }
         }
         shareTypes.insert(HKObjectType.workoutType())
+        if let mindfulType = HKObjectType.categoryType(forIdentifier: .mindfulSession) {
+            shareTypes.insert(mindfulType)
+        }
 
         connectionState = .connecting
         statusLabel = "Connecting..."
@@ -689,6 +689,29 @@ public class HealthKitManager: ObservableObject {
         glucoseSamples24h.append(point)
         glucoseSamples24h.sort { $0.date < $1.date }
         syncEventToMac(extraPayload: ["glucoseLatest": mgPerDl])
+    }
+
+    public func logMindfulSession(minutes: Double) async -> Bool {
+        guard isAvailable,
+              minutes >= 0.5,
+              let mindfulType = HKObjectType.categoryType(forIdentifier: .mindfulSession) else {
+            return false
+        }
+        let end = Date()
+        let start = end.addingTimeInterval(-minutes * 60.0)
+        let sample = HKCategorySample(
+            type: mindfulType,
+            value: HKCategoryValue.notApplicable.rawValue,
+            start: start,
+            end: end
+        )
+        do {
+            try await healthStore.save([sample])
+            syncEventToMac(extraPayload: ["mindfulMinutesLogged": (minutes * 10).rounded() / 10])
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func fetchIntradaySamplesToday(
@@ -1109,9 +1132,44 @@ public class HealthKitManager: ObservableObject {
         }
     }
 
-    // MARK: - Unified Continuity Sync to Mac Companion
+    // MARK: - Unified Continuity Sync to Mac Companion, Watch & Proactive Alerts
     public func broadcastToMac() {
+        ApexWatchConnectivity.shared.pushTelemetryToWatch(health: self)
+        ApexNotificationsEngine.shared.evaluateHealthMonitorAndSchedule(health: self)
         syncEventToMac(extraPayload: nil)
+    }
+
+    public func pushBackupSnapshotToMac(_ jsonData: Data) async -> Bool {
+        let cleanHost = macHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanHost.isEmpty,
+              let url = URL(string: "http://\(cleanHost):\(macServerPort)/api/backup-sync") else {
+            return false
+        }
+        if macSyncToken.isEmpty {
+            await fetchPairingToken(host: cleanHost, port: macServerPort)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !macSyncToken.isEmpty {
+            request.setValue(macSyncToken, forHTTPHeaderField: "X-APEX-Sync-Token")
+        }
+        request.httpBody = jsonData
+        request.timeoutInterval = 3.0
+
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let httpRes = response as? HTTPURLResponse else {
+            return false
+        }
+        if httpRes.statusCode == 401 {
+            await fetchPairingToken(host: cleanHost, port: macServerPort)
+            if !macSyncToken.isEmpty {
+                request.setValue(macSyncToken, forHTTPHeaderField: "X-APEX-Sync-Token")
+                let (_, retryResp) = (try? await URLSession.shared.data(for: request)) ?? (Data(), URLResponse())
+                return (retryResp as? HTTPURLResponse)?.statusCode == 200
+            }
+        }
+        return httpRes.statusCode == 200
     }
 
     public func syncEventToMac(extraPayload: [String: Any]?) {

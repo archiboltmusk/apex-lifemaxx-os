@@ -287,6 +287,18 @@ public final class ExperimentLabStore: ObservableObject {
         return (hrvDeltaPct, rhrDeltaBpm, sleepDeltaMin)
     }
 
+    public func reloadFromDisk() {
+        self.activeProtocolId = UserDefaults.standard.string(forKey: "apex_active_experiment_id") ?? ExperimentProtocol.presets[0].id
+        if let data = UserDefaults.standard.data(forKey: logsKey),
+           let decoded = try? JSONDecoder().decode([ExperimentLogEntry].self, from: data) {
+            self.logs = decoded
+        }
+        if let tagData = UserDefaults.standard.data(forKey: journalTagsKey),
+           let decodedTags = try? JSONDecoder().decode([String: [String]].self, from: tagData) {
+            self.dailyTagsByDate = decodedTags
+        }
+    }
+
     private func persist() {
         if let data = try? JSONEncoder().encode(logs) {
             UserDefaults.standard.set(data, forKey: logsKey)

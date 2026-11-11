@@ -57,11 +57,12 @@ echo -e "${COLOR_CYAN}${COLOR_BOLD}=============================================
 
 APP_BUNDLE="APEX_iOS.app"
 WIDGET_APPEX="$APP_BUNDLE/PlugIns/APEXWidgets.appex"
+WATCH_BUNDLE="APEXWatch.app"
 
 # Step 1: Clean & Generate AppIcon + LaunchBackground Asset Catalog
 echo -e "\n${COLOR_YELLOW}[1/7] Generating AppIcon & Asset Catalog...${COLOR_RESET}"
-rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE" "$WIDGET_APPEX"
+rm -rf "$APP_BUNDLE" "$WATCH_BUNDLE"
+mkdir -p "$APP_BUNDLE" "$WIDGET_APPEX" "$WATCH_BUNDLE"
 
 if [ ! -f "ios_app/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" ]; then
     swift ios_app/generate_ios_icon.swift
@@ -139,12 +140,19 @@ xcrun --sdk iphonesimulator swiftc \
     -framework RealityKit \
     -framework SoundAnalysis \
     -framework WorkoutKit \
+    -framework WatchConnectivity \
+    -framework UserNotifications \
+    -framework PDFKit \
+    -framework StoreKit \
     -Xlinker -weak_framework -Xlinker FoundationModels \
     -parse-as-library \
     -O \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "$SIM_ENTITLEMENTS" \
     ios_app/ApexSharedTypes.swift \
+    ios_app/Widgets/ApexWidgetIntents.swift \
     ios_app/DesignSystem.swift \
+    ios_app/ApexWatchConnectivity.swift \
+    ios_app/ApexNotificationsEngine.swift \
     ios_app/HealthKitManager.swift \
     ios_app/WorkoutActivityManager.swift \
     ios_app/ActivityRingsView.swift \
@@ -159,8 +167,11 @@ xcrun --sdk iphonesimulator swiftc \
     ios_app/CameraWorkoutView.swift \
     ios_app/StrengthBuilderView.swift \
     ios_app/NutritionCGMView.swift \
+    ios_app/BreathworkHapticsView.swift \
     ios_app/BevelMetricsViews.swift \
     ios_app/BloodworkOCRView.swift \
+    ios_app/ClinicalReportEngine.swift \
+    ios_app/OnboardingAndPrefsView.swift \
     ios_app/LongevityView.swift \
     ios_app/SummaryView.swift \
     ios_app/ApexIntents.swift \
@@ -178,16 +189,35 @@ xcrun --sdk iphonesimulator swiftc \
     -framework WidgetKit \
     -framework SwiftUI \
     -framework ActivityKit \
+    -framework AppIntents \
     -parse-as-library \
     -O \
     -Xlinker -e -Xlinker _NSExtensionMain \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "$WIDGET_ENTITLEMENTS" \
     ios_app/ApexSharedTypes.swift \
+    ios_app/Widgets/ApexWidgetIntents.swift \
     ios_app/Widgets/ApexWidgets.swift \
     -o "$WIDGET_APPEX/APEXWidgets"
 
 cp "ios_app/Widgets/Info.plist" "$WIDGET_APPEX/Info.plist"
 echo -e "${COLOR_GREEN}  ✓ WidgetKit & Dynamic Island extension compiled: $WIDGET_APPEX${COLOR_RESET}"
+
+# Step 4B: Compile Native watchOS Companion App (APEXWatch.app)
+echo -e "\n${COLOR_YELLOW}[4B/7] Compiling watchOS Companion Binary...${COLOR_RESET}"
+xcrun --sdk watchsimulator swiftc \
+    -target arm64-apple-watchos10.0-simulator \
+    -framework SwiftUI \
+    -framework Combine \
+    -framework HealthKit \
+    -framework WatchConnectivity \
+    -framework WatchKit \
+    -parse-as-library \
+    -O \
+    ios_app/Watch/APEXWatchApp.swift \
+    -o "$WATCH_BUNDLE/APEXWatch"
+cp "ios_app/Watch/Info.plist" "$WATCH_BUNDLE/Info.plist"
+codesign --force --sign - "$WATCH_BUNDLE"
+echo -e "${COLOR_GREEN}  ✓ watchOS companion compiled & signed cleanly: $WATCH_BUNDLE${COLOR_RESET}"
 
 # Step 5: Merge Info.plist & Sign Extension + App Bundle
 echo -e "\n${COLOR_YELLOW}[5/7] Bundling Info.plist & Signing Bundles...${COLOR_RESET}"

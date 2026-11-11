@@ -1,5 +1,13 @@
 import Foundation
+#if canImport(SwiftUI)
+import SwiftUI
+#endif
+#if canImport(ActivityKit) && !os(watchOS)
 import ActivityKit
+#endif
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 // MARK: - Shared 7-Day & Intraday Telemetry Samples
 public struct DailyMetricPoint: Codable, Identifiable, Equatable {
@@ -114,8 +122,165 @@ public enum ApexSnapshotStore {
         }
         return ApexWidgetSnapshot()
     }
+
+    // Interactive Widget -> Main App Action Queue (App Group backed)
+    public static var sharedDefaults: UserDefaults { defaults }
+
+    public static func queueHydrationIncrement(ml: Double = 250) {
+        let dayKey = todayKey()
+        let currentDay = defaults.string(forKey: "apex_widget_water_day")
+        let prevMl = (currentDay == dayKey) ? defaults.double(forKey: "apex_widget_water_pending_ml") : 0
+        defaults.set(dayKey, forKey: "apex_widget_water_day")
+        defaults.set(prevMl + ml, forKey: "apex_widget_water_pending_ml")
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+    }
+
+    public static func consumePendingHydrationMl() -> Double {
+        let dayKey = todayKey()
+        guard defaults.string(forKey: "apex_widget_water_day") == dayKey else { return 0 }
+        let pending = defaults.double(forKey: "apex_widget_water_pending_ml")
+        if pending > 0 {
+            defaults.set(0, forKey: "apex_widget_water_pending_ml")
+        }
+        return pending
+    }
+
+    public static func queuePendingJournalTag(_ tagId: String) {
+        let dayKey = todayKey()
+        let keyName = "apex_widget_pending_tags_\(dayKey)"
+        var list = defaults.stringArray(forKey: keyName) ?? []
+        if !list.contains(tagId) {
+            list.append(tagId)
+            defaults.set(list, forKey: keyName)
+        }
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+    }
+
+    public static func consumePendingJournalTags() -> [String] {
+        let keyName = "apex_widget_pending_tags_\(todayKey())"
+        let tags = defaults.stringArray(forKey: keyName) ?? []
+        if !tags.isEmpty {
+            defaults.removeObject(forKey: keyName)
+        }
+        return tags
+    }
+
+    private static func todayKey() -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
 }
 
+// MARK: - Unit Preferences (Metric kg / mg·dL vs Imperial lbs / mmol·L)
+public enum ApexUnitSystem: String, Codable, CaseIterable, Identifiable {
+    case metric
+    case imperial
+    public var id: String { rawValue }
+    public var displayLabel: String {
+        switch self {
+        case .metric: return "Metric (kg · mg/dL)"
+        case .imperial: return "Imperial (lbs · mmol/L)"
+        }
+    }
+}
+
+public enum ApexUnitPreferences {
+    private static let unitKey = "apex_unit_system_v1"
+
+    public static var current: ApexUnitSystem {
+        get {
+            let raw = ApexSnapshotStore.sharedDefaults.string(forKey: unitKey)
+                ?? UserDefaults.standard.string(forKey: unitKey)
+                ?? "metric"
+            return ApexUnitSystem(rawValue: raw) ?? .metric
+        }
+        set {
+            ApexSnapshotStore.sharedDefaults.set(newValue.rawValue, forKey: unitKey)
+            UserDefaults.standard.set(newValue.rawValue, forKey: unitKey)
+        }
+    }
+
+    public static func formatWeight(kg: Double) -> String {
+        switch current {
+        case .metric:
+            return String(format: "%.1f kg", kg)
+        case .imperial:
+            return String(format: "%.1f lbs", kg * 2.20462)
+        }
+    }
+
+    public static func formatGlucose(mgDl: Double) -> String {
+        switch current {
+        case .metric:
+            return "\(Int(mgDl.rounded())) mg/dL"
+        case .imperial:
+            return String(format: "%.1f mmol/L", mgDl / 18.0182)
+        }
+    }
+}
+
+// MARK: - Shared Pure Biometric & Bevel Formula Engine (Tested via Automated Unit Suite)
+public enum ApexBiometricMath {
+    public static func dailyStrain(moveKcal: Double, exerciseMinutes: Double, strengthSetsBonus: Double = 0) -> Double? {
+        guard moveKcal > 0 || exerciseMinutes > 0 || strengthSetsBonus > 0 else { return nil }
+        let cardLoad = (moveKcal / 110.0) + (exerciseMinutes / 18.0) + strengthSetsBonus
+        let scaled = 21.0 * (1.0 - exp(-cardLoad / 10.5))
+        return min(21.0, max(0.0, (scaled * 10.0).rounded() / 10.0))
+    }
+
+    public static func targetStrainRange(readiness: Int?) -> ClosedRange<Double>? {
+        guard let r = readiness else { return nil }
+        let low = max(4.0, (6.0 + (Double(r) / 100.0) * 8.0).rounded())
+        let high = min(20.0, low + 4.0)
+        return low...high
+    }
+
+    public static func energyBank(readiness: Int?, strain: Double?, napHours: Double = 0) -> Int? {
+        guard let r = readiness else { return nil }
+        let drain = (strain ?? 0) * 2.3
+        let recharge = napHours * 18.0
+        return Int(min(100.0, max(5.0, (Double(r) - drain + recharge).rounded())))
+    }
+
+    public static func brzycki1RM(weightKg: Double, reps: Int) -> Double {
+        guard weightKg > 0, reps >= 1 else { return 0 }
+        let cappedReps = min(reps, 36)
+        return (weightKg * (36.0 / Double(37 - cappedReps)) * 10.0).rounded() / 10.0
+    }
+
+    public static func nutritionQualityScore(
+        calories: Double,
+        calorieTarget: Double,
+        proteinG: Double,
+        proteinTargetG: Double,
+        fiberG: Double,
+        fiberTargetG: Double,
+        sugarG: Double,
+        wholeFoodRatio: Double,
+        mealCount: Int
+    ) -> Int? {
+        guard mealCount > 0 else { return nil }
+        let calRatio = calorieTarget > 0 ? min(1.2, calories / calorieTarget) : 1.0
+        let proteinRatio = min(1.0, proteinG / max(60.0, proteinTargetG))
+        let fiberRatio = min(1.0, fiberG / max(15.0, fiberTargetG))
+        let sugarPenalty = max(0.0, (sugarG - 38.0) * 0.45)
+        let raw = 28.0
+            + proteinRatio * 34.0
+            + fiberRatio * 18.0
+            + min(1.0, max(0.0, wholeFoodRatio)) * 15.0
+            + (calRatio >= 0.7 && calRatio <= 1.15 ? 5.0 : 0.0)
+            - sugarPenalty
+        return Int(max(12.0, min(100.0, raw.rounded())))
+    }
+}
+
+#if canImport(ActivityKit) && os(iOS)
 // MARK: - ActivityKit Live Activity Attributes (Dynamic Island + Lock Screen)
 @available(iOS 16.1, *)
 public struct ApexWorkoutAttributes: ActivityAttributes {
@@ -152,7 +317,9 @@ public struct ApexWorkoutAttributes: ActivityAttributes {
         self.startedAt = startedAt
     }
 }
+#endif
 
+#if canImport(SwiftUI) && !os(watchOS)
 // MARK: - AppIntents / Deep-Link Navigation Bus
 @MainActor
 public final class ApexNavigationRouter: ObservableObject {
@@ -186,3 +353,4 @@ public final class ApexNavigationRouter: ObservableObject {
         }
     }
 }
+#endif

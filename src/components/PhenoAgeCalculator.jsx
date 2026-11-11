@@ -226,17 +226,26 @@ export default function PhenoAgeCalculator({ healthData, onConnectHealth, onOpen
             <span className="text-[10px] font-mono text-[#8A8A8A] uppercase block">
               {activeEngine === 'livity_fitness' ? 'FITNESS AGE' : 'BIOLOGICAL AGE'}
             </span>
-            <div className="flex items-baseline space-x-2">
+            <div className="flex items-baseline justify-end space-x-2">
               <span className="text-4xl font-mono font-black text-white">{showActiveMetrics ? currentAge : '—'}</span>
               <span className="text-xs font-mono text-[#8A8A8A]">{showActiveMetrics ? 'years' : ''}</span>
             </div>
-            <span className="text-xs font-mono font-black text-[#10B981]">
+            <span className="text-xs font-mono font-black text-[#10B981] block">
               {!showActiveMetrics
                 ? 'Awaiting real telemetry'
                 : isReversed
                 ? `${Math.abs(ageDelta)} YEARS YOUNGER`
                 : `+${ageDelta} Years Advanced`}
             </span>
+            <button
+              onClick={() => {
+                playPlunk();
+                window.print();
+              }}
+              className="mt-2 px-3 py-1 rounded-[8px] bg-white/10 hover:bg-white/20 text-[10px] font-mono font-bold text-white border border-white/15 transition"
+            >
+              PRINT CLINICAL DOSSIER
+            </button>
           </div>
         </div>
 

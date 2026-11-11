@@ -32,6 +32,7 @@ APEX OS.app/Contents/MacOS/APEX OS
 mac_app/APEX OS
 APEX OS.app
 APEX_iOS.app
+APEXWatch.app
 public/models/*.task
 public/models/*.tflite
 public/models/*.onnx

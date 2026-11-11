@@ -343,10 +343,10 @@ private struct DocumentCameraScannerSheet: UIViewControllerRepresentable {
     }
 }
 
-private enum LabPanelStore {
+public enum LabPanelStore {
     private static let key = "apex_ios_lab_panel_v1"
 
-    static func load() -> LabBiomarkerPanel? {
+    public static func load() -> LabBiomarkerPanel? {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode(LabBiomarkerPanel.self, from: data) else {
             return nil
@@ -354,7 +354,7 @@ private enum LabPanelStore {
         return decoded
     }
 
-    static func save(_ panel: LabBiomarkerPanel) {
+    public static func save(_ panel: LabBiomarkerPanel) {
         if let encoded = try? JSONEncoder().encode(panel) {
             UserDefaults.standard.set(encoded, forKey: key)
         }
