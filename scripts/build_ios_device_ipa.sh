@@ -31,7 +31,7 @@ mkdir -p "$APP_BUNDLE" "$WIDGET_APPEX" "$WATCH_BUNDLE" "$STAGING_DIR/watch_bin"
 
 # 1. Compile iPhoneOS Asset Catalog & AppIcon
 echo -e "\n${COLOR_YELLOW}[1/5] Compiling iPhoneOS Asset Catalog (Assets.car)...${COLOR_RESET}"
-xcrun actool ios_app/Assets.xcassets \
+xcrun actool "$PROJECT_DIR/ios_app/Assets.xcassets" \
     --compile "$APP_BUNDLE" \
     --platform iphoneos \
     --minimum-deployment-target 17.0 \
@@ -44,6 +44,7 @@ SWIFT_SOURCES=()
 while IFS= read -r src; do
     SWIFT_SOURCES+=("$src")
 done < <(find ios_app -maxdepth 1 -name '*.swift' ! -name 'generate_ios_icon.swift' | sort)
+SWIFT_SOURCES+=("ios_app/Widgets/ApexWidgetIntents.swift")
 
 # 3. Compile Physical ARM64 Main iOS Executable (iphoneos SDK)
 echo -e "\n${COLOR_YELLOW}[2/5] Compiling ARM64 iPhoneOS Binary (APEX_iOS)...${COLOR_RESET}"
@@ -192,13 +193,13 @@ fi
 
 if [ "$SIGN_IDENTITY" = "-" ]; then
     echo -e "  Signing Mode : Ad-hoc (0 Apple signing certs in Keychain; ready for Sideloadly/AltStore/SideStore re-sign)"
-    codesign --force --sign - "$WATCH_BUNDLE"
-    codesign --force --sign - "$WIDGET_APPEX"
+    codesign --force --sign - --entitlements ios_app/Watch/APEXWatch.entitlements "$WATCH_BUNDLE"
+    codesign --force --sign - --entitlements ios_app/Widgets/APEXWidgets.entitlements "$WIDGET_APPEX"
     codesign --force --sign - --entitlements ios_app/APEX_iOS.entitlements "$APP_BUNDLE"
 else
     echo -e "  Signing Mode : Identity '$SIGN_IDENTITY'"
-    codesign --force --sign "$SIGN_IDENTITY" "$WATCH_BUNDLE"
-    codesign --force --sign "$SIGN_IDENTITY" "$WIDGET_APPEX"
+    codesign --force --sign "$SIGN_IDENTITY" --entitlements ios_app/Watch/APEXWatch.entitlements "$WATCH_BUNDLE"
+    codesign --force --sign "$SIGN_IDENTITY" --entitlements ios_app/Widgets/APEXWidgets.entitlements "$WIDGET_APPEX"
     codesign --force --sign "$SIGN_IDENTITY" --entitlements ios_app/APEX_iOS.entitlements "$APP_BUNDLE"
 fi
 

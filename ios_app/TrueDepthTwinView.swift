@@ -359,10 +359,10 @@ private final class TrueDepthMeshCapturer: NSObject, ObservableObject, ARSession
     }
 }
 
-private enum TrueDepthTwinStore {
+public enum TrueDepthTwinStore {
     private static let key = "apex_truedepth_twin_snapshots_v1"
 
-    static func load() -> [TrueDepthMeshSnapshot] {
+    public static func load() -> [TrueDepthMeshSnapshot] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([TrueDepthMeshSnapshot].self, from: data) else {
             return []
@@ -370,7 +370,7 @@ private enum TrueDepthTwinStore {
         return decoded
     }
 
-    static func save(_ items: [TrueDepthMeshSnapshot]) {
+    public static func save(_ items: [TrueDepthMeshSnapshot]) {
         if let data = try? JSONEncoder().encode(Array(items.prefix(15))) {
             UserDefaults.standard.set(data, forKey: key)
         }

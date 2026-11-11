@@ -1036,10 +1036,20 @@ private struct BiometricDetailSheet: View {
 
     private var optimalRange: String {
         switch metric {
-        case .restingHR: return "45 – 56 bpm"
-        case .hrv: return "> 70 ms"
-        case .vo2Max: return "> 50 mL/kg·min"
-        case .sleep: return "7.5 – 8.5 hrs"
+        case .restingHR:
+            if let base = health.rhrBaseline7d {
+                return "\(Int((base - 4).rounded())) – \(Int((base + 4).rounded())) bpm (7d band)"
+            }
+            return "45 – 58 bpm"
+        case .hrv:
+            if let base = health.hrvBaseline7d {
+                return "≥ \(Int(base.rounded())) ms (7d avg)"
+            }
+            return health.chronologicalAge >= 40 ? "> 45 ms" : "> 65 ms"
+        case .vo2Max:
+            return health.chronologicalAge >= 40 ? "> 44 mL/kg·min" : "> 50 mL/kg·min"
+        case .sleep:
+            return String(format: "%.1f – %.1f hrs", health.baselineSleepGoalHours, min(9.5, health.baselineSleepGoalHours + 0.75))
         }
     }
 

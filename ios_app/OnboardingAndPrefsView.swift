@@ -174,28 +174,19 @@ public struct ApexProPaywallSheet: View {
                             .buttonStyle(.plain)
                         }
                     } else {
-                        ForEach(referenceTiers) { tier in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 6) {
-                                        Text(tier.title)
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(.white)
-                                        Text(tier.badge)
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(ApexTheme.standCyan)
-                                    }
-                                    Text(tier.desc)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(tier.refPrice)
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundStyle(ApexTheme.accentVolt)
-                            }
-                            .appleCard(padding: 15, cornerRadius: 18)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("All On-Device Engines Unlocked Offline", systemImage: "checkmark.seal.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(ApexTheme.accentEmerald)
+                            Text("All HealthKit, Bevel recovery/strain curves, Vision face & pose tracking, optical rPPG, Watch sync, PDF clinical reports, and local .apexbackup continuity run natively on your device.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                            Text("App Store Connect Pro/Supporter SKUs load automatically once published with your Apple Developer StoreKit configuration.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .appleCard(padding: 16, cornerRadius: 18)
                     }
 
                     Button {
@@ -243,8 +234,22 @@ public struct CalibrationOnboardingSheet: View {
     @ObservedObject private var watch = ApexWatchConnectivity.shared
 
     @AppStorage("apex_has_completed_onboarding") private var hasCompletedOnboarding: Bool = false
-    @AppStorage("apex_unit_system") private var unitRaw: String = ApexUnitPreferences.current.rawValue
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitRaw: String = ApexUnitPreferences.current.rawValue
+    @AppStorage("apex_wake_minutes") private var wakeMinutes: Int = 390
     @Environment(\.dismiss) private var dismiss
+
+    private var wakeDateBinding: Binding<Date> {
+        Binding<Date>(
+            get: {
+                Calendar.current.date(bySettingHour: wakeMinutes / 60, minute: wakeMinutes % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { newDate in
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                wakeMinutes = (comps.hour ?? 6) * 60 + (comps.minute ?? 30)
+                notifications.rescheduleAll(health: health)
+            }
+        )
+    }
 
     public init() {}
 
@@ -271,12 +276,15 @@ public struct CalibrationOnboardingSheet: View {
                             Haptics.selection()
                         }
                     }
+
+                    DatePicker("Typical Wake Time", selection: wakeDateBinding, displayedComponents: .hourAndMinute)
                 }
 
                 Section("Daily Targets") {
                     Stepper("Sleep Goal: \(String(format: "%.2f", health.baselineSleepGoalHours)) hrs", value: $health.baselineSleepGoalHours, in: 6.0...10.0, step: 0.25)
                     Stepper("Calorie Target: \(Int(nutrition.calorieTarget)) kcal", value: $nutrition.calorieTarget, in: 1200...5000, step: 100)
                     Stepper("Protein Target: \(Int(nutrition.proteinTargetG)) g", value: $nutrition.proteinTargetG, in: 60...320, step: 5)
+                    Stepper("Fiber Target: \(Int(nutrition.fiberTargetG)) g", value: $nutrition.fiberTargetG, in: 15...80, step: 2)
                 }
 
                 Section("Real-Data Permissions & Wearables") {
@@ -352,10 +360,38 @@ public struct AlertsAndPreferencesSheet: View {
     @ObservedObject private var notifications = ApexNotificationsEngine.shared
     @ObservedObject private var watch = ApexWatchConnectivity.shared
 
-    @AppStorage("apex_unit_system") private var unitRaw: String = ApexUnitPreferences.current.rawValue
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitRaw: String = ApexUnitPreferences.current.rawValue
+    @AppStorage("apex_wake_minutes") private var wakeMinutes: Int = 390
     @Environment(\.dismiss) private var dismiss
 
     @State private var showOnboarding = false
+
+    private var morningTimeBinding: Binding<Date> {
+        Binding<Date>(
+            get: {
+                Calendar.current.date(bySettingHour: notifications.morningHour, minute: notifications.morningMinute, second: 0, of: Date()) ?? Date()
+            },
+            set: { newDate in
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                notifications.morningHour = comps.hour ?? 7
+                notifications.morningMinute = comps.minute ?? 30
+            }
+        )
+    }
+
+    private var wakeTimeBinding: Binding<Date> {
+        Binding<Date>(
+            get: {
+                Calendar.current.date(bySettingHour: wakeMinutes / 60, minute: wakeMinutes % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { newDate in
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                wakeMinutes = (comps.hour ?? 6) * 60 + (comps.minute ?? 30)
+                notifications.rescheduleAll(health: health)
+                Haptics.selection()
+            }
+        )
+    }
 
     public init() {}
 
@@ -374,6 +410,7 @@ public struct AlertsAndPreferencesSheet: View {
                             Haptics.selection()
                         }
                     }
+                    DatePicker("Typical Wake Time", selection: wakeTimeBinding, displayedComponents: .hourAndMinute)
                 }
 
                 Section("Proactive Intelligence Alerts") {
@@ -388,7 +425,10 @@ public struct AlertsAndPreferencesSheet: View {
                     }
 
                     Toggle("Overnight 5-Vital Shift Alert", isOn: $notifications.outOfRangeAlertsEnabled)
-                    Toggle("Morning Briefing Summary (7:30)", isOn: $notifications.morningBriefingEnabled)
+                    Toggle("Morning Briefing Summary", isOn: $notifications.morningBriefingEnabled)
+                    if notifications.morningBriefingEnabled {
+                        DatePicker("Briefing Delivery Time", selection: morningTimeBinding, displayedComponents: .hourAndMinute)
+                    }
                     Toggle("Caffeine Cutoff & Wind-Down Alerts", isOn: $notifications.caffeineCutoffEnabled)
                 }
 

@@ -25,7 +25,7 @@ if [ "$BUILD_DEVICE" -eq 1 ]; then
     echo "   🍏 APEX — Physical iPhone / App Store Archive Build (.xcarchive)"
     echo "======================================================================"
     python3 "$PROJECT_DIR/scripts/generate_xcodeproj.py"
-    bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" "${SIGN_TEAM:-}"
+    bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" "${TEAM_ID:-}"
     echo -e "• Xcode Project  : ${COLOR_BOLD}$PROJECT_DIR/ios_app/APEX_iOS.xcodeproj${COLOR_RESET}"
     echo -e "• Physical IPA   : ${COLOR_BOLD}$PROJECT_DIR/APEX-OS.ipa${COLOR_RESET}\n"
     exit 0
@@ -68,8 +68,8 @@ if [ ! -f "ios_app/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" ]; then
     swift ios_app/generate_ios_icon.swift
 fi
 
-xcrun actool ios_app/Assets.xcassets \
-    --compile "$APP_BUNDLE" \
+xcrun actool "$PROJECT_DIR/ios_app/Assets.xcassets" \
+    --compile "$PROJECT_DIR/$APP_BUNDLE" \
     --platform iphonesimulator \
     --minimum-deployment-target 17.0 \
     --app-icon AppIcon \
@@ -117,6 +117,12 @@ EOF
 
 # Step 3: Compile Native SwiftUI, Vision, ARKit, Charts, Bonjour & AppIntents Binary
 echo -e "\n${COLOR_YELLOW}[3/7] Compiling Native iOS Binary...${COLOR_RESET}"
+SIM_SWIFT_SOURCES=()
+while IFS= read -r src; do
+    SIM_SWIFT_SOURCES+=("$src")
+done < <(find ios_app -maxdepth 1 -name '*.swift' ! -name 'generate_ios_icon.swift' | sort)
+SIM_SWIFT_SOURCES+=("ios_app/Widgets/ApexWidgetIntents.swift")
+
 xcrun --sdk iphonesimulator swiftc \
     -target arm64-apple-ios17.0-simulator \
     -framework SwiftUI \
@@ -148,35 +154,7 @@ xcrun --sdk iphonesimulator swiftc \
     -parse-as-library \
     -O \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "$SIM_ENTITLEMENTS" \
-    ios_app/ApexSharedTypes.swift \
-    ios_app/Widgets/ApexWidgetIntents.swift \
-    ios_app/DesignSystem.swift \
-    ios_app/ApexWatchConnectivity.swift \
-    ios_app/ApexNotificationsEngine.swift \
-    ios_app/HealthKitManager.swift \
-    ios_app/WorkoutActivityManager.swift \
-    ios_app/ActivityRingsView.swift \
-    ios_app/ApexIntelligenceEngine.swift \
-    ios_app/OpticalPulseEngine.swift \
-    ios_app/TrueDepthTwinView.swift \
-    ios_app/SpatialPostureHapticsEngine.swift \
-    ios_app/BLEHeartRateMonitor.swift \
-    ios_app/ExperimentLabView.swift \
-    ios_app/VoiceBiomarkerView.swift \
-    ios_app/FaceScanView.swift \
-    ios_app/CameraWorkoutView.swift \
-    ios_app/StrengthBuilderView.swift \
-    ios_app/NutritionCGMView.swift \
-    ios_app/BreathworkHapticsView.swift \
-    ios_app/BevelMetricsViews.swift \
-    ios_app/BloodworkOCRView.swift \
-    ios_app/ClinicalReportEngine.swift \
-    ios_app/OnboardingAndPrefsView.swift \
-    ios_app/LongevityView.swift \
-    ios_app/SummaryView.swift \
-    ios_app/ApexIntents.swift \
-    ios_app/ContentView.swift \
-    ios_app/APEXApp.swift \
+    "${SIM_SWIFT_SOURCES[@]}" \
     -o "$APP_BUNDLE/APEX_iOS"
 
 echo -e "${COLOR_GREEN}  ✓ Mach-O iOS binary compiled: $APP_BUNDLE/APEX_iOS${COLOR_RESET}"
@@ -213,10 +191,11 @@ xcrun --sdk watchsimulator swiftc \
     -framework WatchKit \
     -parse-as-library \
     -O \
+    ios_app/ApexSharedTypes.swift \
     ios_app/Watch/APEXWatchApp.swift \
     -o "$WATCH_BUNDLE/APEXWatch"
 cp "ios_app/Watch/Info.plist" "$WATCH_BUNDLE/Info.plist"
-codesign --force --sign - "$WATCH_BUNDLE"
+codesign --force --sign - --entitlements ios_app/Watch/APEXWatch.entitlements "$WATCH_BUNDLE"
 echo -e "${COLOR_GREEN}  ✓ watchOS companion compiled & signed cleanly: $WATCH_BUNDLE${COLOR_RESET}"
 
 # Step 5: Merge Info.plist & Sign Extension + App Bundle
@@ -250,7 +229,7 @@ if os.path.exists(watch_plist_path):
         plistlib.dump(wat_plist, f)
 "
 
-codesign --force --sign - "$WIDGET_APPEX"
+codesign --force --sign - --entitlements ios_app/Widgets/APEXWidgets.entitlements "$WIDGET_APPEX"
 codesign --force --sign - "$APP_BUNDLE"
 codesign -v "$APP_BUNDLE"
 echo -e "${COLOR_GREEN}  ✓ $APP_BUNDLE & $WIDGET_APPEX packaged & signed cleanly!${COLOR_RESET}"
@@ -264,7 +243,7 @@ ZIP_SIZE=$(ls -lh "$ZIP_NAME" | awk '{print $5}')
 echo -e "${COLOR_GREEN}  ✓ iOS Simulator archive created: $ZIP_NAME ($ZIP_SIZE)${COLOR_RESET}"
 
 python3 "$PROJECT_DIR/scripts/generate_xcodeproj.py"
-bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" "${SIGN_TEAM:-}"
+bash "$PROJECT_DIR/scripts/build_ios_device_ipa.sh" "${TEAM_ID:-}"
 
 # Step 7: Install & Launch on iOS Simulator
 echo -e "\n${COLOR_YELLOW}[7/7] Installing & Launching on iOS Simulator...${COLOR_RESET}"

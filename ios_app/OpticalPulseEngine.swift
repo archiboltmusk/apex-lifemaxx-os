@@ -3,12 +3,53 @@ import AVFoundation
 import Accelerate
 import Combine
 
-// MARK: - Contactless Camera rPPG Optical Pulse & RMSSD Engine (vDSP FFT)
-public struct OpticalPulseMeasurement: Codable {
+// MARK: - Contactless Camera rPPG Optical Pulse, SpO2 & RMSSD Engine (vDSP FFT)
+public struct OpticalPulseMeasurement: Codable, Identifiable {
+    public var id: UUID { UUID() }
     public let bpm: Int
     public let rmssdMs: Int
     public let confidencePct: Int
+    public var spo2EstimatePct: Int? = nil
     public let measuredAt: Date
+
+    public init(bpm: Int, rmssdMs: Int, confidencePct: Int, spo2EstimatePct: Int? = nil, measuredAt: Date) {
+        self.bpm = bpm
+        self.rmssdMs = rmssdMs
+        self.confidencePct = confidencePct
+        self.spo2EstimatePct = spo2EstimatePct
+        self.measuredAt = measuredAt
+    }
+}
+
+@MainActor
+public final class OpticalPulseStore: ObservableObject {
+    public static let shared = OpticalPulseStore()
+    @Published public private(set) var history: [OpticalPulseMeasurement] = []
+    private let key = "apex_optical_pulse_history_v1"
+
+    private init() {
+        history = Self.load()
+    }
+
+    public static func load() -> [OpticalPulseMeasurement] {
+        guard let d = UserDefaults.standard.data(forKey: "apex_optical_pulse_history_v1"),
+              let dec = try? JSONDecoder().decode([OpticalPulseMeasurement].self, from: d) else {
+            return []
+        }
+        return dec
+    }
+
+    public func save(_ reading: OpticalPulseMeasurement) {
+        history.insert(reading, at: 0)
+        history = Array(history.prefix(30))
+        if let d = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(d, forKey: key)
+        }
+    }
+
+    public func reloadFromDisk() {
+        history = Self.load()
+    }
 }
 
 @MainActor
@@ -67,6 +108,7 @@ public final class OpticalPulseViewModel: ObservableObject {
             ? "Optical PPG reading locked · \(result?.confidencePct ?? 0)% SNR confidence"
             : "Weak pulse signal — cover rear camera gently without pressing hard"
         if let res = result {
+            OpticalPulseStore.shared.save(res)
             Haptics.success()
             if res.confidencePct >= 60 {
                 Task {
@@ -76,12 +118,16 @@ public final class OpticalPulseViewModel: ObservableObject {
                     )
                 }
             }
-            HealthKitManager.shared.syncEventToMac(extraPayload: [
+            var extra: [String: Any] = [
                 "hr": res.bpm,
                 "hrv": res.rmssdMs,
                 "confidencePct": res.confidencePct,
                 "source": "iPhone Camera rPPG Optical Pulse"
-            ])
+            ]
+            if let spo2 = res.spo2EstimatePct {
+                extra["spo2"] = spo2
+            }
+            HealthKitManager.shared.syncEventToMac(extraPayload: extra)
         } else {
             Haptics.warning()
         }
@@ -289,7 +335,62 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
         guard cleanIbis.count >= 4 else { return nil }
 
         let avgIbi = cleanIbis.reduce(0, +) / Double(cleanIbis.count)
-        let bpm = Int(max(42, min(180, (60000.0 / avgIbi).rounded())))
+        let peakBpm = Int(max(42, min(180, (60000.0 / avgIbi).rounded())))
+
+        // Cross-check cardiac fundamental frequency via Accelerate vDSP 256-pt Hamming DFT (42–210 BPM)
+        let fftLen = 256
+        var fftReal = [Float](repeating: 0, count: fftLen)
+        let copyCount = min(n, fftLen)
+        var hann = [Float](repeating: 0, count: copyCount)
+        vDSP_hann_window(&hann, vDSP_Length(copyCount), Int32(vDSP_HANN_NORM))
+        for i in 0..<copyCount {
+            let srcIdx = n - copyCount + i
+            fftReal[i] = Float(smoothed[srcIdx]) * hann[i]
+        }
+        let imagZero = [Float](repeating: 0, count: fftLen)
+        var outReal = [Float](repeating: 0, count: fftLen)
+        var outImag = [Float](repeating: 0, count: fftLen)
+        var fftPeakBpm: Double? = nil
+        if let dftSetup = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(fftLen), .FORWARD) {
+            vDSP_DFT_Execute(dftSetup, fftReal, imagZero, &outReal, &outImag)
+            vDSP_DFT_DestroySetup(dftSetup)
+            var bestMag: Float = 0
+            var bestBin = 0
+            for k in 1..<(fftLen / 2) {
+                let freqHz = Double(k) * sampleRate / Double(fftLen)
+                let candBpm = freqHz * 60.0
+                if candBpm >= 42.0 && candBpm <= 210.0 {
+                    let mag = outReal[k] * outReal[k] + outImag[k] * outImag[k]
+                    if mag > bestMag {
+                        bestMag = mag
+                        bestBin = k
+                    }
+                }
+            }
+            if bestBin > 0 && bestMag > 0 {
+                fftPeakBpm = Double(bestBin) * sampleRate / Double(fftLen) * 60.0
+            }
+        }
+        let bpm: Int = {
+            guard let fBpm = fftPeakBpm else { return peakBpm }
+            if abs(Double(peakBpm) - fBpm) > 18.0 {
+                return Int(max(42, min(195, ((Double(peakBpm) + fBpm) / 2.0).rounded())))
+            }
+            return Int(max(42, min(195, (Double(peakBpm) * 0.65 + fBpm * 0.35).rounded())))
+        }()
+
+        // Optional Optical SpO2 Estimate from dual-wavelength Red/Green Ratio of Ratios (only if both channels unclipped & pulsatile)
+        let meanR = redChannelMeans.reduce(0, +) / Double(redChannelMeans.count)
+        let meanG = greenChannelMeans.reduce(0, +) / Double(greenChannelMeans.count)
+        let spo2Est: Int? = {
+            guard !redClipped, meanR < 245.0, meanG > 6.0, rStd > 0.04, gStd > 0.04 else { return nil }
+            let acdcR = rStd / max(1.0, meanR)
+            let acdcG = gStd / max(1.0, meanG)
+            guard acdcG > 0.0005 else { return nil }
+            let rRatio = acdcR / acdcG
+            let est = Int(max(92.0, min(100.0, (108.5 - 12.5 * rRatio).rounded())))
+            return est
+        }()
 
         var sqDiffSum: Double = 0
         for i in 1..<cleanIbis.count {
@@ -306,95 +407,126 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
         let rawConf = (0.45 * keepRatio + 0.35 * rhythmConsistency + 0.20 * amplitudeScore) * 100.0
         let confidencePct = Int(max(45, min(99, rawConf.rounded())))
 
-        return OpticalPulseMeasurement(bpm: bpm, rmssdMs: rmssd, confidencePct: confidencePct, measuredAt: Date())
+        return OpticalPulseMeasurement(bpm: bpm, rmssdMs: rmssd, confidencePct: confidencePct, spo2EstimatePct: spo2Est, measuredAt: Date())
     }
 }
 
 // MARK: - Optical Camera rPPG Sheet
 public struct OpticalPulseSheet: View {
     @StateObject private var vm = OpticalPulseViewModel()
+    @ObservedObject private var pulseStore = OpticalPulseStore.shared
     @Environment(\.dismiss) private var dismiss
 
     public init() {}
 
     public var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                ZStack {
-                    Circle()
-                        .stroke(ApexTheme.moveCrimson.opacity(0.18), lineWidth: 10)
-                    Circle()
-                        .trim(from: 0, to: vm.progress)
-                        .stroke(ApexTheme.moveCrimson, style: StrokeStyle(lineWidth: 10, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.15), value: vm.progress)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    ZStack {
+                        Circle()
+                            .stroke(ApexTheme.moveCrimson.opacity(0.18), lineWidth: 10)
+                        Circle()
+                            .trim(from: 0, to: vm.progress)
+                            .stroke(ApexTheme.moveCrimson, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 0.15), value: vm.progress)
 
-                    VStack(spacing: 4) {
-                        if let res = vm.measuredResult {
-                            Text("\(res.bpm)")
-                                .font(.system(size: 48, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(.white)
-                            Text("BPM · HRV \(res.rmssdMs) ms")
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                .foregroundStyle(ApexTheme.standCyan)
-                            Text("Confidence \(res.confidencePct)%")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(res.confidencePct >= 60 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
-                        } else {
-                            Image(systemName: "waveform.path.ecg")
-                                .font(.system(size: 36))
-                                .foregroundStyle(ApexTheme.moveCrimson)
-                            Text(vm.isScanning ? "\(Int(vm.progress * 100))%" : "10s Optical PPG")
-                                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
+                        VStack(spacing: 4) {
+                            if let res = vm.measuredResult {
+                                Text("\(res.bpm)")
+                                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.white)
+                                Text("BPM · HRV \(res.rmssdMs) ms")
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(ApexTheme.standCyan)
+                                if let spo2 = res.spo2EstimatePct {
+                                    Text("Est. SpO₂ \(spo2)% · Conf \(res.confidencePct)%")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(ApexTheme.accentEmerald)
+                                } else {
+                                    Text("Confidence \(res.confidencePct)%")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(res.confidencePct >= 60 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                                }
+                            } else {
+                                Image(systemName: "waveform.path.ecg")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(ApexTheme.moveCrimson)
+                                Text(vm.isScanning ? "\(Int(vm.progress * 100))%" : "10s Optical PPG")
+                                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white)
+                            }
                         }
                     }
-                }
-                .frame(width: 190, height: 190)
-                .padding(.top, 10)
+                    .frame(width: 190, height: 190)
+                    .padding(.top, 10)
 
-                Text(vm.statusText)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
+                    Text(vm.statusText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
 
-                // Live PPG Pulse Trace Preview
-                Canvas { ctx, size in
-                    guard vm.liveGreenTrace.count >= 4 else { return }
-                    let minV = vm.liveGreenTrace.min() ?? 0
-                    let maxV = max(minV + 0.01, vm.liveGreenTrace.max() ?? 1)
-                    var path = Path()
-                    for (idx, val) in vm.liveGreenTrace.enumerated() {
-                        let x = CGFloat(idx) / CGFloat(vm.liveGreenTrace.count - 1) * size.width
-                        let normY = CGFloat((val - minV) / (maxV - minV))
-                        let y = size.height - normY * (size.height - 12) - 6
-                        if idx == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                        else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    // Live PPG Pulse Trace Preview
+                    Canvas { ctx, size in
+                        guard vm.liveGreenTrace.count >= 4 else { return }
+                        let minV = vm.liveGreenTrace.min() ?? 0
+                        let maxV = max(minV + 0.01, vm.liveGreenTrace.max() ?? 1)
+                        var path = Path()
+                        for (idx, val) in vm.liveGreenTrace.enumerated() {
+                            let x = CGFloat(idx) / CGFloat(vm.liveGreenTrace.count - 1) * size.width
+                            let normY = CGFloat((val - minV) / (maxV - minV))
+                            let y = size.height - normY * (size.height - 12) - 6
+                            if idx == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                            else { path.addLine(to: CGPoint(x: x, y: y)) }
+                        }
+                        ctx.stroke(path, with: .color(ApexTheme.moveCrimson), lineWidth: 2)
                     }
-                    ctx.stroke(path, with: .color(ApexTheme.moveCrimson), lineWidth: 2)
-                }
-                .frame(height: 80)
-                .appleCard(padding: 12, cornerRadius: 18)
+                    .frame(height: 80)
+                    .appleCard(padding: 12, cornerRadius: 18)
 
-                Spacer()
+                    Button {
+                        Haptics.tap(.medium)
+                        vm.toggleScan()
+                    } label: {
+                        Text(vm.isScanning ? "Stop Scan" : (vm.cameraAvailable ? "Start 10s Finger PPG" : "Camera Hardware Required"))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(vm.cameraAvailable ? ApexTheme.moveCrimson : ApexTheme.elevatedSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .disabled(!vm.cameraAvailable)
 
-                Button {
-                    Haptics.tap(.medium)
-                    vm.toggleScan()
-                } label: {
-                    Text(vm.isScanning ? "Stop Scan" : (vm.cameraAvailable ? "Start 10s Finger PPG" : "Camera Hardware Required"))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(vm.cameraAvailable ? ApexTheme.moveCrimson : ApexTheme.elevatedSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    if !pulseStore.history.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Recent Optical Captures")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                            ForEach(pulseStore.history.prefix(5)) { item in
+                                HStack {
+                                    Text(item.measuredAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    let spo2Txt = item.spo2EstimatePct.map { " · \($0)% SpO₂" } ?? ""
+                                    Text("\(item.bpm) bpm · \(item.rmssdMs) ms\(spo2Txt)")
+                                        .font(.system(size: 12, weight: .bold).monospacedDigit())
+                                        .foregroundStyle(.white)
+                                }
+                                .padding(10)
+                                .background(ApexTheme.elevatedSurface)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+                        .appleCard(padding: 14, cornerRadius: 18)
+                    }
                 }
-                .disabled(!vm.cameraAvailable)
+                .padding(20)
             }
-            .padding(20)
             .background(ApexTheme.background)
             .navigationTitle("Optical Pulse")
             .navigationBarTitleDisplayMode(.inline)

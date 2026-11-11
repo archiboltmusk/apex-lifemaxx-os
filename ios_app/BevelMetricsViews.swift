@@ -22,10 +22,7 @@ public struct BevelScoresDetailSheet: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    energyBankSection
-                    stressSection
-                    healthMonitorSection
-                    sleepCoachSection
+                    orderedSections
                 }
                 .padding(16)
             }
@@ -41,6 +38,133 @@ public struct BevelScoresDetailSheet: View {
                 BreathworkHapticsView()
             }
         }
+    }
+
+    @ViewBuilder
+    private var orderedSections: some View {
+        switch focus {
+        case .recovery:
+            recoverySection
+            healthMonitorSection
+            sleepCoachSection
+            energyBankSection
+            stressSection
+        case .strain:
+            strainSection
+            energyBankSection
+            recoverySection
+            stressSection
+        case .energyBank:
+            energyBankSection
+            strainSection
+            stressSection
+            sleepCoachSection
+        case .stress:
+            stressSection
+            energyBankSection
+            healthMonitorSection
+        case .healthMonitor:
+            healthMonitorSection
+            recoverySection
+            sleepCoachSection
+        case .sleepCoach:
+            sleepCoachSection
+            recoverySection
+            energyBankSection
+            healthMonitorSection
+        }
+    }
+
+    private var recoverySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Autonomic Recovery Contributors")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Weighted from 7d HRV deviation, RHR delta & nocturnal sleep")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(health.readinessScore.map { "\($0)%" } ?? "—")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(ApexTheme.accentEmerald)
+            }
+
+            HStack(spacing: 10) {
+                contributorPill(
+                    label: "HRV SDNN",
+                    value: health.heartRateVariability.map { "\(Int($0.rounded())) ms" } ?? "—",
+                    sub: health.hrvDeltaPercent.map { String(format: "%+d%% vs 7d", $0) } ?? "Need 2d base",
+                    tint: ApexTheme.standCyan
+                )
+                contributorPill(
+                    label: "Resting HR",
+                    value: health.restingHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "—",
+                    sub: health.rhrDeltaBpm.map { String(format: "%+d vs 7d", $0) } ?? "Need 2d base",
+                    tint: ApexTheme.moveCrimson
+                )
+                contributorPill(
+                    label: "Sleep Eff.",
+                    value: health.sleepEfficiencyPercent.map { "\($0)%" } ?? "—",
+                    sub: health.sleepTotalHours.map { String(format: "%.1fh total", $0) } ?? "—",
+                    tint: ApexTheme.accentIndigo
+                )
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private var strainSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Cardiovascular & Muscular Strain")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    if let band = health.targetStrainRange {
+                        Text(String(format: "Readiness-guided target zone: %.0f – %.0f", band.lowerBound, band.upperBound))
+                            .font(.system(size: 12))
+                            .foregroundStyle(ApexTheme.exerciseLime)
+                    } else {
+                        Text("Log workouts or connect Apple Health to track 0–21 strain load")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Text(health.todayStrainScore.map { String(format: "%.1f", $0) } ?? "0.0")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(ApexTheme.moveCrimson)
+            }
+
+            HStack(spacing: 10) {
+                contributorPill(label: "Move", value: "\(Int(health.moveCalories)) kcal", sub: "Goal \(Int(health.moveTarget))", tint: ApexTheme.moveCrimson)
+                contributorPill(label: "Exercise", value: "\(Int(health.exerciseMinutes)) min", sub: "Goal \(Int(health.exerciseTarget))m", tint: ApexTheme.exerciseLime)
+                contributorPill(label: "Strength Bonus", value: String(format: "+%.1f", health.strengthStrainBonusToday), sub: "Resets daily", tint: ApexTheme.accentAmber)
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func contributorPill(label: String, value: String, sub: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+            Text(sub)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(ApexTheme.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var title: String {
@@ -96,8 +220,7 @@ public struct BevelScoresDetailSheet: View {
                 Spacer()
                 Button("+20m Nap (+Battery)") {
                     Haptics.tap()
-                    health.loggedNapHoursToday += 0.33
-                    health.persistWidgetSnapshot()
+                    health.addNapMinutes(20)
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.black)

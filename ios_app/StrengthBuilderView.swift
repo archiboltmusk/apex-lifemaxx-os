@@ -69,7 +69,7 @@ public struct StrengthSetItem: Identifiable, Codable, Equatable {
     }
 }
 
-public struct ActiveBuilderExercise: Identifiable, Codable {
+public struct ActiveBuilderExercise: Identifiable, Codable, Equatable {
     public let id: UUID
     public let exercise: BevelExercise
     public var sets: [StrengthSetItem]
@@ -83,6 +83,12 @@ public struct ActiveBuilderExercise: Identifiable, Codable {
             StrengthSetItem(weightKg: exercise.isBodyweight ? 0 : 40, reps: 10)
         ]
     }
+}
+
+private struct ActiveStrengthDraft: Codable {
+    let title: String
+    let startedAt: Date
+    let exercises: [ActiveBuilderExercise]
 }
 
 public struct StrengthTemplate: Identifiable {
@@ -117,6 +123,7 @@ public struct LoggedStrengthWorkout: Identifiable, Codable {
     public let durationMinutes: Double
     public let calories: Double
     public let muscleSets: [String: Int]
+    public var exerciseNames: [String]? = nil
 }
 
 @MainActor
@@ -124,6 +131,7 @@ public final class StrengthBuilderStore: ObservableObject {
     public static let shared = StrengthBuilderStore()
 
     @Published public var activeTitle: String = "Custom Session"
+    @Published public var activeSessionStart: Date = Date()
     @Published public var activeExercises: [ActiveBuilderExercise] = []
     @Published public var customExercises: [BevelExercise] = []
     @Published public var bestRecords: [String: ExerciseBestRecord] = [:]
@@ -132,6 +140,7 @@ public final class StrengthBuilderStore: ObservableObject {
     private let customKey = "apex_strength_custom_ex_v1"
     private let prKey = "apex_strength_prs_v1"
     private let historyKey = "apex_strength_history_v1"
+    private let draftKey = "apex_active_strength_draft_v1"
 
     private init() {
         load()
@@ -153,8 +162,13 @@ public final class StrengthBuilderStore: ObservableObject {
     }
 
     public var currentSessionVolumeKg: Double {
-        activeExercises.reduce(0.0) { sum, item in
-            sum + item.sets.filter(\.completed).reduce(0.0) { $0 + max(1.0, $1.weightKg) * Double($1.reps) }
+        let bw = HealthKitManager.shared.bodyWeightKg ?? 75.0
+        return activeExercises.reduce(0.0) { sum, item in
+            let itemVol = item.sets.filter(\.completed).reduce(0.0) { setSum, set in
+                let effWeight = item.exercise.isBodyweight ? bw : max(0.0, set.weightKg)
+                return setSum + effWeight * Double(set.reps)
+            }
+            return sum + itemVol
         }
     }
 
@@ -162,27 +176,34 @@ public final class StrengthBuilderStore: ObservableObject {
         activeExercises.reduce(0) { $0 + $1.sets.filter(\.completed).count }
     }
 
-    public func loadTemplate(_ template: StrengthTemplate, scaleSets: Double = 1.0) {
+    public func loadTemplate(_ template: StrengthTemplate, scaleSets: Double = 1.0, loadMultiplier: Double = 1.0) {
         activeTitle = template.title
+        activeSessionStart = Date()
         let setCount = max(2, Int((3.0 * scaleSets).rounded()))
         activeExercises = template.exerciseIds.compactMap { id in
             guard let ex = allExercises.first(where: { $0.id == id }) else { return nil }
             let rec = bestRecords[ex.id]
-            let defaultWeight = rec?.lastWeightKg ?? (ex.isBodyweight ? 0 : 40)
+            let rawDefaultWeight = rec?.lastWeightKg ?? (ex.isBodyweight ? 0 : 40)
+            let scaledWeight = ex.isBodyweight ? 0 : ((rawDefaultWeight * loadMultiplier / 2.5).rounded() * 2.5)
             let defaultReps = rec?.lastReps ?? 8
             let sets = (0..<setCount).map { _ in
-                StrengthSetItem(weightKg: defaultWeight, reps: defaultReps)
+                StrengthSetItem(weightKg: max(ex.isBodyweight ? 0 : 5, scaledWeight), reps: defaultReps)
             }
             return ActiveBuilderExercise(exercise: ex, sets: sets)
         }
+        saveDraft()
     }
 
     public func addExercise(_ exercise: BevelExercise) {
+        if activeExercises.isEmpty {
+            activeSessionStart = Date()
+        }
         let rec = bestRecords[exercise.id]
         let defaultWeight = rec?.lastWeightKg ?? (exercise.isBodyweight ? 0 : 35)
         let defaultReps = rec?.lastReps ?? 10
         let sets = (0..<3).map { _ in StrengthSetItem(weightKg: defaultWeight, reps: defaultReps) }
         activeExercises.append(ActiveBuilderExercise(exercise: exercise, sets: sets))
+        saveDraft()
     }
 
     public func addCustomExercise(name: String, category: String, primaryMuscle: String, equipment: String, isBodyweight: Bool) {
@@ -204,16 +225,41 @@ public final class StrengthBuilderStore: ObservableObject {
         addExercise(ex)
     }
 
+    public func discardActiveSession() {
+        activeExercises.removeAll()
+        activeTitle = "Custom Session"
+        activeSessionStart = Date()
+        UserDefaults.standard.removeObject(forKey: draftKey)
+    }
+
+    public func deleteCompletedWorkout(id: UUID) {
+        completedWorkouts.removeAll { $0.id == id }
+        persist()
+    }
+
+    public func saveDraft() {
+        if activeExercises.isEmpty {
+            UserDefaults.standard.removeObject(forKey: draftKey)
+            return
+        }
+        let draft = ActiveStrengthDraft(title: activeTitle, startedAt: activeSessionStart, exercises: activeExercises)
+        if let d = try? JSONEncoder().encode(draft) {
+            UserDefaults.standard.set(d, forKey: draftKey)
+        }
+    }
+
     public func finishSession(health: HealthKitManager, durationMinutes: Double) async -> (prCount: Int, calories: Double) {
         var volume = 0.0
         var totalSets = 0
         var totalReps = 0
         var muscleCounts: [String: Int] = [:]
         var prCount = 0
+        var workedExerciseNames: [String] = []
 
         for item in activeExercises {
             let doneSets = item.sets.filter(\.completed)
             guard !doneSets.isEmpty else { continue }
+            workedExerciseNames.append(item.exercise.name)
             totalSets += doneSets.count
             muscleCounts[item.exercise.primaryMuscle, default: 0] += doneSets.count
             if let sec = item.exercise.secondaryMuscle {
@@ -254,10 +300,11 @@ public final class StrengthBuilderStore: ObservableObject {
             totalReps: totalReps,
             durationMinutes: (mins * 10).rounded() / 10,
             calories: kcal.rounded(),
-            muscleSets: muscleCounts
+            muscleSets: muscleCounts,
+            exerciseNames: workedExerciseNames
         )
         completedWorkouts.insert(entry, at: 0)
-        health.strengthStrainBonusToday += Double(totalSets) * 0.45
+        health.addStrengthStrainBonus(Double(totalSets) * 0.45)
         persist()
 
         _ = await health.logWorkout(calories: kcal, durationMinutes: mins, workoutType: .traditionalStrengthTraining)
@@ -274,7 +321,7 @@ public final class StrengthBuilderStore: ObservableObject {
             ],
             "muscleVolumes7d": muscleVolume7Days
         ])
-        activeExercises.removeAll()
+        discardActiveSession()
         return (prCount, kcal)
     }
 
@@ -304,10 +351,11 @@ public final class StrengthBuilderStore: ObservableObject {
             totalReps: reps,
             durationMinutes: 3.0,
             calories: 18.0,
-            muscleSets: [matched.primaryMuscle: 1]
+            muscleSets: [matched.primaryMuscle: 1],
+            exerciseNames: [matched.name]
         )
         completedWorkouts.insert(entry, at: 0)
-        health.strengthStrainBonusToday += 0.45
+        health.addStrengthStrainBonus(0.45)
         persist()
         health.syncEventToMac(extraPayload: [
             "workoutSet": [
@@ -341,6 +389,12 @@ public final class StrengthBuilderStore: ObservableObject {
            let dec = try? JSONDecoder().decode([LoggedStrengthWorkout].self, from: d) {
             completedWorkouts = dec
         }
+        if let d = UserDefaults.standard.data(forKey: draftKey),
+           let draft = try? JSONDecoder().decode(ActiveStrengthDraft.self, from: d) {
+            activeTitle = draft.title
+            activeSessionStart = draft.startedAt
+            activeExercises = draft.exercises
+        }
     }
 
     private func persist() {
@@ -358,9 +412,11 @@ public struct StrengthBuilderView: View {
     @ObservedObject private var store = StrengthBuilderStore.shared
     @ObservedObject private var health = HealthKitManager.shared
     @ObservedObject private var activityMgr = WorkoutActivityManager.shared
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitSystemRaw: String = ApexUnitSystem.metric.rawValue
 
     @State private var showExercisePicker = false
-    @State private var sessionStart = Date()
+    @State private var showOneRMCalculator = false
+    @State private var selectedWorkoutDetail: LoggedStrengthWorkout? = nil
     @State private var finishBanner: String? = nil
     @State private var isFinishing = false
 
@@ -397,10 +453,26 @@ public struct StrengthBuilderView: View {
                 recentWorkoutsCard
             }
         }
+        .onChange(of: store.activeExercises) { _, _ in
+            store.saveDraft()
+        }
         .sheet(isPresented: $showExercisePicker) {
             ExerciseLibraryPickerSheet()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showOneRMCalculator) {
+            OneRMCalculatorSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedWorkoutDetail) { workout in
+            StrengthWorkoutDetailSheet(workout: workout) {
+                store.deleteCompletedWorkout(id: workout.id)
+                selectedWorkoutDetail = nil
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -416,19 +488,34 @@ public struct StrengthBuilderView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    Haptics.tap(.medium)
-                    sessionStart = Date()
-                    store.activeTitle = "Custom Session"
-                    showExercisePicker = true
-                } label: {
-                    Label("Blank", systemImage: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(ApexTheme.accentVolt)
-                        .clipShape(Capsule())
+                HStack(spacing: 8) {
+                    Button {
+                        Haptics.tap()
+                        showOneRMCalculator = true
+                    } label: {
+                        Label("1RM", systemImage: "percent")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ApexTheme.standCyan)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(ApexTheme.elevatedSurface)
+                            .clipShape(Capsule())
+                    }
+
+                    Button {
+                        Haptics.tap(.medium)
+                        store.activeSessionStart = Date()
+                        store.activeTitle = "Custom Session"
+                        showExercisePicker = true
+                    } label: {
+                        Label("Blank", systemImage: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(ApexTheme.accentVolt)
+                            .clipShape(Capsule())
+                    }
                 }
             }
 
@@ -440,7 +527,6 @@ public struct StrengthBuilderView: View {
             ForEach(StrengthTemplate.presets) { tpl in
                 Button {
                     Haptics.tap(.medium)
-                    sessionStart = Date()
                     store.loadTemplate(tpl, scaleSets: readinessScale)
                 } label: {
                     HStack {
@@ -476,22 +562,35 @@ public struct StrengthBuilderView: View {
                 Text(store.activeTitle)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
-                Text("\(store.currentSessionCompletedSets) sets done · \(Int(store.currentSessionVolumeKg)) kg volume")
+                Text("\(store.currentSessionCompletedSets) sets done · \(ApexUnitPreferences.formatWeight(kg: store.currentSessionVolumeKg)) volume")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(ApexTheme.standCyan)
             }
             Spacer()
-            Button {
-                Haptics.tap()
-                showExercisePicker = true
-            } label: {
-                Label("Exercise", systemImage: "plus")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(ApexTheme.accentVolt)
-                    .clipShape(Capsule())
+            HStack(spacing: 8) {
+                Button {
+                    Haptics.tap()
+                    showOneRMCalculator = true
+                } label: {
+                    Image(systemName: "percent")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ApexTheme.standCyan)
+                        .padding(9)
+                        .background(ApexTheme.elevatedSurface)
+                        .clipShape(Circle())
+                }
+                Button {
+                    Haptics.tap()
+                    showExercisePicker = true
+                } label: {
+                    Label("Exercise", systemImage: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(ApexTheme.accentVolt)
+                        .clipShape(Capsule())
+                }
             }
         }
         .appleCard(padding: 16, cornerRadius: 20)
@@ -502,6 +601,7 @@ public struct StrengthBuilderView: View {
         let prevRecord = store.bestRecords[wrapped.exercise.id]
         let bestDone1RM = wrapped.sets.filter(\.completed).map(\.estimated1RM).max() ?? 0
         let hitNewPR = !wrapped.exercise.isBodyweight && prevRecord != nil && bestDone1RM > (prevRecord?.best1RM ?? 0)
+        let weightUnit = ApexUnitPreferences.weightUnitLabel
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -526,7 +626,7 @@ public struct StrengthBuilderView: View {
                 }
                 Spacer()
                 if let rec = prevRecord {
-                    Text(String(format: "Best 1RM %.1f kg", rec.best1RM))
+                    Text("Best 1RM \(ApexUnitPreferences.formatWeight(kg: rec.best1RM))")
                         .font(.system(size: 11, weight: .semibold).monospacedDigit())
                         .foregroundStyle(ApexTheme.standCyan)
                 }
@@ -534,43 +634,69 @@ public struct StrengthBuilderView: View {
 
             ForEach(Array(item.sets.indices), id: \.self) { idx in
                 let isDone = item.sets[idx].wrappedValue.completed
-                HStack(spacing: 8) {
+                let weightBinding = Binding<Double>(
+                    get: {
+                        let v = ApexUnitPreferences.weightValue(kg: item.sets[idx].weightKg.wrappedValue)
+                        return (v * 10).rounded() / 10
+                    },
+                    set: { displayed in
+                        item.sets[idx].weightKg.wrappedValue = max(0, ApexUnitPreferences.kgFromWeightInput(displayed))
+                    }
+                )
+                HStack(spacing: 6) {
                     Text("\(idx + 1)")
                         .font(.system(size: 13, weight: .bold).monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 20)
+                        .frame(width: 18)
 
                     if !wrapped.exercise.isBodyweight {
-                        HStack(spacing: 3) {
-                            TextField("0", value: item.sets[idx].weightKg, format: .number)
+                        HStack(spacing: 2) {
+                            TextField("0", value: weightBinding, format: .number)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.center)
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .frame(width: 54, height: 36)
+                                .frame(width: 50, height: 34)
                                 .background(ApexTheme.elevatedSurface)
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            Text("kg")
-                                .font(.system(size: 11))
+                            Text(weightUnit)
+                                .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                         }
                     } else {
                         Text("BW")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 68)
+                            .frame(width: 64)
                     }
 
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         TextField("0", value: item.sets[idx].reps, format: .number)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.center)
                             .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .frame(width: 48, height: 36)
+                            .frame(width: 42, height: 34)
                             .background(ApexTheme.elevatedSurface)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         Text("reps")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundStyle(.secondary)
+                    }
+
+                    Menu {
+                        ForEach([6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0], id: \.self) { val in
+                            Button(String(format: "RPE %.1f", val)) {
+                                Haptics.selection()
+                                item.sets[idx].rpe.wrappedValue = val
+                            }
+                        }
+                    } label: {
+                        Text(String(format: "RPE %.1g", item.sets[idx].rpe.wrappedValue))
+                            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(ApexTheme.accentAmber)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(ApexTheme.elevatedSurface)
+                            .clipShape(Capsule())
                     }
 
                     Spacer()
@@ -580,14 +706,21 @@ public struct StrengthBuilderView: View {
                         item.sets[idx].completed.wrappedValue.toggle()
                         if item.sets[idx].completed.wrappedValue {
                             item.sets[idx].completedAt.wrappedValue = Date()
-                            activityMgr.startRestCountdown(seconds: 90, reps: item.sets[idx].reps.wrappedValue, elapsedSeconds: Int(Date().timeIntervalSince(sessionStart)))
+                            if !activityMgr.isLiveActivityActive {
+                                activityMgr.startSet(exercise: wrapped.exercise.name)
+                            }
+                            activityMgr.startRestCountdown(
+                                seconds: 90,
+                                reps: item.sets[idx].reps.wrappedValue,
+                                elapsedSeconds: Int(Date().timeIntervalSince(store.activeSessionStart))
+                            )
                         }
                     } label: {
                         Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 24))
                             .foregroundStyle(isDone ? ApexTheme.exerciseLime : .secondary)
                     }
-                    .frame(minWidth: 44, minHeight: 44)
+                    .frame(minWidth: 40, minHeight: 40)
                 }
             }
 
@@ -595,11 +728,21 @@ public struct StrengthBuilderView: View {
                 Button {
                     Haptics.tap()
                     let last = item.sets.wrappedValue.last ?? StrengthSetItem(weightKg: 40, reps: 10)
-                    item.sets.wrappedValue.append(StrengthSetItem(weightKg: last.weightKg, reps: last.reps))
+                    item.sets.wrappedValue.append(StrengthSetItem(weightKg: last.weightKg, reps: last.reps, rpe: last.rpe))
                 } label: {
                     Label("Add Set", systemImage: "plus")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(ApexTheme.standCyan)
+                }
+                if item.sets.wrappedValue.count > 1 {
+                    Button {
+                        Haptics.tap()
+                        _ = item.sets.wrappedValue.popLast()
+                    } label: {
+                        Label("Del Set", systemImage: "minus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Button {
@@ -620,7 +763,8 @@ public struct StrengthBuilderView: View {
         HStack(spacing: 12) {
             Button {
                 Haptics.tap()
-                store.activeExercises.removeAll()
+                activityMgr.endSet()
+                store.discardActiveSession()
             } label: {
                 Text("Discard")
                     .font(.system(size: 15, weight: .semibold))
@@ -634,8 +778,9 @@ public struct StrengthBuilderView: View {
             Button {
                 isFinishing = true
                 Task {
-                    let mins = max(5.0, Date().timeIntervalSince(sessionStart) / 60.0)
+                    let mins = max(5.0, Date().timeIntervalSince(store.activeSessionStart) / 60.0)
                     let res = await store.finishSession(health: health, durationMinutes: mins)
+                    activityMgr.endSet()
                     isFinishing = false
                     Haptics.success()
                     finishBanner = res.prCount > 0
@@ -662,7 +807,7 @@ public struct StrengthBuilderView: View {
 
     private var muscularLoadCard: some View {
         let vol = store.muscleVolume7Days
-        let trackedMuscles = ["Chest", "Lats", "Shoulders", "Quads", "Hamstrings", "Glutes", "Biceps", "Triceps", "Core", "Calves"]
+        let trackedMuscles = ["Chest", "Upper Back", "Lats", "Shoulders", "Quads", "Hamstrings", "Glutes", "Biceps", "Triceps", "Forearms", "Core", "Calves", "Cardio", "Full Body"]
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -718,22 +863,33 @@ public struct StrengthBuilderView: View {
             Text("Strength Logbook")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-            ForEach(store.completedWorkouts.prefix(5)) { w in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(w.title)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                        Text("\(w.completedSets) sets · \(w.totalReps) reps · \(Int(w.totalVolumeKg)) kg")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+            ForEach(store.completedWorkouts.prefix(8)) { w in
+                Button {
+                    Haptics.tap()
+                    selectedWorkoutDetail = w
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(w.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Text("\(w.completedSets) sets · \(w.totalReps) reps · \(ApexUnitPreferences.formatWeight(kg: w.totalVolumeKg))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(Int(w.calories)) kcal")
+                                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(ApexTheme.moveCrimson)
+                            Text(w.date.formatted(date: .abbreviated, time: .omitted))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    Spacer()
-                    Text("\(Int(w.calories)) kcal")
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(ApexTheme.moveCrimson)
+                    .appleCard(padding: 14, cornerRadius: 16)
                 }
-                .appleCard(padding: 14, cornerRadius: 16)
+                .buttonStyle(.plain)
             }
         }
     }
@@ -747,11 +903,14 @@ private struct ExerciseLibraryPickerSheet: View {
     @State private var selectedCat: String = "All"
     @State private var showCustomForm = false
     @State private var customName = ""
+    @State private var customCategory = "Push"
     @State private var customMuscle = "Chest"
     @State private var customEquip = "Dumbbell"
+    @State private var customIsBodyweight = false
 
     private let categories = ["All", "Push", "Pull", "Legs", "Core", "Conditioning"]
-    private let muscles = ["Chest", "Lats", "Shoulders", "Quads", "Hamstrings", "Glutes", "Biceps", "Triceps", "Core"]
+    private let formCategories = ["Push", "Pull", "Legs", "Core", "Conditioning"]
+    private let muscles = ["Chest", "Upper Back", "Lats", "Shoulders", "Quads", "Hamstrings", "Glutes", "Biceps", "Triceps", "Forearms", "Core", "Calves", "Cardio", "Full Body"]
 
     var filtered: [BevelExercise] {
         store.allExercises.filter { ex in
@@ -767,17 +926,21 @@ private struct ExerciseLibraryPickerSheet: View {
                 if showCustomForm {
                     Section("Create Custom Exercise") {
                         TextField("Exercise Name", text: $customName)
+                        Picker("Category", selection: $customCategory) {
+                            ForEach(formCategories, id: \.self) { Text($0) }
+                        }
                         Picker("Primary Muscle", selection: $customMuscle) {
                             ForEach(muscles, id: \.self) { Text($0) }
                         }
                         TextField("Equipment", text: $customEquip)
+                        Toggle("Bodyweight Movement", isOn: $customIsBodyweight)
                         Button("Save & Add to Workout") {
                             store.addCustomExercise(
                                 name: customName,
-                                category: "Push",
+                                category: customCategory,
                                 primaryMuscle: customMuscle,
-                                equipment: customEquip,
-                                isBodyweight: false
+                                equipment: customIsBodyweight ? "Bodyweight" : customEquip,
+                                isBodyweight: customIsBodyweight
                             )
                             customName = ""
                             showCustomForm = false
@@ -846,6 +1009,148 @@ private struct ExerciseLibraryPickerSheet: View {
     }
 }
 
+// MARK: - Brzycki / Epley 1RM & Training Zone Calculator Sheet
+private struct OneRMCalculatorSheet: View {
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitRaw: String = ApexUnitSystem.metric.rawValue
+    @Environment(\.dismiss) private var dismiss
+    @State private var inputWeightKg: Double = 80.0
+    @State private var reps: Int = 5
+
+    private var brzyckiKg: Double {
+        ApexBiometricMath.brzycki1RM(weightKg: inputWeightKg, reps: reps)
+    }
+
+    private var epleyKg: Double {
+        guard inputWeightKg > 0, reps > 0 else { return 0 }
+        return reps == 1 ? inputWeightKg : (inputWeightKg * (1.0 + Double(reps) / 30.0))
+    }
+
+    var body: some View {
+        let _ = unitRaw
+        let unitLabel = ApexUnitPreferences.weightUnitLabel
+        let weightBinding = Binding<Double>(
+            get: { (ApexUnitPreferences.weightValue(kg: inputWeightKg) * 10).rounded() / 10 },
+            set: { inputWeightKg = max(5, min(400, ApexUnitPreferences.kgFromWeightInput($0))) }
+        )
+
+        return NavigationStack {
+            List {
+                Section("Working Set Input") {
+                    HStack {
+                        Text("Load (\(unitLabel))")
+                        Spacer()
+                        TextField("80", value: weightBinding, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                    }
+                    Stepper("Reps Completed: \(reps)", value: $reps, in: 1...20)
+                }
+
+                Section("Estimated 1-Rep Max") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Brzycki 1RM")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Validated for 1–12 rep sets")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(ApexUnitPreferences.formatWeight(kg: brzyckiKg))
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(ApexTheme.accentVolt)
+                    }
+                    HStack {
+                        Text("Epley 1RM")
+                            .font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                        Text(ApexUnitPreferences.formatWeight(kg: epleyKg))
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(ApexTheme.standCyan)
+                    }
+                }
+
+                Section("Percentage Load Zones (Brzycki)") {
+                    ForEach([(95, "Peaking · 1–2 reps"), (90, "Max Strength · 2–4 reps"), (85, "Strength · 4–6 reps"), (80, "Power Hypertrophy · 6–8 reps"), (75, "Hypertrophy · 8–10 reps"), (70, "Metabolic · 10–12 reps"), (60, "Speed / VBT · 0.8–1.0 m/s")], id: \.0) { pct, desc in
+                        let zoneKg = brzyckiKg * Double(pct) / 100.0
+                        HStack {
+                            Text("\(pct)%")
+                                .font(.system(size: 14, weight: .bold).monospacedDigit())
+                                .foregroundStyle(ApexTheme.accentAmber)
+                                .frame(width: 44, alignment: .leading)
+                            Text(desc)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(ApexUnitPreferences.formatWeight(kg: zoneKg))
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("1RM & Zone Calculator")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Strength Workout Logbook Inspector Sheet
+private struct StrengthWorkoutDetailSheet: View {
+    let workout: LoggedStrengthWorkout
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Summary") {
+                    LabeledContent("Date", value: workout.date.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent("Volume", value: ApexUnitPreferences.formatWeight(kg: workout.totalVolumeKg))
+                    LabeledContent("Sets / Reps", value: "\(workout.completedSets) sets · \(workout.totalReps) reps")
+                    LabeledContent("Duration", value: String(format: "%.0f min", workout.durationMinutes))
+                    LabeledContent("Energy Burned", value: "\(Int(workout.calories)) kcal")
+                }
+
+                if let names = workout.exerciseNames, !names.isEmpty {
+                    Section("Exercises Completed") {
+                        ForEach(names, id: \.self) { Text($0) }
+                    }
+                }
+
+                if !workout.muscleSets.isEmpty {
+                    Section("Muscle Groups Targeted") {
+                        ForEach(workout.muscleSets.sorted(by: { $0.value > $1.value }), id: \.key) { muscle, sets in
+                            LabeledContent(muscle, value: "\(sets) sets")
+                        }
+                    }
+                }
+
+                Section {
+                    Button("Delete Workout Entry", role: .destructive) {
+                        onDelete()
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle(workout.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Bevel Adaptive Multi-Week Training Plan View
 public struct AdaptiveTrainingPlanView: View {
     @ObservedObject private var health = HealthKitManager.shared
@@ -867,7 +1172,7 @@ public struct AdaptiveTrainingPlanView: View {
                         Text("Adaptive 4-Week Plan")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white)
-                        Text("Week \(currentWeek) of 4 · Scales daily load to live Readiness & HRV")
+                        Text("Week \(currentWeek) of 4 · Scales sets & load to live Readiness")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
@@ -926,7 +1231,7 @@ public struct AdaptiveTrainingPlanView: View {
                         if item.isToday, let tpl = item.template {
                             Button {
                                 Haptics.tap(.medium)
-                                builder.loadTemplate(tpl, scaleSets: recoveryScaleFactor)
+                                builder.loadTemplate(tpl, scaleSets: recoveryScaleFactor, loadMultiplier: weekLoadMultiplier)
                                 ApexNavigationRouter.shared.requestedTrainSegment = 0
                             } label: {
                                 Text("Load")
@@ -966,6 +1271,15 @@ public struct AdaptiveTrainingPlanView: View {
         }
     }
 
+    private var weekLoadMultiplier: Double {
+        switch currentWeek {
+        case 1: return 1.0
+        case 2: return 1.025
+        case 3: return 1.05
+        default: return 0.85 // Week 4 deload intensity
+        }
+    }
+
     private var recoveryScaleFactor: Double {
         if let delta = health.hrvDeltaPercent, delta <= -15 { return 0.65 }
         if let rdy = health.readinessScore, rdy < 58 { return 0.7 }
@@ -981,11 +1295,11 @@ public struct AdaptiveTrainingPlanView: View {
         if let rdy = health.readinessScore {
             if rdy >= 78 && currentWeek < 4 {
                 title = "Autonomic Green Light · \(rdy)% Readiness"
-                detail = "Prescribing full Week \(currentWeek) progressive overload (+2.5% target load / 2 RIR)."
+                detail = "Prescribing full Week \(currentWeek) progressive overload (+\(Int((weekLoadMultiplier - 1.0) * 100))% load / 2 RIR)."
                 tint = ApexTheme.accentEmerald
             } else if currentWeek == 4 {
                 title = "Deload Week 4 · Recovery Supercompensation"
-                detail = "Volume tapered by 40% while preserving movement velocity cleanly."
+                detail = "Volume tapered by 40% and load trimmed 15% to preserve bar velocity."
                 tint = ApexTheme.standCyan
             } else {
                 title = "Autonomic Guardrail · \(rdy)% Readiness"
@@ -1020,7 +1334,7 @@ public struct AdaptiveTrainingPlanView: View {
         let legs = StrengthTemplate.presets[2]
         let upper = StrengthTemplate.presets[3]
         let full = StrengthTemplate.presets[4]
-        let setHint = currentWeek == 4 ? "2 sets · RPE 6" : "\(2 + min(2, currentWeek - 1))–4 sets · RPE \(7 + min(2, currentWeek - 1))"
+        let setHint = currentWeek == 4 ? "2 sets · RPE 6 (-15% load)" : "\(2 + min(2, currentWeek - 1))–4 sets · RPE \(7 + min(2, currentWeek - 1))"
 
         let base: [(String, String, String, StrengthTemplate?)] = {
             switch selectedGoal {
@@ -1033,6 +1347,16 @@ public struct AdaptiveTrainingPlanView: View {
                     ("Fri", "Upper Power", setHint, upper),
                     ("Sat", "Longevity Full Body", setHint, full),
                     ("Sun", "Active Rest & Sunlight", "8,000+ steps nasal", nil)
+                ]
+            case "Strength & VBT":
+                return [
+                    ("Mon", "Heavy Lower & Squat VBT", "\(setHint) · Stop @ 15% VBT loss", legs),
+                    ("Tue", "Upper Power & Bench VBT", "\(setHint) · 0.55–0.75 m/s target", upper),
+                    ("Wed", "Zone 2 Flush + Dead Hang", "30 min aerobic + grip endurance", nil),
+                    ("Thu", "Pull & Posterior Hinge", "\(setHint) · Explosive concentric", pull),
+                    ("Fri", "Push Overhead & Speed", "\(setHint) · 0.80 m/s dynamic effort", push),
+                    ("Sat", "Longevity Full Body Power", setHint, full),
+                    ("Sun", "Active Rest & Mobility", "Breathwork + sunlight walk", nil)
                 ]
             case "VO₂ Max Engine":
                 return [

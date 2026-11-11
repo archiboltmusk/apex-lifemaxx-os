@@ -26,10 +26,14 @@ public final class ApexWatchConnectivity: NSObject, ObservableObject, WCSessionD
         let session = WCSession.default
         guard session.activationState == .activated else { return }
 
+        let nutrition = NutritionLogStore.shared
         var context: [String: Any] = [
             "updatedAt": Date().timeIntervalSince1970,
             "moveCalories": Int(health.moveCalories),
-            "moveTarget": Int(health.moveTarget)
+            "moveTarget": Int(health.moveTarget),
+            "waterMlToday": Int(nutrition.waterMlToday.rounded()),
+            "waterTargetMl": Int(nutrition.waterTargetMl.rounded()),
+            "unitSystem": ApexUnitPreferences.current.rawValue
         ]
         if let rdy = health.readinessScore { context["readiness"] = rdy }
         if let bank = health.energyBankPercent { context["energyBank"] = bank }
@@ -42,6 +46,7 @@ public final class ApexWatchConnectivity: NSObject, ObservableObject, WCSessionD
         if let hrv = health.heartRateVariability { context["hrv"] = Int(hrv.rounded()) }
         if let rhr = health.restingHeartRate { context["rhr"] = Int(rhr.rounded()) }
         if let sleepNeed = health.sleepNeededHours { context["sleepNeededHours"] = (sleepNeed * 10).rounded() / 10 }
+        if let pace = health.paceOfAging { context["paceOfAging"] = (pace * 100).rounded() / 100 }
 
         try? session.updateApplicationContext(context)
         if session.isReachable {
@@ -89,6 +94,8 @@ public final class ApexWatchConnectivity: NSObject, ObservableObject, WCSessionD
 
     private func handleIncomingWatchPayload(_ payload: [String: Any]) {
         let health = HealthKitManager.shared
+        var shouldPushBack = false
+
         if let ex = payload["watchExercise"] as? String {
             let weight = payload["weightKg"] as? Double ?? 0
             let reps = payload["reps"] as? Int ?? 8
@@ -100,13 +107,30 @@ public final class ApexWatchConnectivity: NSObject, ObservableObject, WCSessionD
                 rpe: rpe,
                 health: health
             )
-            lastWatchSetSummary = "\(ex) · \(Int(weight)) kg × \(reps)"
+            lastWatchSetSummary = "\(ex) · \(ApexUnitPreferences.formatWeight(kg: weight)) × \(reps)"
+            shouldPushBack = true
         }
         if let hrrDrop = payload["watchHrrDropBpm"] as? Int, hrrDrop > 0 {
+            let endBpm = (payload["watchEndBpm"] as? Int) ?? max(40, (payload["watchPeakBpm"] as? Int ?? 120) - hrrDrop)
+            let peakBpm = (payload["watchPeakBpm"] as? Int) ?? (endBpm + hrrDrop)
+            BLEHeartRateMonitor.appendHRR60Record(
+                peakBPM: peakBpm,
+                endBPM: endBpm,
+                dropBpm: hrrDrop,
+                rmssdMs: nil,
+                source: "Apple Watch"
+            )
             health.syncEventToMac(extraPayload: ["hrr60DropBpm": hrrDrop])
         }
         if let hydrationMl = payload["watchWaterMl"] as? Double, hydrationMl > 0 {
             NutritionLogStore.shared.addWater(ml: hydrationMl, health: health)
+            shouldPushBack = true
+        }
+        if payload["watchRequestRefresh"] as? Bool == true {
+            shouldPushBack = true
+        }
+        if shouldPushBack {
+            pushTelemetryToWatch(health: health)
         }
     }
 }

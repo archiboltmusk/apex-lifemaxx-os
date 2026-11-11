@@ -80,7 +80,12 @@ public class HealthKitManager: ObservableObject {
     @Published public var glucoseSamples24h: [HourlyMetricPoint] = []
     @AppStorage("apex_sleep_goal_hours") public var baselineSleepGoalHours: Double = 7.75
     @AppStorage("apex_logged_nap_hours") public var loggedNapHoursToday: Double = 0
+    @AppStorage("apex_logged_nap_day") private var loggedNapDayKey: String = ""
     @AppStorage("apex_strength_load_bonus") public var strengthStrainBonusToday: Double = 0
+    @AppStorage("apex_strength_load_day") private var strengthLoadDayKey: String = ""
+    @AppStorage("apex_offline_activity_day") private var offlineActivityDayKey: String = ""
+    @AppStorage("apex_offline_move_kcal") private var offlineMoveKcalToday: Double = 0
+    @AppStorage("apex_offline_ex_min") private var offlineExerciseMinToday: Double = 0
 
     // Biological & Clinical Epigenetic Age
     @AppStorage("apex_chronological_age") public var chronologicalAge: Double = 26.0
@@ -88,6 +93,7 @@ public class HealthKitManager: ObservableObject {
     @AppStorage("apex_mac_token") public var macSyncToken: String = ""
     @AppStorage("apex_clinical_phenoage") public var clinicalPhenoAgeValue: Double = 0
     @AppStorage("apex_clinical_phenoage_updated") public var clinicalPhenoAgeDateStr: String = ""
+    @AppStorage("apex_hk_authorized") private var wasHKAuthorized: Bool = false
 
     // Mac Companion Continuity & Bonjour Auto-Discovery
     @AppStorage("apex_mac_host") public var macHost: String = "127.0.0.1"
@@ -190,6 +196,58 @@ public class HealthKitManager: ObservableObject {
         return max(18.0, (bio * 10).rounded() / 10)
     }
 
+    public var paceOfAging: Double? {
+        ApexBiometricMath.paceOfAging(
+            chronologicalAge: chronologicalAge,
+            biologicalAge: biologicalAge,
+            clinicalPhenoAge: clinicalPhenoAge,
+            hrv: heartRateVariability,
+            hrvBaseline: hrvBaseline7d,
+            rhr: restingHeartRate,
+            rhrBaseline: rhrBaseline7d,
+            vo2Max: vo2Max,
+            sleepEfficiencyPercent: sleepEfficiencyPercent
+        )
+    }
+
+    public static func currentDayKey() -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    public func ensureDailyCountersAreCurrent() {
+        let today = Self.currentDayKey()
+        if loggedNapDayKey != today {
+            loggedNapDayKey = today
+            loggedNapHoursToday = 0
+        }
+        if strengthLoadDayKey != today {
+            strengthLoadDayKey = today
+            strengthStrainBonusToday = 0
+        }
+        if offlineActivityDayKey != today {
+            offlineActivityDayKey = today
+            offlineMoveKcalToday = 0
+            offlineExerciseMinToday = 0
+        }
+    }
+
+    public func addNapMinutes(_ minutes: Double) {
+        ensureDailyCountersAreCurrent()
+        loggedNapHoursToday = min(3.0, loggedNapHoursToday + max(0, minutes / 60.0))
+        persistWidgetSnapshot()
+        broadcastToMac()
+    }
+
+    public func addStrengthStrainBonus(_ delta: Double) {
+        ensureDailyCountersAreCurrent()
+        strengthStrainBonusToday = min(8.0, strengthStrainBonusToday + max(0, delta))
+        persistWidgetSnapshot()
+        broadcastToMac()
+    }
+
     // MARK: - Bevel Pro Engine: Strain (0–21), Adaptive Target, Intraday Stress, Energy Bank & Sleep Coach
     public var todayStrainScore: Double? {
         ApexBiometricMath.dailyStrain(
@@ -246,21 +304,24 @@ public class HealthKitManager: ObservableObject {
         guard let startBattery = readinessScore else { return [] }
         let cal = Calendar.current
         let todayStart = cal.startOfDay(for: Date())
-        let currentHour = max(7, cal.component(.hour, from: Date()))
-        let wakeHour = 6
+        let wakeMin = UserDefaults.standard.object(forKey: "apex_wake_minutes") as? Int ?? 390
+        let wakeHour = max(4, min(12, wakeMin / 60))
+        let currentHour = max(wakeHour, cal.component(.hour, from: Date()))
         var battery = Double(startBattery)
         let hourlyStress = Dictionary(uniqueKeysWithValues: stressHourlyCurve.map { (cal.component(.hour, from: $0.date), $0.value) })
-        let activeDrainPerHour = min(4.8, (moveCalories / 150.0) / max(1.0, Double(currentHour - wakeHour)))
+        let hoursAwake = max(1.0, Double(currentHour - wakeHour))
+        let activeDrainPerHour = min(4.8, (moveCalories / 150.0) / hoursAwake)
 
         var curve: [HourlyMetricPoint] = []
+        let napApplyHour = max(wakeHour + 1, min(16, currentHour))
         for h in wakeHour...currentHour {
             guard let dt = cal.date(byAdding: .hour, value: h, to: todayStart) else { continue }
             if h > wakeHour {
                 let stressAtH = hourlyStress[h] ?? 28.0
                 let drain = activeDrainPerHour + max(0.3, (stressAtH - 18.0) * 0.08)
                 battery = max(5.0, battery - drain)
-                if loggedNapHoursToday > 0 && h == max(13, min(16, currentHour)) {
-                    battery = min(98.0, battery + loggedNapHoursToday * 14.0)
+                if loggedNapHoursToday > 0 && h == napApplyHour {
+                    battery = min(98.0, battery + loggedNapHoursToday * 18.0)
                 }
             }
             curve.append(HourlyMetricPoint(date: dt, value: battery.rounded(), label: "\(h):00"))
@@ -329,12 +390,19 @@ public class HealthKitManager: ObservableObject {
 
     private init() {
         self.isAvailable = HKHealthStore.isHealthDataAvailable()
+        ensureDailyCountersAreCurrent()
+        loadPersistedLocalFallbacks()
         if isAvailable {
-            self.connectionState = .needsPermission
-            self.statusLabel = "Connect Apple Health"
+            if wasHKAuthorized {
+                self.connectionState = .connected
+                self.statusLabel = "Live HealthKit"
+            } else {
+                self.connectionState = .needsPermission
+                self.statusLabel = "Connect Apple Health"
+            }
         } else {
             self.connectionState = .unavailable
-            self.statusLabel = "Health Data Unavailable"
+            self.statusLabel = "On-Device Storage"
         }
         startBonjourDiscovery()
         persistWidgetSnapshot()
@@ -352,6 +420,9 @@ public class HealthKitManager: ObservableObject {
         readTypes.insert(HKObjectType.activitySummaryType())
         if let mindful = HKObjectType.categoryType(forIdentifier: .mindfulSession) {
             readTypes.insert(mindful)
+        }
+        if let standCat = HKObjectType.categoryType(forIdentifier: .appleStandHour) {
+            readTypes.insert(standCat)
         }
 
         var quantityIds: [HKQuantityTypeIdentifier] = [
@@ -375,6 +446,7 @@ public class HealthKitManager: ObservableObject {
             .dietaryFatTotal,
             .dietaryFiber,
             .dietarySugar,
+            .dietarySodium,
             .dietaryWater,
             .dietaryCaffeine
         ]
@@ -405,6 +477,7 @@ public class HealthKitManager: ObservableObject {
             .dietaryFatTotal,
             .dietaryFiber,
             .dietarySugar,
+            .dietarySodium,
             .dietaryWater,
             .dietaryCaffeine
         ]
@@ -426,6 +499,7 @@ public class HealthKitManager: ObservableObject {
             Task { @MainActor in
                 guard let self = self else { return }
                 if success {
+                    self.wasHKAuthorized = true
                     self.connectionState = .connected
                     self.statusLabel = "Live HealthKit"
                     self.startRealtimeObserverQueries()
@@ -471,6 +545,7 @@ public class HealthKitManager: ObservableObject {
 
     // MARK: - Fetch Real ActivitySummary, Sleep Architecture, Vitals & 7-Day Baselines
     public func fetchLiveHealthMetrics() {
+        ensureDailyCountersAreCurrent()
         guard isAvailable else { return }
 
         let calendar = Calendar.current
@@ -497,12 +572,17 @@ public class HealthKitManager: ObservableObject {
                     let stand = summary.appleStandHours.doubleValue(for: .count())
                     let standGoal = max(4, summary.appleStandHoursGoal.doubleValue(for: .count()))
 
-                    self.moveCalories = move
+                    self.moveCalories = max(move, self.offlineMoveKcalToday)
                     self.moveTarget = moveGoal
-                    self.exerciseMinutes = ex
+                    self.exerciseMinutes = max(ex, self.offlineExerciseMinToday)
                     self.exerciseTarget = exGoal
                     self.standHours = stand
                     self.standTarget = standGoal
+                    if self.connectionState != .connected {
+                        self.connectionState = .connected
+                        self.statusLabel = "Live HealthKit"
+                        self.wasHKAuthorized = true
+                    }
                     self.persistWidgetSnapshot()
                     self.broadcastToMac()
                 } else {
@@ -603,9 +683,15 @@ public class HealthKitManager: ObservableObject {
             let query = HKStatisticsQuery(quantityType: energyType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
                 let kcal = stats?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
                 Task { @MainActor in
-                    self?.moveCalories = kcal
-                    self?.persistWidgetSnapshot()
-                    self?.broadcastToMac()
+                    guard let self = self else { return }
+                    self.moveCalories = max(kcal, self.offlineMoveKcalToday)
+                    if kcal > 0, self.connectionState != .connected {
+                        self.connectionState = .connected
+                        self.statusLabel = "Live HealthKit"
+                        self.wasHKAuthorized = true
+                    }
+                    self.persistWidgetSnapshot()
+                    self.broadcastToMac()
                 }
             }
             healthStore.execute(query)
@@ -614,17 +700,35 @@ public class HealthKitManager: ObservableObject {
             let query = HKStatisticsQuery(quantityType: exType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
                 let mins = stats?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
                 Task { @MainActor in
-                    self?.exerciseMinutes = mins
-                    self?.persistWidgetSnapshot()
+                    guard let self = self else { return }
+                    self.exerciseMinutes = max(mins, self.offlineExerciseMinToday)
+                    self.persistWidgetSnapshot()
                 }
             }
             healthStore.execute(query)
         }
-        if let standType = HKObjectType.quantityType(forIdentifier: .appleStandTime) {
+        if let standCatType = HKObjectType.categoryType(forIdentifier: .appleStandHour) {
+            let query = HKSampleQuery(sampleType: standCatType, predicate: todayPredicate, limit: 48, sortDescriptors: nil) { [weak self] _, samples, _ in
+                let catSamples = (samples as? [HKCategorySample]) ?? []
+                let cal = Calendar.current
+                var stoodHours = Set<Int>()
+                for s in catSamples where s.value == HKCategoryValueAppleStandHour.stood.rawValue {
+                    stoodHours.insert(cal.component(.hour, from: s.startDate))
+                }
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    if !stoodHours.isEmpty {
+                        self.standHours = Double(stoodHours.count)
+                        self.persistWidgetSnapshot()
+                    }
+                }
+            }
+            healthStore.execute(query)
+        } else if let standType = HKObjectType.quantityType(forIdentifier: .appleStandTime) {
             let query = HKStatisticsQuery(quantityType: standType, quantitySamplePredicate: todayPredicate, options: .cumulativeSum) { [weak self] _, stats, _ in
                 let mins = stats?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
                 Task { @MainActor in
-                    self?.standHours = floor(mins / 5.0)
+                    self?.standHours = min(24.0, (mins / 60.0 * 10.0).rounded() / 10.0)
                     self?.persistWidgetSnapshot()
                 }
             }
@@ -652,6 +756,7 @@ public class HealthKitManager: ObservableObject {
         fatG: Double,
         fiberG: Double = 0,
         sugarG: Double = 0,
+        sodiumMg: Double = 0,
         waterMl: Double = 0,
         caffeineMg: Double = 0,
         date: Date = Date()
@@ -670,11 +775,37 @@ public class HealthKitManager: ObservableObject {
         addSample(.dietaryFatTotal, .gram(), fatG)
         addSample(.dietaryFiber, .gram(), fiberG)
         addSample(.dietarySugar, .gram(), sugarG)
+        addSample(.dietarySodium, .gramUnit(with: .milli), sodiumMg)
         addSample(.dietaryWater, .literUnit(with: .milli), waterMl)
         addSample(.dietaryCaffeine, .gramUnit(with: .milli), caffeineMg)
 
         if !samples.isEmpty {
             try? await healthStore.save(samples)
+        }
+    }
+
+    private let manualGlucoseStorageKey = "apex_ios_manual_glucose_v1"
+
+    private func loadPersistedLocalFallbacks() {
+        ensureDailyCountersAreCurrent()
+        if moveCalories == 0 && offlineMoveKcalToday > 0 {
+            moveCalories = offlineMoveKcalToday
+        }
+        if exerciseMinutes == 0 && offlineExerciseMinToday > 0 {
+            exerciseMinutes = offlineExerciseMinToday
+        }
+        if let data = UserDefaults.standard.data(forKey: manualGlucoseStorageKey),
+           let decoded = try? JSONDecoder().decode([HourlyMetricPoint].self, from: data) {
+            let cutoff = Date().addingTimeInterval(-86400)
+            glucoseSamples24h = decoded.filter { $0.date >= cutoff }.sorted { $0.date < $1.date }
+        }
+    }
+
+    private func saveManualGlucose(_ points: [HourlyMetricPoint]) {
+        let cutoff = Date().addingTimeInterval(-86400)
+        let recent = Array(points.filter { $0.date >= cutoff }.suffix(120))
+        if let data = try? JSONEncoder().encode(recent) {
+            UserDefaults.standard.set(data, forKey: manualGlucoseStorageKey)
         }
     }
 
@@ -688,6 +819,14 @@ public class HealthKitManager: ObservableObject {
         let point = HourlyMetricPoint(date: date, value: mgPerDl.rounded(), label: date.formatted(date: .omitted, time: .shortened))
         glucoseSamples24h.append(point)
         glucoseSamples24h.sort { $0.date < $1.date }
+
+        var existingManual: [HourlyMetricPoint] = []
+        if let data = UserDefaults.standard.data(forKey: manualGlucoseStorageKey),
+           let decoded = try? JSONDecoder().decode([HourlyMetricPoint].self, from: data) {
+            existingManual = decoded
+        }
+        existingManual.append(point)
+        saveManualGlucose(existingManual)
         syncEventToMac(extraPayload: ["glucoseLatest": mgPerDl])
     }
 
@@ -725,7 +864,7 @@ public class HealthKitManager: ObservableObject {
         let start = cal.startOfDay(for: now)
         let pred = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
-        let query = HKSampleQuery(sampleType: type, predicate: pred, limit: 350, sortDescriptors: [sort]) { _, samples, _ in
+        let query = HKSampleQuery(sampleType: type, predicate: pred, limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, _ in
             let pts = (samples as? [HKQuantitySample] ?? []).map { s in
                 HourlyMetricPoint(
                     date: s.startDate,
@@ -754,8 +893,19 @@ public class HealthKitManager: ObservableObject {
                 )
             }
             Task { @MainActor in
-                if !pts.isEmpty {
-                    self?.glucoseSamples24h = pts
+                guard let self = self else { return }
+                var combined = pts
+                if let data = UserDefaults.standard.data(forKey: self.manualGlucoseStorageKey),
+                   let manual = try? JSONDecoder().decode([HourlyMetricPoint].self, from: data) {
+                    let cutoff = Date().addingTimeInterval(-86400)
+                    for m in manual where m.date >= cutoff {
+                        if !combined.contains(where: { abs($0.date.timeIntervalSince(m.date)) < 60 && abs($0.value - m.value) < 2 }) {
+                            combined.append(m)
+                        }
+                    }
+                }
+                if !combined.isEmpty {
+                    self.glucoseSamples24h = combined.sorted { $0.date < $1.date }
                 }
             }
         }
@@ -1002,17 +1152,80 @@ public class HealthKitManager: ObservableObject {
             self.fetchLiveHealthMetrics()
             return true
         } catch {
-            self.moveCalories += calories
-            self.exerciseMinutes += durationMinutes
+            ensureDailyCountersAreCurrent()
+            offlineMoveKcalToday += calories
+            offlineExerciseMinToday += durationMinutes
+            self.moveCalories = max(self.moveCalories, self.offlineMoveKcalToday)
+            self.exerciseMinutes = max(self.exerciseMinutes, self.offlineExerciseMinToday)
             self.persistWidgetSnapshot()
             self.broadcastToMac()
             return false
         }
     }
 
+    /// Standalone iPhone ingestion hook for parsed Apple Health `export.xml` history.
+    public func applyImportedAppleHealthSnapshot(
+        hrvPoints: [DailyMetricPoint],
+        rhrPoints: [DailyMetricPoint],
+        vo2Points: [DailyMetricPoint],
+        sleepPoints: [DailyMetricPoint],
+        movePoints: [DailyMetricPoint],
+        weightPoints: [DailyMetricPoint],
+        latestHRV: Double?,
+        latestRHR: Double?,
+        latestVO2: Double?,
+        latestWeightKg: Double?,
+        latestBodyFatPct: Double?,
+        latestSleepHours: Double?,
+        latestDeepHours: Double?,
+        latestRemHours: Double?,
+        latestCoreHours: Double?,
+        latestAwakeHours: Double?,
+        latestSpO2: Double?,
+        latestRespRate: Double?,
+        latestGlucoseMgDl: Double?
+    ) {
+        if !hrvPoints.isEmpty { hrvHistory = hrvPoints }
+        if !rhrPoints.isEmpty { rhrHistory = rhrPoints }
+        if !vo2Points.isEmpty { vo2History = vo2Points }
+        if !sleepPoints.isEmpty { sleepHistory = sleepPoints }
+        if !movePoints.isEmpty { moveHistory = movePoints }
+        if !weightPoints.isEmpty { weightHistory = weightPoints }
+
+        if let v = latestHRV { heartRateVariability = v }
+        if let v = latestRHR { restingHeartRate = v }
+        if let v = latestVO2 { vo2Max = v }
+        if let v = latestWeightKg { bodyWeightKg = v }
+        if let v = latestBodyFatPct { bodyFatPercent = v }
+        if let v = latestSleepHours { sleepTotalHours = v }
+        if let v = latestDeepHours { sleepDeepHours = v }
+        if let v = latestRemHours { sleepRemHours = v }
+        if let v = latestCoreHours { sleepCoreHours = v }
+        if let v = latestAwakeHours { sleepAwakeHours = v }
+        if let v = latestSpO2 { bloodOxygenPercent = v }
+        if let v = latestRespRate { respiratoryRateBpm = v }
+        if let g = latestGlucoseMgDl {
+            let pt = HourlyMetricPoint(date: Date(), value: g.rounded(), label: "XML Import")
+            glucoseSamples24h.append(pt)
+            saveManualGlucose(glucoseSamples24h)
+        }
+        connectionState = .connected
+        statusLabel = "Apple Health XML + Live"
+        persistWidgetSnapshot()
+        broadcastToMac()
+    }
+
     // MARK: - Shared WidgetKit Snapshot Writer
     public func persistWidgetSnapshot() {
         let bestHang = UserDefaults.standard.integer(forKey: "apex_best_deadhang_sec")
+        let todayKey = Self.currentDayKey()
+        let waterMl = (UserDefaults.standard.string(forKey: "apex_ios_hydration_day_v1") == todayKey)
+            ? UserDefaults.standard.double(forKey: "apex_ios_water_today_v1")
+            : 0
+        let cafMg = (UserDefaults.standard.string(forKey: "apex_ios_hydration_day_v1") == todayKey)
+            ? UserDefaults.standard.double(forKey: "apex_ios_caffeine_today_v1")
+            : 0
+        let sunlightToday = ExperimentLabStore.shared.dailyTagsToday.contains("sunlight")
         let snapshot = ApexWidgetSnapshot(
             moveCalories: moveCalories,
             moveTarget: moveTarget,
@@ -1031,6 +1244,10 @@ public class HealthKitManager: ObservableObject {
             clinicalPhenoAge: clinicalPhenoAge,
             deadHangBestSec: bestHang,
             dailySteps: dailySteps,
+            waterMlToday: waterMl,
+            caffeineMgToday: cafMg,
+            sunlightLoggedToday: sunlightToday,
+            paceOfAging: paceOfAging,
             updatedAt: Date()
         )
         ApexSnapshotStore.save(snapshot)

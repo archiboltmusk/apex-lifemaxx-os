@@ -24,6 +24,7 @@
 		9C1B4E9433EC722D0B00C707 /* DesignSystem.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = D395890CBF1C08B7FD55B5AD /* DesignSystem.swift */; };
 		F30EDCBE486A87D10E699A68 /* ExperimentLabView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = DFA17EB20881036CBF27B481 /* ExperimentLabView.swift */; };
 		EFCCC31CE77FCBDAF4C7101A /* FaceScanView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 644B1B6155F80922718D2780 /* FaceScanView.swift */; };
+		76FC9FDE8D0BA7707A5174AF /* HealthExportXMLImporter.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = C6F7180F2E55E503EDA8F753 /* HealthExportXMLImporter.swift */; };
 		272AB9AAAF352FF7B7A6B908 /* HealthKitManager.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 05B5DDC31AC39948A69ECF40 /* HealthKitManager.swift */; };
 		000C823D7E8E46238F3049C2 /* LongevityView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = A62D3F46AAF28BA81C66E975 /* LongevityView.swift */; };
 		140F4DAC88259E06F7DB7EE6 /* NutritionCGMView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 1B0F993C3F07D7F5C68E0CF0 /* NutritionCGMView.swift */; };
@@ -32,6 +33,7 @@
 		61FD4D8951C65850636F99F7 /* SpatialPostureHapticsEngine.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 9DB708E35C8B329E3DAFCE37 /* SpatialPostureHapticsEngine.swift */; };
 		AF8B879C2FCFB3ACA9CC9931 /* StrengthBuilderView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = FF53872D49950BB18133A67D /* StrengthBuilderView.swift */; };
 		527CA2D898A393771A18A472 /* SummaryView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = B22834A745015328075BC724 /* SummaryView.swift */; };
+		3E59A24D255C64B68865829C /* ThermalAndBrainSuiteView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = B63A1555DD235C1FC12A6A2A /* ThermalAndBrainSuiteView.swift */; };
 		F1E269D8AFA45A6520656088 /* TrueDepthTwinView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 7C4D4E80F948F01F1CAB66D3 /* TrueDepthTwinView.swift */; };
 		28F180FE32270CA994275DB1 /* VoiceBiomarkerView.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = BB2F770BA1CAE29E366AD813 /* VoiceBiomarkerView.swift */; };
 		B3598624ED0B21A690EE9131 /* WorkoutActivityManager.swift in APEX_iOS_Sources */ = {isa = PBXBuildFile; fileRef = 9977483F3B27A264251C5E93 /* WorkoutActivityManager.swift */; };
@@ -105,6 +107,7 @@
 		D395890CBF1C08B7FD55B5AD /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignSystem.swift"; sourceTree = "<group>"; };
 		DFA17EB20881036CBF27B481 /* ExperimentLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ExperimentLabView.swift"; sourceTree = "<group>"; };
 		644B1B6155F80922718D2780 /* FaceScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FaceScanView.swift"; sourceTree = "<group>"; };
+		C6F7180F2E55E503EDA8F753 /* HealthExportXMLImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HealthExportXMLImporter.swift"; sourceTree = "<group>"; };
 		05B5DDC31AC39948A69ECF40 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HealthKitManager.swift"; sourceTree = "<group>"; };
 		A62D3F46AAF28BA81C66E975 /* LongevityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LongevityView.swift"; sourceTree = "<group>"; };
 		1B0F993C3F07D7F5C68E0CF0 /* NutritionCGMView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NutritionCGMView.swift"; sourceTree = "<group>"; };
@@ -113,6 +116,7 @@
 		9DB708E35C8B329E3DAFCE37 /* SpatialPostureHapticsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SpatialPostureHapticsEngine.swift"; sourceTree = "<group>"; };
 		FF53872D49950BB18133A67D /* StrengthBuilderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StrengthBuilderView.swift"; sourceTree = "<group>"; };
 		B22834A745015328075BC724 /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SummaryView.swift"; sourceTree = "<group>"; };
+		B63A1555DD235C1FC12A6A2A /* ThermalAndBrainSuiteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ThermalAndBrainSuiteView.swift"; sourceTree = "<group>"; };
 		7C4D4E80F948F01F1CAB66D3 /* TrueDepthTwinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TrueDepthTwinView.swift"; sourceTree = "<group>"; };
 		BB2F770BA1CAE29E366AD813 /* VoiceBiomarkerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceBiomarkerView.swift"; sourceTree = "<group>"; };
 		9977483F3B27A264251C5E93 /* WorkoutActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkoutActivityManager.swift"; sourceTree = "<group>"; };
@@ -123,7 +127,9 @@
 		3FB6BD64A997C517BC11CC6E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
 		7A319D5730FCA08BE486FE5D /* APEX_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "APEX_iOS.entitlements"; sourceTree = "<group>"; };
 		E04CE310A1E19C383AA5B02B /* Widgets/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Widgets/Info.plist"; sourceTree = "<group>"; };
+		6E6F90A77DDDC837225F09D1 /* Widgets/APEXWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Widgets/APEXWidgets.entitlements"; sourceTree = "<group>"; };
 		3609CF3AF34F0A5C8EF447C9 /* Watch/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Watch/Info.plist"; sourceTree = "<group>"; };
+		F0D7EEA81CC6DA1C4DDD35E8 /* Watch/APEXWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Watch/APEXWatch.entitlements"; sourceTree = "<group>"; };
 		0550FDA0774F736EBFB3035E /* APEX_iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "APEX_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		8397CC00EB22AB0810985D10 /* APEXWidgets.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = "APEXWidgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB92CACF367999BA73AFFD33 /* APEXWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "APEXWatch.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -160,6 +166,7 @@
 				D395890CBF1C08B7FD55B5AD /* DesignSystem.swift */,
 				DFA17EB20881036CBF27B481 /* ExperimentLabView.swift */,
 				644B1B6155F80922718D2780 /* FaceScanView.swift */,
+				C6F7180F2E55E503EDA8F753 /* HealthExportXMLImporter.swift */,
 				05B5DDC31AC39948A69ECF40 /* HealthKitManager.swift */,
 				A62D3F46AAF28BA81C66E975 /* LongevityView.swift */,
 				1B0F993C3F07D7F5C68E0CF0 /* NutritionCGMView.swift */,
@@ -168,6 +175,7 @@
 				9DB708E35C8B329E3DAFCE37 /* SpatialPostureHapticsEngine.swift */,
 				FF53872D49950BB18133A67D /* StrengthBuilderView.swift */,
 				B22834A745015328075BC724 /* SummaryView.swift */,
+				B63A1555DD235C1FC12A6A2A /* ThermalAndBrainSuiteView.swift */,
 				7C4D4E80F948F01F1CAB66D3 /* TrueDepthTwinView.swift */,
 				BB2F770BA1CAE29E366AD813 /* VoiceBiomarkerView.swift */,
 				9977483F3B27A264251C5E93 /* WorkoutActivityManager.swift */,
@@ -183,6 +191,8 @@
 				BE84BE759602725A2CDA4EC2 /* Widgets/ApexWidgetIntents.swift */,
 				DB71739A105B2CE3E0FA2123 /* Widgets/ApexWidgets.swift */,
 				E04CE310A1E19C383AA5B02B /* Widgets/Info.plist */,
+				6E6F90A77DDDC837225F09D1 /* Widgets/APEXWidgets.entitlements */,
+				E04CE310A1E19C383AA5B02B /* Widgets/Info.plist */,
 			);
 			sourceTree = "<group>";
 		};
@@ -191,6 +201,7 @@
 			children = (
 				7AC01893ABBB85A07102CE07 /* Watch/APEXWatchApp.swift */,
 				3609CF3AF34F0A5C8EF447C9 /* Watch/Info.plist */,
+				F0D7EEA81CC6DA1C4DDD35E8 /* Watch/APEXWatch.entitlements */,
 			);
 			sourceTree = "<group>";
 		};
@@ -320,6 +331,7 @@
 				9C1B4E9433EC722D0B00C707,
 				F30EDCBE486A87D10E699A68,
 				EFCCC31CE77FCBDAF4C7101A,
+				76FC9FDE8D0BA7707A5174AF,
 				272AB9AAAF352FF7B7A6B908,
 				000C823D7E8E46238F3049C2,
 				140F4DAC88259E06F7DB7EE6,
@@ -328,6 +340,7 @@
 				61FD4D8951C65850636F99F7,
 				AF8B879C2FCFB3ACA9CC9931,
 				527CA2D898A393771A18A472,
+				3E59A24D255C64B68865829C,
 				F1E269D8AFA45A6520656088,
 				28F180FE32270CA994275DB1,
 				B3598624ED0B21A690EE9131,
@@ -443,6 +456,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/APEXWidgets.entitlements;
 				INFOPLIST_FILE = Widgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -461,6 +475,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/APEXWidgets.entitlements;
 				INFOPLIST_FILE = Widgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -478,6 +493,7 @@
 		F5BAF4B2BDA9887CF15D2A30 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Watch/APEXWatch.entitlements;
 				INFOPLIST_FILE = Watch/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -492,6 +508,7 @@
 		21DA6EB792355EB03B5DF577 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Watch/APEXWatch.entitlements;
 				INFOPLIST_FILE = Watch/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";

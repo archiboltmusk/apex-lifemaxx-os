@@ -801,6 +801,18 @@ private struct FaceCompareSheet: View {
                                 delta: latest.symmetryPercent - baseline.symmetryPercent,
                                 unit: "%"
                             )
+                            let parseTilt: (String) -> Double? = { s in
+                                Double(s.replacingOccurrences(of: "°", with: "").replacingOccurrences(of: "+", with: "").trimmingCharacters(in: .whitespaces))
+                            }
+                            if let t0 = parseTilt(baseline.canthalTilt), let t1 = parseTilt(latest.canthalTilt) {
+                                deltaRow(
+                                    label: "Canthal Tilt",
+                                    base: baseline.canthalTilt,
+                                    current: latest.canthalTilt,
+                                    delta: t1 - t0,
+                                    unit: "°"
+                                )
+                            }
                             deltaRow(
                                 label: "Midface Ratio",
                                 base: String(format: "%.2f", baseline.midfaceRatio),
@@ -815,6 +827,24 @@ private struct FaceCompareSheet: View {
                                 delta: latest.fwhrRatio - baseline.fwhrRatio,
                                 unit: ""
                             )
+                            if let g0 = baseline.gonialAngleDeg, let g1 = latest.gonialAngleDeg {
+                                deltaRow(
+                                    label: "Gonial Jaw Angle",
+                                    base: String(format: "%.1f°", g0),
+                                    current: String(format: "%.1f°", g1),
+                                    delta: g1 - g0,
+                                    unit: "°"
+                                )
+                            }
+                            if let p0 = baseline.forwardProjectionScore, let p1 = latest.forwardProjectionScore {
+                                deltaRow(
+                                    label: "Forward Projection",
+                                    base: String(format: "%.0f", p0),
+                                    current: String(format: "%.0f", p1),
+                                    delta: p1 - p0,
+                                    unit: ""
+                                )
+                            }
                         }
 
                         HStack {
@@ -884,43 +914,64 @@ private struct TrueDepth3DScanSheet: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                TrueDepthARViewRepresentable(coordinator: arCoordinator)
-                    .ignoresSafeArea(edges: .bottom)
+                if ARFaceTrackingConfiguration.isSupported {
+                    TrueDepthARViewRepresentable(coordinator: arCoordinator)
+                        .ignoresSafeArea(edges: .bottom)
+                }
 
                 VStack {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        HStack {
-                            Text(arCoordinator.faceDetected ? "TrueDepth Mesh Locked" : "Position Face in TrueDepth Cone")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(arCoordinator.faceDetected ? ApexTheme.accentEmerald : .white)
-                            Spacer()
-                            if let mm = arCoordinator.interPupillaryMm {
-                                Text("IPD \(String(format: "%.1f mm", mm))")
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundStyle(ApexTheme.standCyan)
-                            }
+                    if !ARFaceTrackingConfiguration.isSupported {
+                        Spacer()
+                        VStack(spacing: 12) {
+                            Image(systemName: "faceid")
+                                .font(.system(size: 42))
+                                .foregroundStyle(ApexTheme.standCyan)
+                            Text("TrueDepth Hardware Required")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("TrueDepth infrared 3D millimeter geometry requires a physical iPhone with Face ID. Use 2D Optical Scan or Photo Import on this device.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
-
-                        Button {
-                            if let rec = arCoordinator.snapshotRecord() {
-                                Haptics.success()
-                                onCaptured(rec)
-                                dismiss()
-                            }
-                        } label: {
-                            Text("Capture 3D Millimeter Scan")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(arCoordinator.faceDetected ? ApexTheme.accentVolt : ApexTheme.elevatedSurface)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        }
-                        .disabled(!arCoordinator.faceDetected)
+                        .appleCard(padding: 20, cornerRadius: 22)
+                        .padding(20)
                     }
-                    .appleCard(padding: 16, cornerRadius: 22)
-                    .padding(16)
+                    Spacer()
+                    if ARFaceTrackingConfiguration.isSupported {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Text(arCoordinator.faceDetected ? "TrueDepth Mesh Locked" : "Position Face in TrueDepth Cone")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(arCoordinator.faceDetected ? ApexTheme.accentEmerald : .white)
+                                Spacer()
+                                if let mm = arCoordinator.interPupillaryMm {
+                                    Text("IPD \(String(format: "%.1f mm", mm))")
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        .foregroundStyle(ApexTheme.standCyan)
+                                }
+                            }
+
+                            Button {
+                                if let rec = arCoordinator.snapshotRecord() {
+                                    Haptics.success()
+                                    onCaptured(rec)
+                                    dismiss()
+                                }
+                            } label: {
+                                Text("Capture 3D Millimeter Scan")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(arCoordinator.faceDetected ? ApexTheme.accentVolt : ApexTheme.elevatedSurface)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            .disabled(!arCoordinator.faceDetected)
+                        }
+                        .appleCard(padding: 16, cornerRadius: 22)
+                        .padding(16)
+                    }
                 }
             }
             .navigationTitle("TrueDepth 3D")
@@ -958,14 +1009,15 @@ private final class TrueDepthCoordinator: NSObject, ObservableObject, ARSessionD
 
         guard let obs = req.results?.first, let lm = obs.landmarks else { return }
         let bbox = obs.boundingBox
-        let leftEye = lm.leftEye?.normalizedPoints ?? []
-        let rightEye = lm.rightEye?.normalizedPoints ?? []
-        let outerLips = lm.outerLips?.normalizedPoints ?? []
-        let lPupil = lm.leftPupil?.normalizedPoints.first
-        let rPupil = lm.rightPupil?.normalizedPoints.first
-        let leftBrow = lm.leftEyebrow?.normalizedPoints ?? []
-        let noseCrest = lm.noseCrest?.normalizedPoints ?? []
-        let contour = lm.faceContour?.normalizedPoints ?? []
+        func flipPt(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: 1.0 - p.y) }
+        let leftEye = (lm.leftEye?.normalizedPoints ?? []).map(flipPt)
+        let rightEye = (lm.rightEye?.normalizedPoints ?? []).map(flipPt)
+        let outerLips = (lm.outerLips?.normalizedPoints ?? []).map(flipPt)
+        let lPupil = lm.leftPupil?.normalizedPoints.first.map(flipPt)
+        let rPupil = lm.rightPupil?.normalizedPoints.first.map(flipPt)
+        let leftBrow = (lm.leftEyebrow?.normalizedPoints ?? []).map(flipPt)
+        let noseCrest = (lm.noseCrest?.normalizedPoints ?? []).map(flipPt)
+        let contour = (lm.faceContour?.normalizedPoints ?? []).map(flipPt)
 
         var tiltSum = 0.0, tiltCount = 0.0
         if leftEye.count >= 4 {
@@ -996,10 +1048,10 @@ private final class TrueDepthCoordinator: NSObject, ObservableObject, ARSessionD
 
         var thirdsLabel: String? = nil
         if let browY = (leftBrow.isEmpty ? nil : leftBrow.map(\.y).reduce(0, +) / CGFloat(leftBrow.count)),
-           let noseBaseY = noseCrest.min(by: { $0.y < $1.y })?.y,
-           let chinY = contour.min(by: { $0.y < $1.y })?.y {
-            let midThird = abs(browY - noseBaseY)
-            let lowerThird = abs(noseBaseY - chinY)
+           let noseBaseY = noseCrest.max(by: { $0.y < $1.y })?.y,
+           let chinY = contour.max(by: { $0.y < $1.y })?.y {
+            let midThird = abs(noseBaseY - browY)
+            let lowerThird = abs(chinY - noseBaseY)
             if midThird > 0.02 && lowerThird > 0.02 {
                 let ratio = midThird / lowerThird
                 thirdsLabel = ratio < 0.88 ? "Strong Lower Third" : (ratio > 1.14 ? "Longer Midface" : "Balanced")
@@ -1195,6 +1247,7 @@ private class FaceVisionController: NSObject, ObservableObject, AVCaptureVideoDa
     let session = AVCaptureSession()
 
     private let videoQueue = DispatchQueue(label: "apex.face.vision.queue", qos: .userInteractive)
+    private let ciContext = CIContext()
     private var isConfigured = false
     private var latestSampleImage: UIImage? = nil
     private var pendingCaptureCompletion: ((UIImage?) -> Void)? = nil
@@ -1276,8 +1329,7 @@ private class FaceVisionController: NSObject, ObservableObject, AVCaptureVideoDa
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        if let cgImage = context.createCGImage(ciImage, from: ciImage.extent) {
+        if let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) {
             let uiImage = UIImage(cgImage: cgImage)
             self.latestSampleImage = uiImage
             if let pending = self.pendingCaptureCompletion {
@@ -1472,10 +1524,10 @@ private class FaceVisionController: NSObject, ObservableObject, AVCaptureVideoDa
         var facialThirdsLabel = "Proportion Pending"
         if !leftEyebrow.isEmpty && !noseCrest.isEmpty && !contour.isEmpty {
             let browY = leftEyebrow.map(\.y).reduce(0, +) / CGFloat(leftEyebrow.count)
-            let noseBaseY = noseCrest.min(by: { $0.y < $1.y })?.y ?? browY
-            let chinY = contour.min(by: { $0.y < $1.y })?.y ?? noseBaseY
-            let midThird = abs(browY - noseBaseY)
-            let lowerThird = abs(noseBaseY - chinY)
+            let noseBaseY = noseCrest.max(by: { $0.y < $1.y })?.y ?? browY
+            let chinY = contour.max(by: { $0.y < $1.y })?.y ?? noseBaseY
+            let midThird = abs(noseBaseY - browY)
+            let lowerThird = abs(chinY - noseBaseY)
             if midThird > 0.02 && lowerThird > 0.02 {
                 let ratio = midThird / lowerThird
                 if ratio < 0.88 {
@@ -1525,10 +1577,10 @@ private final class PreviewContainerView: UIView {
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
 }
 
-private enum FaceScanStore {
+public enum FaceScanStore {
     private static let key = "apex_ios_face_scans_v1"
 
-    static func load() -> [FaceScanRecord] {
+    public static func load() -> [FaceScanRecord] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([FaceScanRecord].self, from: data) else {
             return []
@@ -1536,7 +1588,7 @@ private enum FaceScanStore {
         return decoded
     }
 
-    static func save(_ records: [FaceScanRecord]) {
+    public static func save(_ records: [FaceScanRecord]) {
         if let encoded = try? JSONEncoder().encode(Array(records.prefix(25))) {
             UserDefaults.standard.set(encoded, forKey: key)
         }

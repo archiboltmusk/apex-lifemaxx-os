@@ -74,6 +74,65 @@ struct ApexMathTestRunner {
         let tags = ApexSnapshotStore.consumePendingJournalTags()
         assertTrue(tags == ["sunlight"], "Duplicate widget tags same day should deduplicate")
 
+        // 6. Pace of Aging & 5.7h Caffeine Pharmacokinetics
+        assertTrue(
+            ApexBiometricMath.paceOfAging(
+                chronologicalAge: 32, biologicalAge: nil, clinicalPhenoAge: nil,
+                hrv: nil, hrvBaseline: nil, rhr: nil, rhrBaseline: nil,
+                vo2Max: nil, sleepEfficiencyPercent: nil
+            ) == nil,
+            "All-nil vitals must return nil pace of aging"
+        )
+        let youthfulPace = ApexBiometricMath.paceOfAging(
+            chronologicalAge: 35, biologicalAge: 29, clinicalPhenoAge: 28,
+            hrv: 78, hrvBaseline: 64, rhr: 48, rhrBaseline: 52,
+            vo2Max: 56, sleepEfficiencyPercent: 93
+        )!
+        let fastPace = ApexBiometricMath.paceOfAging(
+            chronologicalAge: 35, biologicalAge: 42, clinicalPhenoAge: 43,
+            hrv: 32, hrvBaseline: 60, rhr: 66, rhrBaseline: 54,
+            vo2Max: 35, sleepEfficiencyPercent: 76
+        )!
+        assertTrue(youthfulPace < 0.90 && fastPace > 1.05 && youthfulPace < fastPace, "Pace of aging must distinguish rejuvenated vs accelerated biomarkers")
+
+        let halfLifeRem = ApexBiometricMath.caffeineRemainingMg(intakeMg: 200, hoursElapsed: 5.7)
+        assertTrue(abs(halfLifeRem - 100.0) <= 0.2, "200mg caffeine after 5.7h half-life should be ~100mg (got \(halfLifeRem))")
+        assertTrue(ApexBiometricMath.caffeineRemainingMg(intakeMg: 0, hoursElapsed: 2.0) == 0, "Zero intake yields 0 remaining")
+
+        // 7. Round-trip Unit Conversions (Weight & Glucose)
+        ApexUnitPreferences.current = .imperial
+        assertTrue(ApexUnitPreferences.isImperial, "isImperial should reflect .imperial")
+        let lbs = ApexUnitPreferences.weightValue(kg: 100.0)
+        let kgBack = ApexUnitPreferences.kgFromWeightInput(lbs)
+        assertTrue(abs(kgBack - 100.0) < 0.05, "Imperial weight round-trip mismatch")
+        let mmol = ApexUnitPreferences.glucoseValue(mgDl: 108.0)
+        let mgBack = ApexUnitPreferences.mgDlFromGlucoseInput(mmol)
+        assertTrue(abs(mgBack - 108.0) < 0.1, "Imperial glucose round-trip mismatch")
+        ApexUnitPreferences.current = prevUnit
+
+        // 8. DescribeMealParser ("2 eggs" vs "2 egg whites" regex regression)
+        let twoEggs = DescribeMealParser.parse("2 eggs")
+        assertTrue(twoEggs.matchedItems == ["100g Whole Eggs"], "Expected '100g Whole Eggs', got \(twoEggs.matchedItems)")
+        assertTrue(abs(twoEggs.calories - 143) <= 1, "2 eggs calorie mismatch")
+
+        let twoWhites = DescribeMealParser.parse("2 egg whites and 150g chicken breast")
+        assertTrue(
+            twoWhites.matchedItems.contains("200g Egg Whites") && !twoWhites.matchedItems.contains { $0.contains("Whole Eggs") },
+            "Egg whites must not double-match Whole Eggs: \(twoWhites.matchedItems)"
+        )
+        assertTrue(twoWhites.matchedItems.contains("150g Chicken Breast"), "150g chicken breast should parse as 150g")
+
+        // 9. Lag-1 Next-Morning (D -> D+1) Causality Math
+        let shifted = ApexBiometricMath.lag1ShiftedKeys(["2026-11-01", "2026-11-03"])
+        assertTrue(shifted == ["2026-11-02", "2026-11-04"], "Lag-1 shifted keys mismatch: \(shifted)")
+        let hrvMap = ["2026-11-02": 80.0, "2026-11-04": 88.0, "2026-11-05": 60.0, "2026-11-06": 60.0]
+        let onVals = shifted.compactMap { hrvMap[$0] }
+        let offVals = ["2026-11-05", "2026-11-06"].compactMap { hrvMap[$0] }
+        let pctDelta = ApexBiometricMath.meanPercentDelta(onValues: onVals, offValues: offVals)!
+        assertTrue(abs(pctDelta - 40.0) < 0.01, "Expected +40% Lag-1 HRV delta, got \(pctDelta)")
+        let absDelta = ApexBiometricMath.meanAbsoluteDelta(onValues: [50.0, 52.0], offValues: [55.0, 57.0])!
+        assertTrue(abs(absDelta - (-5.0)) < 0.01, "Expected -5.0 bpm RHR delta, got \(absDelta)")
+
         print("ALL_SWIFT_BIOMETRIC_MATH_TESTS_PASSED")
     }
 }

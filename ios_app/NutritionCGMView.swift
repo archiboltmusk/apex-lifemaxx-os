@@ -3,6 +3,7 @@ import AVFoundation
 @preconcurrency import Vision
 import PhotosUI
 import Charts
+import Combine
 
 // MARK: - Bevel Nutrition, Barcode / Label OCR, Recipes & CGM Engine Models
 public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
@@ -18,6 +19,17 @@ public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
     public var sourceEngine: String
     public var date: Date
     public var photoData: Data?
+    public var photoFileName: String? = nil
+
+    public var estimatedLeucineG: Double {
+        ((proteinG * 0.088) * 10).rounded() / 10
+    }
+
+    public var estimatedGlycemicLoad: Double {
+        let netCarbs = max(0, carbsG - fiberG)
+        let weight = sugarG > 10 ? 0.65 : (fiberG >= 5 ? 0.42 : 0.52)
+        return (netCarbs * weight).rounded()
+    }
 
     public init(
         id: UUID = UUID(),
@@ -31,7 +43,8 @@ public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
         sodiumMg: Double = 0,
         sourceEngine: String,
         date: Date = Date(),
-        photoData: Data? = nil
+        photoData: Data? = nil,
+        photoFileName: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -45,6 +58,7 @@ public struct LoggedFoodEntry: Identifiable, Codable, Equatable {
         self.sourceEngine = sourceEngine
         self.date = date
         self.photoData = photoData
+        self.photoFileName = photoFileName
     }
 }
 
@@ -59,6 +73,27 @@ public struct CustomRecipe: Identifiable, Codable {
     public var sugarG: Double
 }
 
+public struct DailySupplement: Identifiable, Codable, Equatable {
+    public let id: UUID
+    public var name: String
+    public var doseLabel: String
+    public var timing: String
+    public var takenDayKeys: [String]
+}
+
+public struct CaffeineIntakeEvent: Identifiable, Codable, Equatable {
+    public let id: UUID
+    public let timestamp: Date
+    public let mg: Double
+}
+
+public struct HydrationCaffeineDay: Identifiable, Codable {
+    public var id: String { day }
+    public let day: String
+    public var waterMl: Double
+    public var caffeineMg: Double
+}
+
 @MainActor
 public final class NutritionLogStore: ObservableObject {
     public static let shared = NutritionLogStore()
@@ -67,22 +102,56 @@ public final class NutritionLogStore: ObservableObject {
     @Published public var recipes: [CustomRecipe] = []
     @Published public var waterMlToday: Double = 0
     @Published public var caffeineMgToday: Double = 0
+    @Published public var caffeineEvents: [CaffeineIntakeEvent] = []
+    @Published public var hydrationHistory: [HydrationCaffeineDay] = []
+    @Published public var supplements: [DailySupplement] = []
+    @Published public var glut4SecondsRemaining: Int = 0
+    @Published public var isGlut4TimerRunning: Bool = false
 
     @AppStorage("apex_calorie_target") public var calorieTarget: Double = 2400
     @AppStorage("apex_protein_target") public var proteinTargetG: Double = 175
     @AppStorage("apex_fiber_target") public var fiberTargetG: Double = 32
+    @AppStorage("apex_water_target_ml") public var waterTargetMl: Double = 3000
 
     private let mealsKey = "apex_ios_logged_meals_v1"
     private let recipesKey = "apex_ios_custom_recipes_v1"
     private let dailyMetaKey = "apex_ios_hydration_caffeine_v1"
+    private let caffeineEventsKey = "apex_caffeine_events_v1"
+    private let hydrationHistKey = "apex_hydration_caffeine_history_v1"
+    private let supplementsKey = "apex_supplements_v1"
+    private var glut4Cancellable: AnyCancellable?
 
     private init() {
         load()
+        glut4Cancellable = Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in
+            guard let self = self, self.isGlut4TimerRunning else { return }
+            if self.glut4SecondsRemaining > 1 {
+                self.glut4SecondsRemaining -= 1
+            } else {
+                self.glut4SecondsRemaining = 0
+                self.isGlut4TimerRunning = false
+                Haptics.success()
+            }
+        }
+    }
+
+    public func ensureDayIsCurrent() {
+        let today = Self.todayDayKey()
+        if let storedDay = UserDefaults.standard.string(forKey: "apex_ios_hydration_day_v1"), storedDay != today {
+            waterMlToday = 0
+            caffeineMgToday = 0
+            persistMeta()
+        }
     }
 
     public var todaysMeals: [LoggedFoodEntry] {
         let cal = Calendar.current
         return meals.filter { cal.isDateInToday($0.date) }
+    }
+
+    public var recentMeals7Days: [LoggedFoodEntry] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        return meals.filter { $0.date >= cutoff }
     }
 
     public var todayCalories: Double { todaysMeals.reduce(0) { $0 + $1.calories } }
@@ -91,6 +160,30 @@ public final class NutritionLogStore: ObservableObject {
     public var todayFat: Double { todaysMeals.reduce(0) { $0 + $1.fatG } }
     public var todayFiber: Double { todaysMeals.reduce(0) { $0 + $1.fiberG } }
     public var todaySugar: Double { todaysMeals.reduce(0) { $0 + $1.sugarG } }
+    public var todaySodiumMg: Double { todaysMeals.reduce(0) { $0 + $1.sodiumMg } }
+
+    /// Real 5.7h half-life pharmacokinetics summed across recent caffeine doses.
+    public var activeCaffeineRemainingMg: Double {
+        let now = Date()
+        let cutoff = now.addingTimeInterval(-36 * 3600)
+        return caffeineEvents
+            .filter { $0.timestamp >= cutoff && $0.timestamp <= now }
+            .reduce(0.0) { total, ev in
+                let elapsedHrs = now.timeIntervalSince(ev.timestamp) / 3600.0
+                return total + ApexBiometricMath.caffeineRemainingMg(intakeMg: ev.mg, hoursElapsed: elapsedHrs)
+            }
+    }
+
+    public func caffeineAtHourOffset(_ hoursFromNow: Double) -> Double {
+        let targetDate = Date().addingTimeInterval(hoursFromNow * 3600.0)
+        let cutoff = targetDate.addingTimeInterval(-36 * 3600)
+        return caffeineEvents
+            .filter { $0.timestamp >= cutoff && $0.timestamp <= targetDate }
+            .reduce(0.0) { total, ev in
+                let elapsedHrs = targetDate.timeIntervalSince(ev.timestamp) / 3600.0
+                return total + ApexBiometricMath.caffeineRemainingMg(intakeMg: ev.mg, hoursElapsed: elapsedHrs)
+            }
+    }
 
     // Bevel Nutrition Quality Score (0–100) computed strictly from logged meals today
     public var nutritionQualityScore: Int? {
@@ -112,34 +205,108 @@ public final class NutritionLogStore: ObservableObject {
         )
     }
 
+    public func startPostprandialGlut4Walk() {
+        glut4SecondsRemaining = 15 * 60
+        isGlut4TimerRunning = true
+        Haptics.tap(.medium)
+    }
+
+    public func stopPostprandialGlut4Walk() {
+        isGlut4TimerRunning = false
+        glut4SecondsRemaining = 0
+    }
+
+    public func isSupplementTakenToday(_ sup: DailySupplement) -> Bool {
+        sup.takenDayKeys.contains(Self.todayDayKey())
+    }
+
+    public func toggleSupplement(_ id: UUID) {
+        let today = Self.todayDayKey()
+        guard let idx = supplements.firstIndex(where: { $0.id == id }) else { return }
+        if let pos = supplements[idx].takenDayKeys.firstIndex(of: today) {
+            supplements[idx].takenDayKeys.remove(at: pos)
+        } else {
+            supplements[idx].takenDayKeys.append(today)
+            supplements[idx].takenDayKeys = Array(supplements[idx].takenDayKeys.suffix(30))
+        }
+        persistSupplements()
+    }
+
+    public func addSupplement(name: String, dose: String, timing: String) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        supplements.append(DailySupplement(id: UUID(), name: clean, doseLabel: dose.isEmpty ? "1 serving" : dose, timing: timing.isEmpty ? "Daily" : timing, takenDayKeys: []))
+        persistSupplements()
+    }
+
+    public func deleteSupplement(_ id: UUID) {
+        supplements.removeAll { $0.id == id }
+        persistSupplements()
+    }
+
     public func logMeal(_ entry: LoggedFoodEntry, health: HealthKitManager) {
-        meals.insert(entry, at: 0)
+        var cleanEntry = entry
+        if let rawData = entry.photoData, entry.photoFileName == nil {
+            cleanEntry.photoFileName = savePhotoToDisk(rawData, id: entry.id)
+            cleanEntry.photoData = nil
+        }
+        meals.insert(cleanEntry, at: 0)
         persistMeals()
-        syncToMac(health: health, addedMeal: entry)
+        syncToMac(health: health, addedMeal: cleanEntry)
         Task {
             await health.logNutritionToHealth(
-                calories: entry.calories,
-                proteinG: entry.proteinG,
-                carbsG: entry.carbsG,
-                fatG: entry.fatG,
-                fiberG: entry.fiberG,
-                sugarG: entry.sugarG,
-                date: entry.date
+                calories: cleanEntry.calories,
+                proteinG: cleanEntry.proteinG,
+                carbsG: cleanEntry.carbsG,
+                fatG: cleanEntry.fatG,
+                fiberG: cleanEntry.fiberG,
+                sugarG: cleanEntry.sugarG,
+                sodiumMg: cleanEntry.sodiumMg,
+                date: cleanEntry.date
             )
         }
     }
 
+    public func loadMealImage(for entry: LoggedFoodEntry) -> UIImage? {
+        if let file = entry.photoFileName,
+           let url = photosDirectory()?.appendingPathComponent(file),
+           let data = try? Data(contentsOf: url),
+           let img = UIImage(data: data) {
+            return img
+        }
+        if let data = entry.photoData, let img = UIImage(data: data) {
+            return img
+        }
+        return nil
+    }
+
     public func addWater(ml: Double, health: HealthKitManager) {
-        waterMlToday += ml
+        ensureDayIsCurrent()
+        waterMlToday = max(0, waterMlToday + ml)
         persistMeta()
         syncToMac(health: health)
-        Task {
-            await health.logNutritionToHealth(calories: 0, proteinG: 0, carbsG: 0, fatG: 0, waterMl: ml)
+        if ml > 0 {
+            Task {
+                await health.logNutritionToHealth(calories: 0, proteinG: 0, carbsG: 0, fatG: 0, waterMl: ml)
+            }
         }
     }
 
     public func addCaffeine(mg: Double, health: HealthKitManager) {
+        ensureDayIsCurrent()
+        if mg < 0 {
+            caffeineMgToday = max(0, caffeineMgToday + mg)
+            if !caffeineEvents.isEmpty {
+                caffeineEvents.removeFirst()
+                persistCaffeineEvents()
+            }
+            persistMeta()
+            syncToMac(health: health)
+            return
+        }
         caffeineMgToday += mg
+        caffeineEvents.insert(CaffeineIntakeEvent(id: UUID(), timestamp: Date(), mg: mg), at: 0)
+        persistCaffeineEvents()
         persistMeta()
         syncToMac(health: health)
         Task {
@@ -155,6 +322,11 @@ public final class NutritionLogStore: ObservableObject {
     }
 
     public func deleteMeal(_ id: UUID, health: HealthKitManager) {
+        if let existing = meals.first(where: { $0.id == id }),
+           let file = existing.photoFileName,
+           let url = photosDirectory()?.appendingPathComponent(file) {
+            try? FileManager.default.removeItem(at: url)
+        }
         meals.removeAll { $0.id == id }
         persistMeals()
         syncToMac(health: health)
@@ -169,6 +341,7 @@ public final class NutritionLogStore: ObservableObject {
                 "fat": Int(todayFat),
                 "fiber": Int(todayFiber),
                 "sugar": Int(todaySugar),
+                "sodiumMg": Int(todaySodiumMg),
                 "waterL": (waterMlToday / 1000.0 * 10).rounded() / 10,
                 "caffeineMg": Int(caffeineMgToday),
                 "qualityScore": nutritionQualityScore ?? 0,
@@ -185,6 +358,7 @@ public final class NutritionLogStore: ObservableObject {
                 "fat": Int(meal.fatG),
                 "fiber": Int(meal.fiberG),
                 "sugar": Int(meal.sugarG),
+                "sodiumMg": Int(meal.sodiumMg),
                 "source": meal.sourceEngine,
                 "date": ISO8601DateFormatter().string(from: meal.date)
             ]
@@ -199,32 +373,123 @@ public final class NutritionLogStore: ObservableObject {
     private func load() {
         if let d = UserDefaults.standard.data(forKey: mealsKey),
            let dec = try? JSONDecoder().decode([LoggedFoodEntry].self, from: d) {
-            meals = dec
+            meals = dec.map { item in
+                if let rawData = item.photoData, item.photoFileName == nil {
+                    var migrated = item
+                    migrated.photoFileName = savePhotoToDisk(rawData, id: item.id)
+                    migrated.photoData = nil
+                    return migrated
+                }
+                return item
+            }
         }
         if let d = UserDefaults.standard.data(forKey: recipesKey),
            let dec = try? JSONDecoder().decode([CustomRecipe].self, from: d) {
             recipes = dec
         }
+        if let d = UserDefaults.standard.data(forKey: caffeineEventsKey),
+           let dec = try? JSONDecoder().decode([CaffeineIntakeEvent].self, from: d) {
+            caffeineEvents = dec
+        }
+        if let d = UserDefaults.standard.data(forKey: hydrationHistKey),
+           let dec = try? JSONDecoder().decode([HydrationCaffeineDay].self, from: d) {
+            hydrationHistory = dec
+        }
+        if let d = UserDefaults.standard.data(forKey: supplementsKey),
+           let dec = try? JSONDecoder().decode([DailySupplement].self, from: d) {
+            supplements = dec
+        } else {
+            supplements = [
+                DailySupplement(id: UUID(), name: "Creatine Monohydrate", doseLabel: "5 g", timing: "Morning / Post-Workout", takenDayKeys: []),
+                DailySupplement(id: UUID(), name: "Omega-3 EPA/DHA", doseLabel: "2,000 mg", timing: "With Meal", takenDayKeys: []),
+                DailySupplement(id: UUID(), name: "Vitamin D3 + K2", doseLabel: "4,000 IU", timing: "Morning w/ Fat", takenDayKeys: []),
+                DailySupplement(id: UUID(), name: "Magnesium Glycinate", doseLabel: "300 mg", timing: "Evening Wind-Down", takenDayKeys: [])
+            ]
+            persistSupplements()
+        }
+
+        let today = Self.todayDayKey()
         if let dict = UserDefaults.standard.dictionary(forKey: dailyMetaKey),
            let dayStr = dict["day"] as? String,
-           dayStr == Self.todayDayKey() {
+           dayStr == today {
             waterMlToday = dict["waterMl"] as? Double ?? 0
             caffeineMgToday = dict["caffeineMg"] as? Double ?? 0
+            UserDefaults.standard.set(today, forKey: "apex_ios_hydration_day_v1")
+            UserDefaults.standard.set(waterMlToday, forKey: "apex_ios_water_today_v1")
+            UserDefaults.standard.set(caffeineMgToday, forKey: "apex_ios_caffeine_today_v1")
+        } else {
+            waterMlToday = 0
+            caffeineMgToday = 0
+            UserDefaults.standard.set(today, forKey: "apex_ios_hydration_day_v1")
+            UserDefaults.standard.set(0.0, forKey: "apex_ios_water_today_v1")
+            UserDefaults.standard.set(0.0, forKey: "apex_ios_caffeine_today_v1")
+        }
+    }
+
+    private func photosDirectory() -> URL? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = base.appendingPathComponent("apex_meal_photos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func savePhotoToDisk(_ data: Data, id: UUID) -> String? {
+        let name = "\(id.uuidString).jpg"
+        guard let url = photosDirectory()?.appendingPathComponent(name) else { return nil }
+        do {
+            try data.write(to: url, options: .atomic)
+            return name
+        } catch {
+            return nil
         }
     }
 
     private func persistMeals() {
-        if let d = try? JSONEncoder().encode(Array(meals.prefix(80))) {
+        let stripped = meals.prefix(80).map { entry -> LoggedFoodEntry in
+            var copy = entry
+            copy.photoData = nil
+            return copy
+        }
+        if let d = try? JSONEncoder().encode(stripped) {
             UserDefaults.standard.set(d, forKey: mealsKey)
         }
     }
 
+    private func persistCaffeineEvents() {
+        let cutoff = Date().addingTimeInterval(-72 * 3600)
+        let recent = Array(caffeineEvents.filter { $0.timestamp >= cutoff }.prefix(40))
+        if let d = try? JSONEncoder().encode(recent) {
+            UserDefaults.standard.set(d, forKey: caffeineEventsKey)
+        }
+    }
+
+    private func persistSupplements() {
+        if let d = try? JSONEncoder().encode(supplements) {
+            UserDefaults.standard.set(d, forKey: supplementsKey)
+        }
+    }
+
     private func persistMeta() {
+        let today = Self.todayDayKey()
         UserDefaults.standard.set([
-            "day": Self.todayDayKey(),
+            "day": today,
             "waterMl": waterMlToday,
             "caffeineMg": caffeineMgToday
         ], forKey: dailyMetaKey)
+        UserDefaults.standard.set(today, forKey: "apex_ios_hydration_day_v1")
+        UserDefaults.standard.set(waterMlToday, forKey: "apex_ios_water_today_v1")
+        UserDefaults.standard.set(caffeineMgToday, forKey: "apex_ios_caffeine_today_v1")
+
+        if let idx = hydrationHistory.firstIndex(where: { $0.day == today }) {
+            hydrationHistory[idx].waterMl = waterMlToday
+            hydrationHistory[idx].caffeineMg = caffeineMgToday
+        } else {
+            hydrationHistory.insert(HydrationCaffeineDay(day: today, waterMl: waterMlToday, caffeineMg: caffeineMgToday), at: 0)
+        }
+        hydrationHistory = Array(hydrationHistory.prefix(14))
+        if let d = try? JSONEncoder().encode(hydrationHistory) {
+            UserDefaults.standard.set(d, forKey: hydrationHistKey)
+        }
     }
 
     private static func todayDayKey() -> String {
@@ -235,76 +500,7 @@ public final class NutritionLogStore: ObservableObject {
 }
 
 // MARK: - Deterministic Describe-Meal & Label OCR Engines
-public enum DescribeMealParser {
-    private struct FoodRef {
-        let aliases: [String]
-        let label: String
-        let per100gCal: Double
-        let per100gPro: Double
-        let per100gCarb: Double
-        let per100gFat: Double
-        let per100gFiber: Double
-        let per100gSugar: Double
-        let defaultServingGrams: Double
-    }
-
-    private static let table: [FoodRef] = [
-        FoodRef(aliases: ["chicken breast", "chicken"], label: "Chicken Breast", per100gCal: 165, per100gPro: 31, per100gCarb: 0, per100gFat: 3.6, per100gFiber: 0, per100gSugar: 0, defaultServingGrams: 170),
-        FoodRef(aliases: ["salmon"], label: "Wild Salmon", per100gCal: 208, per100gPro: 20.4, per100gCarb: 0, per100gFat: 13.4, per100gFiber: 0, per100gSugar: 0, defaultServingGrams: 170),
-        FoodRef(aliases: ["ribeye", "steak", "beef"], label: "Lean Steak / Beef", per100gCal: 250, per100gPro: 26, per100gCarb: 0, per100gFat: 15, per100gFiber: 0, per100gSugar: 0, defaultServingGrams: 180),
-        FoodRef(aliases: ["egg", "eggs"], label: "Whole Eggs", per100gCal: 143, per100gPro: 12.6, per100gCarb: 0.7, per100gFat: 9.5, per100gFiber: 0, per100gSugar: 0.4, defaultServingGrams: 50),
-        FoodRef(aliases: ["egg white", "egg whites"], label: "Egg Whites", per100gCal: 52, per100gPro: 11, per100gCarb: 0.7, per100gFat: 0.2, per100gFiber: 0, per100gSugar: 0.7, defaultServingGrams: 100),
-        FoodRef(aliases: ["white rice", "rice"], label: "Cooked White Rice", per100gCal: 130, per100gPro: 2.7, per100gCarb: 28.2, per100gFat: 0.3, per100gFiber: 0.4, per100gSugar: 0.1, defaultServingGrams: 160),
-        FoodRef(aliases: ["oats", "oatmeal"], label: "Rolled Oats (Dry)", per100gCal: 389, per100gPro: 16.9, per100gCarb: 66.3, per100gFat: 6.9, per100gFiber: 10.6, per100gSugar: 0.9, defaultServingGrams: 60),
-        FoodRef(aliases: ["greek yogurt", "yogurt"], label: "Nonfat Greek Yogurt", per100gCal: 59, per100gPro: 10.2, per100gCarb: 3.6, per100gFat: 0.4, per100gFiber: 0, per100gSugar: 3.2, defaultServingGrams: 170),
-        FoodRef(aliases: ["whey", "protein shake", "protein powder"], label: "Whey Protein Isolate", per100gCal: 370, per100gPro: 83, per100gCarb: 3, per100gFat: 1.5, per100gFiber: 0, per100gSugar: 1.5, defaultServingGrams: 30),
-        FoodRef(aliases: ["avocado"], label: "Avocado", per100gCal: 160, per100gPro: 2, per100gCarb: 8.5, per100gFat: 14.7, per100gFiber: 6.7, per100gSugar: 0.7, defaultServingGrams: 100),
-        FoodRef(aliases: ["banana"], label: "Banana", per100gCal: 89, per100gPro: 1.1, per100gCarb: 22.8, per100gFat: 0.3, per100gFiber: 2.6, per100gSugar: 12.2, defaultServingGrams: 118),
-        FoodRef(aliases: ["blueberries", "berries"], label: "Blueberries", per100gCal: 57, per100gPro: 0.7, per100gCarb: 14.5, per100gFat: 0.3, per100gFiber: 2.4, per100gSugar: 10, defaultServingGrams: 100),
-        FoodRef(aliases: ["sweet potato"], label: "Baked Sweet Potato", per100gCal: 90, per100gPro: 2, per100gCarb: 20.7, per100gFat: 0.2, per100gFiber: 3.3, per100gSugar: 6.5, defaultServingGrams: 150),
-        FoodRef(aliases: ["broccoli", "spinach", "greens", "salad"], label: "Broccoli / Greens", per100gCal: 34, per100gPro: 2.8, per100gCarb: 6.6, per100gFat: 0.4, per100gFiber: 2.6, per100gSugar: 1.7, defaultServingGrams: 120),
-        FoodRef(aliases: ["olive oil", "butter"], label: "Extra Virgin Olive Oil", per100gCal: 884, per100gPro: 0, per100gCarb: 0, per100gFat: 100, per100gFiber: 0, per100gSugar: 0, defaultServingGrams: 14),
-        FoodRef(aliases: ["almonds", "nuts", "walnuts"], label: "Mixed Nuts / Almonds", per100gCal: 579, per100gPro: 21.2, per100gCarb: 21.6, per100gFat: 49.9, per100gFiber: 12.5, per100gSugar: 4.4, defaultServingGrams: 28),
-        FoodRef(aliases: ["bread", "sourdough", "toast"], label: "Sourdough Bread", per100gCal: 266, per100gPro: 9, per100gCarb: 52, per100gFat: 1.8, per100gFiber: 2.7, per100gSugar: 2.5, defaultServingGrams: 60),
-        FoodRef(aliases: ["paneer", "tofu"], label: "Paneer / Cottage Cheese", per100gCal: 265, per100gPro: 18, per100gCarb: 3, per100gFat: 20, per100gFiber: 0, per100gSugar: 2, defaultServingGrams: 100)
-    ]
-
-    public static func parse(_ text: String) -> (matchedItems: [String], calories: Double, protein: Double, carbs: Double, fat: Double, fiber: Double, sugar: Double) {
-        let lower = text.lowercased()
-        var matched: [String] = []
-        var cal = 0.0, pro = 0.0, carb = 0.0, fat = 0.0, fib = 0.0, sug = 0.0
-
-        for item in table {
-            guard let hitAlias = item.aliases.first(where: { lower.contains($0) }) else { continue }
-            var grams = item.defaultServingGrams
-
-            // Detect preceding "<num>g <alias>" or "<num> <alias>" (count multiplier for pieces like "3 eggs")
-            if let range = lower.range(of: "(\\d+(?:\\.\\d+)?)\\s*(g|gram|grams|oz|tbsp|cup|scoop)?\\s*\(NSRegularExpression.escapedPattern(for: hitAlias))", options: .regularExpression) {
-                let snippet = String(lower[range])
-                let numStr = snippet.components(separatedBy: CharacterSet(charactersIn: "0123456789.").inverted).joined()
-                if let qty = Double(numStr), qty > 0 {
-                    if snippet.contains("g") { grams = qty }
-                    else if snippet.contains("oz") { grams = qty * 28.35 }
-                    else if snippet.contains("tbsp") { grams = qty * 14.0 }
-                    else if snippet.contains("scoop") { grams = qty * 30.0 }
-                    else if snippet.contains("cup") { grams = qty * 160.0 }
-                    else { grams = qty * item.defaultServingGrams }
-                }
-            }
-
-            let factor = grams / 100.0
-            cal += item.per100gCal * factor
-            pro += item.per100gPro * factor
-            carb += item.per100gCarb * factor
-            fat += item.per100gFat * factor
-            fib += item.per100gFiber * factor
-            sug += item.per100gSugar * factor
-            matched.append("\(Int(grams.rounded()))g \(item.label)")
-        }
-
-        return (matched, cal.rounded(), (pro * 10).rounded() / 10, (carb * 10).rounded() / 10, (fat * 10).rounded() / 10, (fib * 10).rounded() / 10, (sug * 10).rounded() / 10)
-    }
-}
+// `DescribeMealParser` lives in `ApexSharedTypes.swift` for shared app + automated test coverage.
 
 public enum NutritionLabelOCREngine {
     public static func recognizeLabel(from image: UIImage) async -> LoggedFoodEntry? {
@@ -458,12 +654,19 @@ public enum MealPlateVisionEstimator {
 public struct NutritionCGMView: View {
     @ObservedObject private var store = NutritionLogStore.shared
     @ObservedObject private var health = HealthKitManager.shared
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitSystemRaw: String = ApexUnitSystem.metric.rawValue
 
     @State private var showBarcodeSheet = false
     @State private var showDescribeSheet = false
     @State private var showRecipeSheet = false
     @State private var showGlucoseLogSheet = false
     @State private var showPlateCameraSheet = false
+    @State private var showLabelCameraSheet = false
+    @State private var showLabelSourceDialog = false
+    @State private var showLabelPhotosPicker = false
+    @State private var showGoalsSheet = false
+    @State private var showAddSupplementSheet = false
+    @State private var showSevenDayMeals = false
     @State private var selectedLabelPhoto: PhotosPickerItem? = nil
     @State private var selectedPlatePhoto: PhotosPickerItem? = nil
     @State private var scannedDraft: LoggedFoodEntry? = nil
@@ -472,7 +675,8 @@ public struct NutritionCGMView: View {
     public init() {}
 
     public var body: some View {
-        NavigationStack {
+        let _ = unitSystemRaw
+        return NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     if let banner = statusBanner {
@@ -488,7 +692,11 @@ public struct NutritionCGMView: View {
                     nutritionScoreHeroCard
                     captureActionsGrid
                     hydrationCaffeineBar
+                    if store.activeCaffeineRemainingMg >= 1.0 || store.caffeineMgToday > 0 {
+                        caffeineHalfLifeCard
+                    }
                     cgmGlucoseCard
+                    supplementsCard
                     todaysMealsSection
                 }
                 .padding(.horizontal, 16)
@@ -498,16 +706,23 @@ public struct NutritionCGMView: View {
             .background(ApexTheme.background)
             .navigationTitle("Nutrition")
             .navigationBarTitleDisplayMode(.large)
+            .onAppear {
+                store.ensureDayIsCurrent()
+            }
+            .photosPicker(isPresented: $showLabelPhotosPicker, selection: $selectedLabelPhoto, matching: .images)
+            .confirmationDialog("Scan Nutrition Label", isPresented: $showLabelSourceDialog) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Take Label Photo") { showLabelCameraSheet = true }
+                }
+                Button("Choose from Photos") { showLabelPhotosPicker = true }
+                Button("Cancel", role: .cancel) {}
+            }
             .onChange(of: selectedLabelPhoto) { _, item in
                 guard let item else { return }
                 Task {
                     if let data = try? await item.loadTransferable(type: Data.self),
-                       let img = UIImage(data: data),
-                       let parsed = await NutritionLabelOCREngine.recognizeLabel(from: img) {
-                        scannedDraft = parsed
-                    } else {
-                        statusBanner = "Could not detect nutrition label rows — try Describe Meal or Manual Entry."
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { statusBanner = nil }
+                       let img = UIImage(data: data) {
+                        await handleLabelImage(img)
                     }
                     selectedLabelPhoto = nil
                 }
@@ -529,8 +744,13 @@ public struct NutritionCGMView: View {
                 }
             }
             .sheet(isPresented: $showPlateCameraSheet) {
-                PlateCameraCaptureSheet { captured in
+                PlateCameraCaptureSheet(sourceType: .camera) { captured in
                     Task { await handlePlateImage(captured) }
+                }
+            }
+            .sheet(isPresented: $showLabelCameraSheet) {
+                PlateCameraCaptureSheet(sourceType: .camera) { captured in
+                    Task { await handleLabelImage(captured) }
                 }
             }
             .sheet(isPresented: $showBarcodeSheet) {
@@ -551,6 +771,25 @@ public struct NutritionCGMView: View {
             .sheet(isPresented: $showGlucoseLogSheet) {
                 LogGlucoseSheet()
             }
+            .sheet(isPresented: $showGoalsSheet) {
+                NutritionGoalsSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showAddSupplementSheet) {
+                AddSupplementSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private func handleLabelImage(_ image: UIImage) async {
+        if let parsed = await NutritionLabelOCREngine.recognizeLabel(from: image) {
+            scannedDraft = parsed
+        } else {
+            statusBanner = "Could not detect nutrition label rows — try Describe Meal or Manual Entry."
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { statusBanner = nil }
         }
     }
 
@@ -572,9 +811,17 @@ public struct NutritionCGMView: View {
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(ApexTheme.accentVolt)
-                    Text("/ \(Int(store.calorieTarget)) goal")
+                    Button {
+                        Haptics.tap()
+                        showGoalsSheet = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("/ \(Int(store.calorieTarget)) goal")
+                            Image(systemName: "slider.horizontal.3")
+                        }
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ApexTheme.standCyan)
+                    }
                 }
             }
 
@@ -590,7 +837,7 @@ public struct NutritionCGMView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             } else {
-                Text("Sugar today: \(Int(store.todaySugar.rounded()))g across \(store.todaysMeals.count) logged item(s)")
+                Text("Sugar: \(Int(store.todaySugar.rounded()))g · Sodium: \(Int(store.todaySodiumMg.rounded()))mg across \(store.todaysMeals.count) item(s)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(store.todaySugar > 45 ? ApexTheme.accentAmber : .secondary)
             }
@@ -664,8 +911,15 @@ public struct NutritionCGMView: View {
             }
             .buttonStyle(.plain)
 
-            PhotosPicker(selection: $selectedLabelPhoto, matching: .images) {
-                captureTile(icon: "text.viewfinder", title: "Label OCR", sub: "Scan Nutrition Facts", tint: ApexTheme.accentIndigo)
+            Button {
+                Haptics.tap(.medium)
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    showLabelSourceDialog = true
+                } else {
+                    showLabelPhotosPicker = true
+                }
+            } label: {
+                captureTile(icon: "text.viewfinder", title: "Label OCR", sub: "Camera or photo scan", tint: ApexTheme.accentIndigo)
             }
             .buttonStyle(.plain)
 
@@ -708,57 +962,147 @@ public struct NutritionCGMView: View {
     }
 
     private var hydrationCaffeineBar: some View {
-        HStack(spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Water")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text(String(format: "%.1f L", store.waterMlToday / 1000.0))
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Water")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("/ \(ApexUnitPreferences.formatVolume(ml: store.waterTargetMl))")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(ApexUnitPreferences.formatVolume(ml: store.waterMlToday))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(ApexTheme.standCyan)
-                }
-                Spacer()
-                Button("+500ml") {
-                    Haptics.tap()
-                    store.addWater(ml: 500, health: health)
-                }
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(ApexTheme.standCyan)
-                .clipShape(Capsule())
-            }
-            .appleCard(padding: 14, cornerRadius: 18)
+                    HStack(spacing: 6) {
+                        Button("-250") {
+                            Haptics.tap()
+                            store.addWater(ml: -250, health: health)
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.elevatedSurface)
+                        .clipShape(Capsule())
+                        .disabled(store.waterMlToday <= 0)
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
+                        Button("+250") {
+                            Haptics.tap()
+                            store.addWater(ml: 250, health: health)
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.standCyan)
+                        .clipShape(Capsule())
+
+                        Button("+500") {
+                            Haptics.tap()
+                            store.addWater(ml: 500, health: health)
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.standCyan.opacity(0.85))
+                        .clipShape(Capsule())
+                    }
+                }
+                .appleCard(padding: 14, cornerRadius: 18)
+
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Caffeine")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                     Text("\(Int(store.caffeineMgToday)) mg")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(ApexTheme.accentAmber)
+                    HStack(spacing: 6) {
+                        Button("-50") {
+                            Haptics.tap()
+                            store.addCaffeine(mg: -50, health: health)
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.elevatedSurface)
+                        .clipShape(Capsule())
+                        .disabled(store.caffeineMgToday <= 0)
+
+                        Button("+100mg") {
+                            Haptics.tap()
+                            store.addCaffeine(mg: 100, health: health)
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.accentAmber)
+                        .clipShape(Capsule())
+                    }
                 }
-                Spacer()
-                Button("+100") {
-                    Haptics.tap()
-                    store.addCaffeine(mg: 100, health: health)
-                }
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(ApexTheme.accentAmber)
-                .clipShape(Capsule())
+                .appleCard(padding: 14, cornerRadius: 18)
             }
-            .appleCard(padding: 14, cornerRadius: 18)
         }
     }
 
+    private var caffeineHalfLifeCard: some View {
+        let nowMg = store.activeCaffeineRemainingMg
+        let sleepMg = store.caffeineAtHourOffset(10)
+        let points: [(hour: Int, mg: Double)] = stride(from: 0, through: 12, by: 2).map { h in
+            (h, store.caffeineAtHourOffset(Double(h)))
+        }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("5.7h Caffeine Clearance Curve")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Active serum: \(Int(nowMg.rounded())) mg · In 10h: \(Int(sleepMg.rounded())) mg")
+                        .font(.system(size: 12))
+                        .foregroundStyle(sleepMg > 35 ? ApexTheme.accentAmber : ApexTheme.accentEmerald)
+                }
+                Spacer()
+                Text(sleepMg > 35 ? "Avoid late caffeine" : "Clear for sleep")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(sleepMg > 35 ? ApexTheme.accentAmber : ApexTheme.accentEmerald)
+                    .clipShape(Capsule())
+            }
+
+            if points.contains(where: { $0.mg > 0 }) {
+                Chart(points, id: \.hour) { pt in
+                    AreaMark(
+                        x: .value("Hours", pt.hour),
+                        y: .value("mg", pt.mg)
+                    )
+                    .foregroundStyle(ApexTheme.accentAmber.opacity(0.22))
+                    LineMark(
+                        x: .value("Hours", pt.hour),
+                        y: .value("mg", pt.mg)
+                    )
+                    .foregroundStyle(ApexTheme.accentAmber)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                }
+                .chartXAxisLabel("Hours from now")
+                .frame(height: 82)
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
     private var cgmGlucoseCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let unitLabel = ApexUnitPreferences.glucoseUnitLabel
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Glucose & Meal Spike")
@@ -779,7 +1123,7 @@ public struct NutritionCGMView: View {
                     Haptics.tap()
                     showGlucoseLogSheet = true
                 } label: {
-                    Text("Log mg/dL")
+                    Text("Log \(unitLabel)")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.black)
                         .padding(.horizontal, 10)
@@ -792,40 +1136,154 @@ public struct NutritionCGMView: View {
             if health.glucoseSamples24h.count >= 2 {
                 Chart {
                     ForEach(health.glucoseSamples24h) { pt in
+                        let val = ApexUnitPreferences.glucoseValue(mgDl: pt.value)
                         LineMark(
                             x: .value("Time", pt.date),
-                            y: .value("mg/dL", pt.value)
+                            y: .value(unitLabel, val)
                         )
                         .foregroundStyle(ApexTheme.accentIndigo)
                         .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
 
                         PointMark(
                             x: .value("Time", pt.date),
-                            y: .value("mg/dL", pt.value)
+                            y: .value(unitLabel, val)
                         )
                         .foregroundStyle(pt.value > 140 ? ApexTheme.accentAmber : ApexTheme.accentEmerald)
                     }
-                    RuleMark(y: .value("Post-Meal Threshold", 140))
+                    RuleMark(y: .value("Post-Meal Threshold", ApexUnitPreferences.glucoseValue(mgDl: 140)))
                         .foregroundStyle(ApexTheme.accentAmber.opacity(0.45))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 }
                 .frame(height: 130)
             } else {
-                Text("No blood glucose samples in Apple Health over the last 24h. Sync a Dexcom/Libre CGM to HealthKit or tap Log mg/dL to track post-meal excursion.")
+                Text("No blood glucose samples in Apple Health over the last 24h. Sync a Dexcom/Libre CGM to HealthKit or tap Log \(unitLabel) to track post-meal excursion.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+            }
+
+            // 15-Minute Postprandial GLUT4 Walk Timer
+            HStack {
+                Image(systemName: "figure.walk")
+                    .foregroundStyle(ApexTheme.exerciseLime)
+                if store.isGlut4TimerRunning {
+                    let mins = store.glut4SecondsRemaining / 60
+                    let secs = store.glut4SecondsRemaining % 60
+                    Text(String(format: "GLUT4 Walk · %02d:%02d left", mins, secs))
+                        .font(.system(size: 13, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Button("Stop") {
+                        store.stopPostprandialGlut4Walk()
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ApexTheme.accentAmber)
+                } else {
+                    Text("15m Postprandial GLUT4 Walk")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Button("Start 15:00") {
+                        store.startPostprandialGlut4Walk()
+                    }
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(ApexTheme.exerciseLime)
+                    .clipShape(Capsule())
+                }
+            }
+            .padding(10)
+            .background(ApexTheme.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .appleCard(padding: 18, cornerRadius: 22)
+    }
+
+    private var supplementsCard: some View {
+        let takenCount = store.supplements.filter { store.isSupplementTakenToday($0) }.count
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Supplement Dispensary")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("\(takenCount)/\(store.supplements.count) completed today")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    Haptics.tap()
+                    showAddSupplementSheet = true
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(ApexTheme.standCyan)
+                        .clipShape(Capsule())
+                }
+            }
+
+            ForEach(store.supplements) { sup in
+                let isTaken = store.isSupplementTakenToday(sup)
+                HStack {
+                    Button {
+                        Haptics.tap(.medium)
+                        store.toggleSupplement(sup.id)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: isTaken ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 20))
+                                .foregroundStyle(isTaken ? ApexTheme.exerciseLime : .secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(sup.name)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                Text("\(sup.doseLabel) · \(sup.timing)")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        store.deleteSupplement(sup.id)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .padding(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(10)
+                .background(ApexTheme.elevatedSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .appleCard(padding: 18, cornerRadius: 22)
     }
 
     private var todaysMealsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let shownMeals = showSevenDayMeals ? store.recentMeals7Days : store.todaysMeals
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Today's Food Log")
+                Text(showSevenDayMeals ? "7-Day Food History" : "Today's Food Log")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                 Spacer()
+                Button(showSevenDayMeals ? "Today Only" : "7D History") {
+                    Haptics.selection()
+                    showSevenDayMeals.toggle()
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
                 Button {
                     scannedDraft = LoggedFoodEntry(name: "", calories: 0, proteinG: 0, carbsG: 0, fatG: 0, sourceEngine: "Manual Entry")
                 } label: {
@@ -835,15 +1293,15 @@ public struct NutritionCGMView: View {
                 }
             }
 
-            if store.todaysMeals.isEmpty {
-                Text("0 meals logged today.")
+            if shownMeals.isEmpty {
+                Text(showSevenDayMeals ? "0 meals logged in the past 7 days." : "0 meals logged today.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .appleCard(padding: 16, cornerRadius: 18)
             } else {
-                ForEach(store.todaysMeals) { meal in
+                ForEach(shownMeals) { meal in
                     HStack(spacing: 12) {
-                        if let data = meal.photoData, let img = UIImage(data: data) {
+                        if let img = store.loadMealImage(for: meal) {
                             Image(uiImage: img)
                                 .resizable()
                                 .scaledToFill()
@@ -851,21 +1309,102 @@ public struct NutritionCGMView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(meal.name)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white)
-                            Text("\(Int(meal.proteinG))g P · \(Int(meal.carbsG))g C · \(Int(meal.fatG))g F · \(meal.sourceEngine)")
+                            HStack(spacing: 6) {
+                                Text(meal.name)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                if meal.estimatedLeucineG >= 2.5 {
+                                    Text("mTOR \(String(format: "%.1f", meal.estimatedLeucineG))g Leu")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.black)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(ApexTheme.exerciseLime)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                            let glText = meal.carbsG > 0 ? " · GL \(Int(meal.estimatedGlycemicLoad))" : ""
+                            Text("\(Int(meal.proteinG))g P · \(Int(meal.carbsG))g C · \(Int(meal.fatG))g F\(glText) · \(meal.sourceEngine)")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                         Spacer()
-                        Text("\(Int(meal.calories)) kcal")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(ApexTheme.accentVolt)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("\(Int(meal.calories)) kcal")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(ApexTheme.accentVolt)
+                            Button {
+                                Haptics.tap()
+                                store.deleteMeal(meal.id, health: health)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .appleCard(padding: 14, cornerRadius: 16)
                 }
+            }
+        }
+    }
+}
+
+private struct NutritionGoalsSheet: View {
+    @ObservedObject private var store = NutritionLogStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Daily Targets") {
+                    Stepper("Calories: \(Int(store.calorieTarget)) kcal", value: $store.calorieTarget, in: 1200...5000, step: 50)
+                    Stepper("Protein: \(Int(store.proteinTargetG)) g", value: $store.proteinTargetG, in: 60...320, step: 5)
+                    Stepper("Fiber: \(Int(store.fiberTargetG)) g", value: $store.fiberTargetG, in: 15...80, step: 1)
+                    Stepper("Hydration: \(ApexUnitPreferences.formatVolume(ml: store.waterTargetMl))", value: $store.waterTargetMl, in: 1500...6000, step: 250)
+                }
+            }
+            .navigationTitle("Nutrition Goals")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
+private struct AddSupplementSheet: View {
+    @ObservedObject private var store = NutritionLogStore.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var dose = ""
+    @State private var timing = "Morning"
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("New Supplement") {
+                    TextField("Name (e.g. L-Theanine)", text: $name)
+                    TextField("Dose (e.g. 200 mg)", text: $dose)
+                    Picker("Timing", selection: $timing) {
+                        ForEach(["Morning", "Pre-Workout", "With Meal", "Evening Wind-Down"], id: \.self) { Text($0) }
+                    }
+                }
+                Section {
+                    Button("Save Supplement") {
+                        store.addSupplement(name: name, dose: dose, timing: timing)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .foregroundStyle(ApexTheme.accentVolt)
+                }
+            }
+            .navigationTitle("Add Supplement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
             }
         }
     }
@@ -951,9 +1490,11 @@ private struct BarcodeScannerLookupSheet: View {
                     let fat = (nut["fat_serving"] as? Double) ?? (nut["fat_100g"] as? Double) ?? 0
                     let fiber = (nut["fiber_serving"] as? Double) ?? (nut["fiber_100g"] as? Double) ?? 0
                     let sugar = (nut["sugars_serving"] as? Double) ?? (nut["sugars_100g"] as? Double) ?? 0
+                    let sodiumGrams = (nut["sodium_serving"] as? Double) ?? (nut["sodium_100g"] as? Double) ?? 0
+                    let sodiumMg = (sodiumGrams * 1000.0).rounded()
                     await MainActor.run {
                         isLoading = false
-                        onFound(LoggedFoodEntry(name: name, calories: kcal.rounded(), proteinG: pro, carbsG: carb, fatG: fat, fiberG: fiber, sugarG: sugar, sourceEngine: "Barcode · OpenFoodFacts"))
+                        onFound(LoggedFoodEntry(name: name, calories: kcal.rounded(), proteinG: pro, carbsG: carb, fatG: fat, fiberG: fiber, sugarG: sugar, sodiumMg: sodiumMg, sourceEngine: "Barcode · OpenFoodFacts"))
                     }
                     return
                 }
@@ -1076,6 +1617,10 @@ private struct DescribeMealSheet: View {
                             .foregroundStyle(.white)
                     }
                     .appleCard(padding: 14, cornerRadius: 16)
+                } else if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No catalog ingredients matched yet — try weights like \"2 eggs 150g white rice\" or use Manual Entry.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(ApexTheme.accentAmber)
                 }
 
                 Button {
@@ -1099,7 +1644,8 @@ private struct DescribeMealSheet: View {
                         .background(ApexTheme.exerciseLime)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(preview.matchedItems.isEmpty)
+                .opacity(preview.matchedItems.isEmpty ? 0.45 : 1.0)
                 Spacer()
             }
             .padding(16)
@@ -1191,7 +1737,7 @@ private struct MealReviewEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let data = entry.photoData, let img = UIImage(data: data) {
+                if let img = NutritionLogStore.shared.loadMealImage(for: entry) {
                     Section("Captured Meal Photo") {
                         Image(uiImage: img)
                             .resizable()
@@ -1209,6 +1755,7 @@ private struct MealReviewEditSheet: View {
                     HStack { Text("Fat (g)"); Spacer(); TextField("0", value: $entry.fatG, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                     HStack { Text("Fiber (g)"); Spacer(); TextField("0", value: $entry.fiberG, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                     HStack { Text("Sugars (g)"); Spacer(); TextField("0", value: $entry.sugarG, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+                    HStack { Text("Sodium (mg)"); Spacer(); TextField("0", value: $entry.sodiumMg, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                 }
                 Section {
                     Button("Save to Food Log & Apple Health") {
@@ -1232,18 +1779,22 @@ private struct MealReviewEditSheet: View {
 
 private struct LogGlucoseSheet: View {
     @ObservedObject private var health = HealthKitManager.shared
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitRaw: String = ApexUnitSystem.metric.rawValue
     @Environment(\.dismiss) private var dismiss
-    @State private var mgDl: Double = 95
+    @State private var displayGlucose: Double = ApexUnitPreferences.glucoseValue(mgDl: 95)
 
     var body: some View {
-        NavigationStack {
+        let _ = unitRaw
+        let unitLabel = ApexUnitPreferences.glucoseUnitLabel
+        return NavigationStack {
             Form {
-                Section("Blood Glucose Reading (mg/dL)") {
-                    TextField("mg/dL", value: $mgDl, format: .number)
+                Section("Blood Glucose Reading (\(unitLabel))") {
+                    TextField(unitLabel, value: $displayGlucose, format: .number)
                         .keyboardType(.decimalPad)
                 }
                 Section {
                     Button("Save to Apple Health") {
+                        let mgDl = ApexUnitPreferences.mgDlFromGlucoseInput(displayGlucose)
                         Task {
                             await health.logGlucoseToHealth(mgPerDl: mgDl)
                             Haptics.success()
@@ -1263,6 +1814,7 @@ private struct LogGlucoseSheet: View {
 }
 
 private struct PlateCameraCaptureSheet: UIViewControllerRepresentable {
+    var sourceType: UIImagePickerController.SourceType = .camera
     var onCaptured: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -1270,7 +1822,7 @@ private struct PlateCameraCaptureSheet: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(sourceType) ? sourceType : .photoLibrary
         picker.delegate = context.coordinator
         return picker
     }

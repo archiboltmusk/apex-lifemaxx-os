@@ -50,7 +50,8 @@ struct ApexReadinessWidgetView: View {
                         .font(.system(size: 10, weight: .bold))
                     Text(entry.snapshot.readinessScore.map { "\($0)% Recovery" } ?? "Sync Apple Health")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    Text("Move \(Int(entry.snapshot.moveCalories))/\(Int(entry.snapshot.moveTarget)) kcal")
+                    Text(entry.snapshot.paceOfAging.map { String(format: "Pace %.2f · Move %d", $0, Int(entry.snapshot.moveCalories)) }
+                         ?? "Move \(Int(entry.snapshot.moveCalories))/\(Int(entry.snapshot.moveTarget)) kcal")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -71,9 +72,15 @@ struct ApexReadinessWidgetView: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Color(red: 0.90, green: 0.99, blue: 0.25))
                 Spacer()
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(red: 0.98, green: 0.07, blue: 0.31))
+                if let pace = entry.snapshot.paceOfAging {
+                    Text(String(format: "%.2fx", pace))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(red: 0.00, green: 0.84, blue: 0.96))
+                } else {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(red: 0.98, green: 0.07, blue: 0.31))
+                }
             }
 
             Spacer()
@@ -103,8 +110,7 @@ struct ApexReadinessWidgetView: View {
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
-                    Text(entry.snapshot.energyBank.map { "Bank \($0)% · Strain \(entry.snapshot.strainScore.map { String(format: "%.1f", $0) } ?? "—")" }
-                         ?? (entry.snapshot.biologicalAge.map { String(format: "Bio Age %.1fy", $0) } ?? "Connect Health"))
+                    Text(mediumSubline)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -122,29 +128,51 @@ struct ApexReadinessWidgetView: View {
             if #available(iOS 17.0, *) {
                 HStack(spacing: 8) {
                     Button(intent: WidgetLogHydrationIntent()) {
-                        Label("+250 mL Water", systemImage: "drop.fill")
+                        let waterLabel = entry.snapshot.waterMlToday > 0
+                            ? "+250 mL (\(ApexUnitPreferences.formatVolume(ml: entry.snapshot.waterMlToday)))"
+                            : "+250 mL Water"
+                        Label(waterLabel, systemImage: "drop.fill")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.black)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
+                            .padding(.horizontal, 4)
                             .background(Color(red: 0.00, green: 0.84, blue: 0.96))
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
 
                     Button(intent: WidgetToggleSunlightIntent()) {
-                        Label("Log Sunlight", systemImage: "sun.max.fill")
+                        Label(entry.snapshot.sunlightLoggedToday ? "Sunlight ✓" : "Log Sunlight",
+                              systemImage: entry.snapshot.sunlightLoggedToday ? "checkmark.circle.fill" : "sun.max.fill")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.black)
+                            .lineLimit(1)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
-                            .background(Color(red: 0.90, green: 0.99, blue: 0.25))
+                            .background(entry.snapshot.sunlightLoggedToday
+                                        ? Color(red: 0.25, green: 0.92, blue: 0.56)
+                                        : Color(red: 0.90, green: 0.99, blue: 0.25))
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
+    }
+
+    private var mediumSubline: String {
+        if let pace = entry.snapshot.paceOfAging {
+            if let bank = entry.snapshot.energyBank {
+                return String(format: "Bank %d%% · Pace %.2fx/yr", bank, pace)
+            }
+            return String(format: "Pace %.2fx/yr", pace)
+        }
+        return entry.snapshot.energyBank.map {
+            "Bank \($0)% · Strain \(entry.snapshot.strainScore.map { String(format: "%.1f", $0) } ?? "—")"
+        } ?? (entry.snapshot.biologicalAge.map { String(format: "Bio Age %.1fy", $0) } ?? "Connect Health")
     }
 
     private func statLine(_ title: String, _ val: String, _ color: Color) -> some View {
@@ -170,7 +198,7 @@ struct ApexReadinessWidget: Widget {
             ApexReadinessWidgetView(entry: entry)
         }
         .configurationDisplayName("APEX Readiness & Rings")
-        .description("Live autonomic recovery, HRV, and Activity rings at a glance.")
+        .description("Live autonomic recovery, HRV, Pace of Aging, and Activity rings at a glance.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
     }
 }

@@ -24,6 +24,12 @@
     <string>10.0</string>
     <key>NSHealthShareUsageDescription</key>
     <string>APEX reads Watch heart rate during workouts and HRR-60 recovery sets.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>APEX saves active Watch workout sessions and heart rate recovery telemetry into Apple Health.</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>workout-processing</string>
+    </array>
     <key>UIDeviceFamily</key>
     <array>
         <integer>4</integer>

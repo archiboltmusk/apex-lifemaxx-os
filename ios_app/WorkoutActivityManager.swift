@@ -69,6 +69,9 @@ public final class WorkoutActivityManager: ObservableObject {
     }
 
     public func startRestCountdown(seconds: Int = 90, reps: Int, elapsedSeconds: Int) {
+        if !isLiveActivityActive {
+            startSet(exercise: activeExerciseName)
+        }
         restDurationTarget = seconds
         restSecondsRemaining = seconds
         isRestTimerRunning = true
@@ -77,10 +80,14 @@ public final class WorkoutActivityManager: ObservableObject {
         pushUpdate(isResting: true)
     }
 
-    public func stopRestTimer() {
+    public func stopRestTimer(endActivity: Bool = false) {
         isRestTimerRunning = false
         restSecondsRemaining = 0
-        pushUpdate(isResting: false)
+        if endActivity {
+            Task { await endAllActivities() }
+        } else {
+            pushUpdate(isResting: false)
+        }
     }
 
     public func endSet() {

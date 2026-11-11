@@ -69,7 +69,7 @@ public struct ExperimentCorrelationSummary {
     public let verdict: String
 }
 
-public struct JournalTag: Identifiable, Hashable {
+public struct JournalTag: Identifiable, Codable, Hashable {
     public let id: String
     public let title: String
     public let icon: String
@@ -110,9 +110,13 @@ public final class ExperimentLabStore: ObservableObject {
     }
     @Published public private(set) var logs: [ExperimentLogEntry] = []
     @Published public private(set) var dailyTagsByDate: [String: [String]] = [:]
+    @Published public private(set) var customTags: [JournalTag] = []
+    @Published public private(set) var customProtocols: [ExperimentProtocol] = []
 
     private let logsKey = "apex_experiment_logs_v1"
     private let journalTagsKey = "apex_daily_journal_tags_v1"
+    private let customTagsKey = "apex_custom_journal_tags_v1"
+    private let customProtocolsKey = "apex_custom_experiment_protocols_v1"
 
     private init() {
         self.activeProtocolId = UserDefaults.standard.string(forKey: "apex_active_experiment_id") ?? ExperimentProtocol.presets[0].id
@@ -124,22 +128,75 @@ public final class ExperimentLabStore: ObservableObject {
            let decodedTags = try? JSONDecoder().decode([String: [String]].self, from: tagData) {
             self.dailyTagsByDate = decodedTags
         }
+        if let customTagData = UserDefaults.standard.data(forKey: customTagsKey),
+           let decodedCustomTags = try? JSONDecoder().decode([JournalTag].self, from: customTagData) {
+            self.customTags = decodedCustomTags
+        }
+        if let customProtoData = UserDefaults.standard.data(forKey: customProtocolsKey),
+           let decodedProtos = try? JSONDecoder().decode([ExperimentProtocol].self, from: customProtoData) {
+            self.customProtocols = decodedProtos
+        }
+    }
+
+    public var allTags: [JournalTag] {
+        JournalTag.presets + customTags
+    }
+
+    public var allProtocols: [ExperimentProtocol] {
+        ExperimentProtocol.presets + customProtocols
     }
 
     public var activeProtocol: ExperimentProtocol {
-        ExperimentProtocol.presets.first(where: { $0.id == activeProtocolId }) ?? ExperimentProtocol.presets[0]
+        allProtocols.first(where: { $0.id == activeProtocolId }) ?? ExperimentProtocol.presets[0]
     }
 
     public var dailyTagsToday: [String] {
         dailyTagsByDate[todayKey()] ?? []
     }
 
+    public func tags(forDateKey key: String) -> [String] {
+        dailyTagsByDate[key] ?? []
+    }
+
     public func todayKey() -> String {
         Self.dayKey(for: Date())
     }
 
-    public func toggleJournalTag(_ tagId: String) {
-        let key = todayKey()
+    public static func dateKey(daysAgo: Int) -> String {
+        let d = Calendar(identifier: .gregorian).date(byAdding: .day, value: -max(0, daysAgo), to: Date()) ?? Date()
+        return dayKey(for: d)
+    }
+
+    public func addCustomTag(title: String, icon: String = "tag.fill", category: String = "Custom") {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let slug = "custom_" + trimmed.lowercased().replacingOccurrences(of: " ", with: "_") + "_\(Int(Date().timeIntervalSince1970) % 10000)"
+        let tag = JournalTag(id: slug, title: trimmed, icon: icon, category: category)
+        customTags.append(tag)
+        persist()
+        Haptics.success()
+    }
+
+    public func addCustomProtocol(title: String, subtitle: String, hypothesis: String, icon: String = "flask.fill") {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let pid = "custom_proto_\(Int(Date().timeIntervalSince1970))"
+        let proto = ExperimentProtocol(
+            id: pid,
+            title: trimmed,
+            subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "14-day N-of-1 test" : subtitle,
+            hypothesis: hypothesis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Measures Lag-1 next-morning HRV, RHR & sleep delta." : hypothesis,
+            icon: icon,
+            accentHex: "#00F0FF"
+        )
+        customProtocols.append(proto)
+        activeProtocolId = pid
+        persist()
+        Haptics.success()
+    }
+
+    public func toggleJournalTag(_ tagId: String, dateKey: String? = nil) {
+        let key = dateKey ?? todayKey()
         var current = dailyTagsByDate[key] ?? []
         if let idx = current.firstIndex(of: tagId) {
             current.remove(at: idx)
@@ -149,15 +206,16 @@ public final class ExperimentLabStore: ObservableObject {
         dailyTagsByDate[key] = current
         persist()
         Haptics.selection()
+        HealthKitManager.shared.persistWidgetSnapshot()
 
         HealthKitManager.shared.syncEventToMac(extraPayload: [
-            "journalTagsToday": current,
+            "journalTagsToday": dailyTagsToday,
             "dailyTagsByDate": dailyTagsByDate
         ])
     }
 
-    public func logToday(adhered: Bool) {
-        let key = todayKey()
+    public func logToday(adhered: Bool, dateKey: String? = nil) {
+        let key = dateKey ?? todayKey()
         logs.removeAll { $0.dateKey == key && $0.protocolId == activeProtocolId }
         logs.append(ExperimentLogEntry(dateKey: key, protocolId: activeProtocolId, adhered: adhered))
         persist()
@@ -173,41 +231,41 @@ public final class ExperimentLabStore: ObservableObject {
         ])
     }
 
-    public func todayStatus(for protocolId: String) -> Bool? {
-        let key = todayKey()
+    public func todayStatus(for protocolId: String, dateKey: String? = nil) -> Bool? {
+        let key = dateKey ?? todayKey()
         return logs.first(where: { $0.dateKey == key && $0.protocolId == protocolId })?.adhered
     }
 
+    /// Lag-1 next-morning causality (protocol logged on day D -> paired with HealthKit morning outcomes on day D+1).
     public func correlation(for protocolId: String, health: HealthKitManager) -> ExperimentCorrelationSummary {
         let relevantLogs = logs.filter { $0.protocolId == protocolId }
-        let onKeys = Set(relevantLogs.filter { $0.adhered }.map { $0.dateKey })
-        let offKeys = Set(relevantLogs.filter { !$0.adhered }.map { $0.dateKey })
-        let deltas = computeOutcomeDeltas(onKeys: onKeys, offKeys: offKeys, health: health)
+        let rawOn = Set(relevantLogs.filter { $0.adhered }.map { $0.dateKey })
+        let rawOff = Set(relevantLogs.filter { !$0.adhered }.map { $0.dateKey })
 
-        let totalDays = onKeys.count + offKeys.count
+        let nextOnKeys = ApexBiometricMath.lag1ShiftedKeys(rawOn)
+        let nextOffKeys = ApexBiometricMath.lag1ShiftedKeys(rawOff)
+        let deltas = computeOutcomeDeltas(onKeys: nextOnKeys, offKeys: nextOffKeys, health: health)
+
+        let totalDays = rawOn.count + rawOff.count
         let verdict: String
-        if onKeys.isEmpty && offKeys.isEmpty {
-            verdict = "Log both Protocol On and Control Off days across 14 days to pair HealthKit outcomes."
-        } else if offKeys.isEmpty {
-            verdict = "Logged \(onKeys.count) On day(s). Log at least 1 Control (Off) day to isolate baseline delta."
-        } else if onKeys.isEmpty {
-            verdict = "Logged \(offKeys.count) Control day(s). Log at least 1 Protocol On day to compute delta."
-        } else if totalDays < 3 {
-            verdict = "Log \(max(0, 3 - totalDays)) more day(s) across On & Off states for statistical confidence."
+        if rawOn.isEmpty && rawOff.isEmpty {
+            verdict = "Log both Protocol On and Control Off days across 14 days to pair next-morning (D+1) HealthKit outcomes."
+        } else if rawOff.count < 2 || rawOn.count < 2 {
+            verdict = "Logged \(rawOn.count) On / \(rawOff.count) Control day(s). Log at least 2 On and 2 Control days for balanced Lag-1 pairing."
         } else if let hrvD = deltas.hrvDeltaPct, hrvD >= 5 {
-            verdict = "Positive signal: HRV averages +\(Int(hrvD.rounded()))% higher on protocol days."
+            verdict = "Positive Lag-1 signal: next-morning HRV averages +\(Int(hrvD.rounded()))% higher."
         } else if let rhrD = deltas.rhrDeltaBpm, rhrD <= -1.5 {
-            verdict = "Positive signal: Resting HR drops \(String(format: "%.1f", abs(rhrD))) bpm on protocol days."
+            verdict = "Positive Lag-1 signal: overnight RHR drops \(String(format: "%.1f", abs(rhrD))) bpm."
         } else {
-            verdict = "Neutral delta across \(totalDays) logged days — continue logging On/Off days through Day 14."
+            verdict = "Neutral Lag-1 delta across \(totalDays) logged days — keep logging through Day 14."
         }
 
         return ExperimentCorrelationSummary(
-            onDaysCount: onKeys.count,
-            offDaysCount: offKeys.count,
-            hrvDeltaPct: deltas.hrvDeltaPct,
-            rhrDeltaBpm: deltas.rhrDeltaBpm,
-            sleepDeltaMin: deltas.sleepDeltaMin,
+            onDaysCount: rawOn.count,
+            offDaysCount: rawOff.count,
+            hrvDeltaPct: (rawOn.count >= 2 && rawOff.count >= 2) ? deltas.hrvDeltaPct : nil,
+            rhrDeltaBpm: (rawOn.count >= 2 && rawOff.count >= 2) ? deltas.rhrDeltaBpm : nil,
+            sleepDeltaMin: (rawOn.count >= 2 && rawOff.count >= 2) ? deltas.sleepDeltaMin : nil,
             verdict: verdict
         )
     }
@@ -260,29 +318,19 @@ public final class ExperimentLabStore: ObservableObject {
         let rhrByDay = Dictionary(health.rhrHistory.map { (Self.dayKey(for: $0.date), $0.value) }, uniquingKeysWith: { _, latest in latest })
         let sleepByDay = Dictionary(health.sleepHistory.map { (Self.dayKey(for: $0.date), $0.value) }, uniquingKeysWith: { _, latest in latest })
 
-        let onHRV = onKeys.compactMap { hrvByDay[$0] }
-        let offHRV = offKeys.compactMap { hrvByDay[$0] }
-        let hrvDeltaPct: Double? = {
-            guard !onHRV.isEmpty, !offHRV.isEmpty else { return nil }
-            let mOn = onHRV.reduce(0, +) / Double(onHRV.count)
-            let mOff = offHRV.reduce(0, +) / Double(offHRV.count)
-            guard mOff > 0 else { return nil }
-            return ((mOn - mOff) / mOff) * 100.0
-        }()
-
-        let onRHR = onKeys.compactMap { rhrByDay[$0] }
-        let offRHR = offKeys.compactMap { rhrByDay[$0] }
-        let rhrDeltaBpm: Double? = {
-            guard !onRHR.isEmpty, !offRHR.isEmpty else { return nil }
-            return (onRHR.reduce(0, +) / Double(onRHR.count)) - (offRHR.reduce(0, +) / Double(offRHR.count))
-        }()
-
-        let onSleep = onKeys.compactMap { sleepByDay[$0] }
-        let offSleep = offKeys.compactMap { sleepByDay[$0] }
-        let sleepDeltaMin: Double? = {
-            guard !onSleep.isEmpty, !offSleep.isEmpty else { return nil }
-            return ((onSleep.reduce(0, +) / Double(onSleep.count)) - (offSleep.reduce(0, +) / Double(offSleep.count))) * 60.0
-        }()
+        let hrvDeltaPct = ApexBiometricMath.meanPercentDelta(
+            onValues: onKeys.compactMap { hrvByDay[$0] },
+            offValues: offKeys.compactMap { hrvByDay[$0] }
+        )
+        let rhrDeltaBpm = ApexBiometricMath.meanAbsoluteDelta(
+            onValues: onKeys.compactMap { rhrByDay[$0] },
+            offValues: offKeys.compactMap { rhrByDay[$0] }
+        )
+        let sleepDeltaMin = ApexBiometricMath.meanAbsoluteDelta(
+            onValues: onKeys.compactMap { sleepByDay[$0] },
+            offValues: offKeys.compactMap { sleepByDay[$0] },
+            scale: 60.0
+        )
 
         return (hrvDeltaPct, rhrDeltaBpm, sleepDeltaMin)
     }
@@ -297,6 +345,14 @@ public final class ExperimentLabStore: ObservableObject {
            let decodedTags = try? JSONDecoder().decode([String: [String]].self, from: tagData) {
             self.dailyTagsByDate = decodedTags
         }
+        if let customTagData = UserDefaults.standard.data(forKey: customTagsKey),
+           let decodedCustomTags = try? JSONDecoder().decode([JournalTag].self, from: customTagData) {
+            self.customTags = decodedCustomTags
+        }
+        if let customProtoData = UserDefaults.standard.data(forKey: customProtocolsKey),
+           let decodedProtos = try? JSONDecoder().decode([ExperimentProtocol].self, from: customProtoData) {
+            self.customProtocols = decodedProtos
+        }
     }
 
     private func persist() {
@@ -305,6 +361,12 @@ public final class ExperimentLabStore: ObservableObject {
         }
         if let tagData = try? JSONEncoder().encode(dailyTagsByDate) {
             UserDefaults.standard.set(tagData, forKey: journalTagsKey)
+        }
+        if let customTagData = try? JSONEncoder().encode(customTags) {
+            UserDefaults.standard.set(customTagData, forKey: customTagsKey)
+        }
+        if let customProtoData = try? JSONEncoder().encode(customProtocols) {
+            UserDefaults.standard.set(customProtoData, forKey: customProtocolsKey)
         }
     }
 
@@ -326,18 +388,37 @@ public struct ExperimentLabSheet: View {
     @ObservedObject private var store = ExperimentLabStore.shared
     @ObservedObject private var health = HealthKitManager.shared
 
+    @State private var selectedDaysAgo: Int = 0
+    @State private var showNewTagSheet = false
+    @State private var newTagTitle = ""
+    @State private var showNewProtoSheet = false
+    @State private var newProtoTitle = ""
+    @State private var newProtoSubtitle = ""
+    @State private var newProtoHypothesis = ""
+
     public init() {}
+
+    private var selectedDateKey: String {
+        ExperimentLabStore.dateKey(daysAgo: selectedDaysAgo)
+    }
+
+    private var selectedDayLabel: String {
+        if selectedDaysAgo == 0 { return "Today" }
+        if selectedDaysAgo == 1 { return "Yesterday" }
+        return "\(selectedDaysAgo)d ago"
+    }
 
     public var body: some View {
         let active = store.activeProtocol
         let summary = store.correlation(for: active.id, health: health)
-        let todayLog = store.todayStatus(for: active.id)
+        let dayLog = store.todayStatus(for: active.id, dateKey: selectedDateKey)
 
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    dateBackfillPicker
                     dailyJournalSection
-                    activeExperimentCard(active: active, summary: summary, todayLog: todayLog)
+                    activeExperimentCard(active: active, summary: summary, todayLog: dayLog)
                     protocolPickerSection
                 }
                 .padding(.horizontal, 16)
@@ -352,8 +433,69 @@ public struct ExperimentLabSheet: View {
                         .fontWeight(.semibold)
                 }
             }
+            .alert("Create Custom Journal Tag", isPresented: $showNewTagSheet) {
+                TextField("Tag name (e.g. Electrolytes, Sauna)", text: $newTagTitle)
+                Button("Add Tag") {
+                    store.addCustomTag(title: newTagTitle)
+                    newTagTitle = ""
+                }
+                Button("Cancel", role: .cancel) { newTagTitle = "" }
+            }
+            .sheet(isPresented: $showNewProtoSheet) {
+                NavigationStack {
+                    Form {
+                        Section("Protocol Details") {
+                            TextField("Protocol Title (e.g. Magnesium Before Bed)", text: $newProtoTitle)
+                            TextField("Target Mechanism (e.g. Deep sleep latency)", text: $newProtoSubtitle)
+                            TextField("Hypothesis", text: $newProtoHypothesis)
+                        }
+                    }
+                    .navigationTitle("New 14-Day Protocol")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Cancel") { showNewProtoSheet = false }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Save") {
+                                store.addCustomProtocol(title: newProtoTitle, subtitle: newProtoSubtitle, hypothesis: newProtoHypothesis)
+                                newProtoTitle = ""
+                                newProtoSubtitle = ""
+                                newProtoHypothesis = ""
+                                showNewProtoSheet = false
+                            }
+                            .disabled(newProtoTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                }
+                .preferredColorScheme(.dark)
+            }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var dateBackfillPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(0..<7, id: \.self) { daysAgo in
+                    let label = daysAgo == 0 ? "Today" : (daysAgo == 1 ? "Yesterday" : ExperimentLabStore.dateKey(daysAgo: daysAgo).suffix(5).description)
+                    let isSelected = selectedDaysAgo == daysAgo
+                    Button {
+                        selectedDaysAgo = daysAgo
+                        Haptics.selection()
+                    } label: {
+                        Text(label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? .black : .white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(isSelected ? ApexTheme.accentVolt : ApexTheme.cardSurface)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private func activeExperimentCard(active: ExperimentProtocol, summary: ExperimentCorrelationSummary, todayLog: Bool?) -> some View {
@@ -384,9 +526,9 @@ public struct ExperimentLabSheet: View {
 
             HStack(spacing: 10) {
                 Button {
-                    store.logToday(adhered: true)
+                    store.logToday(adhered: true, dateKey: selectedDateKey)
                 } label: {
-                    Label(todayLog == true ? "Logged Done Today" : "Done Today", systemImage: "checkmark.circle.fill")
+                    Label(todayLog == true ? "Logged Done (\(selectedDayLabel))" : "Done (\(selectedDayLabel))", systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
@@ -395,9 +537,9 @@ public struct ExperimentLabSheet: View {
                 .tint(todayLog == true ? ApexTheme.green : ApexTheme.blue)
 
                 Button {
-                    store.logToday(adhered: false)
+                    store.logToday(adhered: false, dateKey: selectedDateKey)
                 } label: {
-                    Label(todayLog == false ? "Logged Skipped" : "Control Day", systemImage: "minus.circle")
+                    Label(todayLog == false ? "Logged Skipped (\(selectedDayLabel))" : "Control (\(selectedDayLabel))", systemImage: "minus.circle")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
@@ -424,33 +566,37 @@ public struct ExperimentLabSheet: View {
     }
 
     private var dailyJournalSection: some View {
-        let activeTags = Set(store.dailyTagsToday)
+        let activeTags = Set(store.tags(forDateKey: selectedDateKey))
         let columns = [GridItem(.adaptive(minimum: 120), spacing: 8)]
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Daily Journal & Lag-1 Impact")
+                    Text("Daily Journal · \(selectedDayLabel)")
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.white)
-                    Text("Tap today's habits — correlates against next-day HRV, RHR & Sleep")
+                    Text("Lag-1 pairs against next-day HRV, RHR & Sleep")
                         .font(.caption)
                         .foregroundStyle(ApexTheme.secondaryText)
                 }
                 Spacer()
-                Text("\(activeTags.count) active")
-                    .font(.caption.weight(.bold).monospacedDigit())
-                    .foregroundStyle(ApexTheme.blue)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(ApexTheme.blue.opacity(0.16), in: Capsule())
+                Button {
+                    showNewTagSheet = true
+                } label: {
+                    Label("Tag", systemImage: "plus")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(ApexTheme.accentVolt)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(ApexTheme.accentVolt.opacity(0.14), in: Capsule())
+                }
             }
 
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(JournalTag.presets) { tag in
+                ForEach(store.allTags) { tag in
                     let isOn = activeTags.contains(tag.id)
                     Button {
-                        store.toggleJournalTag(tag.id)
+                        store.toggleJournalTag(tag.id, dateKey: selectedDateKey)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: tag.icon)
@@ -478,7 +624,7 @@ public struct ExperimentLabSheet: View {
 
             Divider().background(Color.white.opacity(0.08))
 
-            let taggedPresets = JournalTag.presets.filter { tag in
+            let taggedPresets = store.allTags.filter { tag in
                 store.dailyTagsByDate.values.contains(where: { $0.contains(tag.id) })
             }
             if taggedPresets.isEmpty {
@@ -548,12 +694,22 @@ public struct ExperimentLabSheet: View {
 
     private var protocolPickerSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Available 14-Day Protocols")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 4)
+            HStack {
+                Text("Available 14-Day Protocols")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Button {
+                    showNewProtoSheet = true
+                } label: {
+                    Label("Custom Protocol", systemImage: "plus.circle.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(ApexTheme.standCyan)
+                }
+            }
+            .padding(.horizontal, 4)
 
-            ForEach(ExperimentProtocol.presets) { proto in
+            ForEach(store.allProtocols) { proto in
                 Button {
                     Haptics.selection()
                     store.activeProtocolId = proto.id

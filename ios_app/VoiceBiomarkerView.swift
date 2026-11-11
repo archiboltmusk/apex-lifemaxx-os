@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import AVFoundation
 import Accelerate
+import Charts
 
 // MARK: - Morning Vocal Resonance Reading
 public struct VoiceBiomarkerReading: Codable, Identifiable, Equatable {
@@ -10,6 +11,8 @@ public struct VoiceBiomarkerReading: Codable, Identifiable, Equatable {
     public let fundamentalPitchHz: Double
     public let jitterPercent: Double
     public let signalRMS: Double
+    public var chestResonancePct: Double? = nil
+    public var cnsStressScore: Int? = nil
 }
 
 @MainActor
@@ -46,6 +49,15 @@ public final class VoiceBiomarkerStore: ObservableObject {
             "vocalJitterPct": reading.jitterPercent
         ])
     }
+
+    public func reloadFromDisk() {
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([VoiceBiomarkerReading].self, from: data) {
+            history = decoded
+        } else {
+            history = []
+        }
+    }
 }
 
 // MARK: - Acoustic F0 & Jitter Engine (AVAudioEngine + Accelerate vDSP)
@@ -60,11 +72,13 @@ public final class VoiceBiomarkerEngine: ObservableObject {
 
     @Published public private(set) var status: Status = .idle
     @Published public private(set) var livePitchHz: Double = 0
+    @Published public private(set) var liveChestResonancePct: Double = 0
     @Published public private(set) var liveLevel: Float = 0
 
     private let audioEngine = AVAudioEngine()
     private var framePitchHistory: [Double] = []
     private var frameRMSHistory: [Double] = []
+    private var frameChestResonanceHistory: [Double] = []
     private var sampleRate: Double = 44100
     private var timerTask: Task<Void, Never>?
 
@@ -73,7 +87,9 @@ public final class VoiceBiomarkerEngine: ObservableObject {
     public func startFiveSecondCapture() {
         framePitchHistory.removeAll()
         frameRMSHistory.removeAll()
+        frameChestResonanceHistory.removeAll()
         livePitchHz = 0
+        liveChestResonancePct = 0
         Haptics.tap()
 
         Task { [weak self] in
@@ -179,6 +195,36 @@ public final class VoiceBiomarkerEngine: ObservableObject {
             livePitchHz = (f0 * 10).rounded() / 10
             framePitchHistory.append(f0)
             frameRMSHistory.append(Double(rms))
+
+            // 2048-pt Hann-windowed vDSP DFT: Chest Resonance (85–250 Hz) vs Vocal Tension (1.5–3.5 kHz)
+            let fftN = min(2048, samples.count >= 2048 ? 2048 : 1024)
+            if fftN >= 1024, let setup = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(fftN), .FORWARD) {
+                var hann = [Float](repeating: 0, count: fftN)
+                vDSP_hann_window(&hann, vDSP_Length(fftN), Int32(vDSP_HANN_NORM))
+                var realIn = [Float](repeating: 0, count: fftN)
+                for i in 0..<fftN { realIn[i] = samples[i] * hann[i] }
+                let imagZero = [Float](repeating: 0, count: fftN)
+                var outR = [Float](repeating: 0, count: fftN)
+                var outI = [Float](repeating: 0, count: fftN)
+                vDSP_DFT_Execute(setup, realIn, imagZero, &outR, &outI)
+                vDSP_DFT_DestroySetup(setup)
+
+                var chestE = 0.0
+                var highE = 0.0
+                for k in 1..<(fftN / 2) {
+                    let freq = Double(k) * sampleRate / Double(fftN)
+                    let pwr = Double(outR[k] * outR[k] + outI[k] * outI[k])
+                    if freq >= 85.0 && freq <= 250.0 {
+                        chestE += pwr
+                    } else if freq >= 1500.0 && freq <= 3500.0 {
+                        highE += pwr
+                    }
+                }
+                let denom = max(1e-9, chestE + highE)
+                let chestPct = min(98.0, max(5.0, (chestE / denom) * 100.0))
+                liveChestResonancePct = chestPct.rounded()
+                frameChestResonanceHistory.append(chestPct)
+            }
         }
     }
 
@@ -202,15 +248,24 @@ public final class VoiceBiomarkerEngine: ObservableObject {
             diffSum += abs(periods[i] - periods[i - 1])
         }
         let meanPeriod = periods.reduce(0, +) / Double(periods.count)
-        let jitterPct = ((diffSum / Double(max(1, periods.count - 1))) / max(meanPeriod, 1e-5)) * 100.0
+        let jitterPct = min(12.0, ((diffSum / Double(max(1, periods.count - 1))) / max(meanPeriod, 1e-5)) * 100.0)
         let avgRMS = frameRMSHistory.reduce(0, +) / Double(frameRMSHistory.count)
+
+        let sortedChest = frameChestResonanceHistory.sorted()
+        let medianChestPct = sortedChest.isEmpty ? nil : ((sortedChest[sortedChest.count / 2] * 10).rounded() / 10)
+        let pitchShiftPenalty = VoiceBiomarkerStore.shared.baselinePitchHz.map { max(0.0, medianPitch - $0) * 1.4 } ?? 0.0
+        let jitterPenalty = jitterPct * 12.0
+        let chestCredit = (medianChestPct ?? 55.0) * 0.35
+        let cnsStress = Int(max(5.0, min(95.0, (28.0 + jitterPenalty + pitchShiftPenalty - (chestCredit - 18.0)).rounded())))
 
         let reading = VoiceBiomarkerReading(
             id: UUID(),
             date: Date(),
             fundamentalPitchHz: (medianPitch * 10).rounded() / 10,
-            jitterPercent: min(12.0, (jitterPct * 100).rounded() / 100),
-            signalRMS: avgRMS
+            jitterPercent: (jitterPct * 100).rounded() / 100,
+            signalRMS: avgRMS,
+            chestResonancePct: medianChestPct,
+            cnsStressScore: cnsStress
         )
         VoiceBiomarkerStore.shared.save(reading)
         status = .completed(reading)
@@ -232,6 +287,9 @@ public struct VoiceBiomarkerSheet: View {
                 VStack(spacing: 16) {
                     liveCheckCard
                     latestSummaryCard
+                    if store.history.count >= 2 {
+                        trendChartCard
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
@@ -288,7 +346,7 @@ public struct VoiceBiomarkerSheet: View {
 
             switch engine.status {
             case .idle:
-                Text("Hold a natural, steady \"Aaaah\" tone for 5 seconds. Measures Fundamental Pitch (F0) and vocal fold jitter for CNS readiness.")
+                Text("Hold a natural, steady \"Aaaah\" tone for 5 seconds. Measures Fundamental Pitch (F0), vocal fold jitter & chest resonance FFT for CNS readiness.")
                     .font(.subheadline)
                     .foregroundStyle(ApexTheme.secondaryText)
                     .multilineTextAlignment(.center)
@@ -319,9 +377,14 @@ public struct VoiceBiomarkerSheet: View {
 
             case .completed(let reading):
                 VStack(spacing: 6) {
-                    Text("Captured F0: \(String(format: "%.1f", reading.fundamentalPitchHz)) Hz · Jitter \(String(format: "%.2f", reading.jitterPercent))%")
+                    Text("F0: \(String(format: "%.1f", reading.fundamentalPitchHz)) Hz · Jitter \(String(format: "%.2f", reading.jitterPercent))%")
                         .font(.headline)
                         .foregroundStyle(ApexTheme.green)
+                    if let chest = reading.chestResonancePct, let cns = reading.cnsStressScore {
+                        Text("Chest Resonance: \(Int(chest.rounded()))% · CNS Strain: \(cns)/100")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(ApexTheme.standCyan)
+                    }
                     Button("Measure Again") {
                         engine.startFiveSecondCapture()
                     }
@@ -349,11 +412,11 @@ public struct VoiceBiomarkerSheet: View {
     private var latestSummaryCard: some View {
         if let latest = store.latest {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Resonance Trend")
+                Text("Latest Acoustic Biomarkers")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
 
-                HStack(spacing: 12) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     VStack(alignment: .leading) {
                         Text("Latest Pitch F0")
                             .font(.caption)
@@ -372,6 +435,30 @@ public struct VoiceBiomarkerSheet: View {
                             .foregroundStyle(latest.jitterPercent < 2.2 ? ApexTheme.green : ApexTheme.orange)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let chest = latest.chestResonancePct {
+                        VStack(alignment: .leading) {
+                            Text("Chest Resonance")
+                                .font(.caption)
+                                .foregroundStyle(ApexTheme.secondaryText)
+                            Text("\(Int(chest.rounded()))%")
+                                .font(.title3.weight(.bold).monospacedDigit())
+                                .foregroundStyle(ApexTheme.standCyan)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if let cns = latest.cnsStressScore {
+                        VStack(alignment: .leading) {
+                            Text("CNS Vocal Load")
+                                .font(.caption)
+                                .foregroundStyle(ApexTheme.secondaryText)
+                            Text("\(cns) / 100")
+                                .font(.title3.weight(.bold).monospacedDigit())
+                                .foregroundStyle(cns > 55 ? ApexTheme.orange : ApexTheme.green)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 if let baseline = store.baselinePitchHz, store.history.count > 1 {
@@ -384,5 +471,32 @@ public struct VoiceBiomarkerSheet: View {
             .padding(18)
             .appleCard(cornerRadius: 20)
         }
+    }
+
+    private var trendChartCard: some View {
+        let chronological = Array(store.history.prefix(14).reversed())
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Pitch F0 Longitudinal Trend")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Chart(chronological) { item in
+                LineMark(
+                    x: .value("Date", item.date),
+                    y: .value("Hz", item.fundamentalPitchHz)
+                )
+                .foregroundStyle(ApexTheme.purple)
+                .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
+
+                PointMark(
+                    x: .value("Date", item.date),
+                    y: .value("Hz", item.fundamentalPitchHz)
+                )
+                .foregroundStyle(ApexTheme.standCyan)
+            }
+            .frame(height: 130)
+        }
+        .padding(18)
+        .appleCard(cornerRadius: 20)
     }
 }

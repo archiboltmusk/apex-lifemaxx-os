@@ -4,10 +4,42 @@ import CoreBluetooth
 import WorkoutKit
 import HealthKit
 
+public struct HRR60Record: Identifiable, Codable, Equatable {
+    public let id: UUID
+    public let recordedAt: Date
+    public let peakBPM: Int
+    public let endBPM: Int
+    public let dropBpm: Int
+    public let rmssdMs: Double?
+    public let source: String
+
+    public init(
+        id: UUID = UUID(),
+        recordedAt: Date = Date(),
+        peakBPM: Int,
+        endBPM: Int,
+        dropBpm: Int,
+        rmssdMs: Double? = nil,
+        source: String = "BLE Chest Strap"
+    ) {
+        self.id = id
+        self.recordedAt = recordedAt
+        self.peakBPM = peakBPM
+        self.endBPM = endBPM
+        self.dropBpm = dropBpm
+        self.rmssdMs = rmssdMs
+        self.source = source
+    }
+}
+
 // MARK: - CoreBluetooth Chest Strap & Live R-R Monitor (0x180D / 0x2A37)
 @MainActor
 public final class BLEHeartRateMonitor: NSObject, ObservableObject {
     public static let shared = BLEHeartRateMonitor()
+
+    private static let preferredStrapKey = "apex_ble_preferred_strap_v1"
+    private static let preferredStrapNameKey = "apex_ble_preferred_strap_name_v1"
+    private static let hrrHistoryKey = "apex_ios_hrr60_history_v1"
 
     @Published public private(set) var stateText: String = "Idle"
     @Published public private(set) var isScanning: Bool = false
@@ -19,6 +51,9 @@ public final class BLEHeartRateMonitor: NSObject, ObservableObject {
     @Published public private(set) var recoveryTimerRemaining: Int = 0
     @Published public private(set) var hrr60DropBpm: Int? = nil
     @Published public private(set) var discoveredDevices: [DiscoveredStrap] = []
+    @Published public private(set) var preferredStrapUUID: UUID? = nil
+    @Published public private(set) var preferredStrapName: String? = nil
+    @Published public private(set) var hrr60History: [HRR60Record] = []
 
     public struct DiscoveredStrap: Identifiable, Hashable {
         public let id: UUID
@@ -38,6 +73,55 @@ public final class BLEHeartRateMonitor: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        if let rawUUID = UserDefaults.standard.string(forKey: Self.preferredStrapKey),
+           let parsed = UUID(uuidString: rawUUID) {
+            preferredStrapUUID = parsed
+            preferredStrapName = UserDefaults.standard.string(forKey: Self.preferredStrapNameKey)
+        }
+        hrr60History = Self.loadHRR60History()
+    }
+
+    public static func loadHRR60History() -> [HRR60Record] {
+        guard let data = UserDefaults.standard.data(forKey: hrrHistoryKey),
+              let decoded = try? JSONDecoder().decode([HRR60Record].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    public static func saveHRR60History(_ items: [HRR60Record]) {
+        if let encoded = try? JSONEncoder().encode(Array(items.prefix(30))) {
+            UserDefaults.standard.set(encoded, forKey: hrrHistoryKey)
+        }
+    }
+
+    public static func appendHRR60Record(
+        peakBPM: Int,
+        endBPM: Int,
+        dropBpm: Int,
+        rmssdMs: Double?,
+        source: String
+    ) {
+        var list = loadHRR60History()
+        list.insert(
+            HRR60Record(peakBPM: peakBPM, endBPM: endBPM, dropBpm: dropBpm, rmssdMs: rmssdMs, source: source),
+            at: 0
+        )
+        saveHRR60History(list)
+        Task { @MainActor in
+            BLEHeartRateMonitor.shared.hrr60History = Self.loadHRR60History()
+        }
+    }
+
+    public func reloadHistory() {
+        hrr60History = Self.loadHRR60History()
+    }
+
+    public func clearPreferredStrap() {
+        preferredStrapUUID = nil
+        preferredStrapName = nil
+        UserDefaults.standard.removeObject(forKey: Self.preferredStrapKey)
+        UserDefaults.standard.removeObject(forKey: Self.preferredStrapNameKey)
     }
 
     public func startScanning() {
@@ -48,6 +132,15 @@ public final class BLEHeartRateMonitor: NSObject, ObservableObject {
         }
         guard let cm = centralManager else { return }
         if cm.state == .poweredOn {
+            // Attempt direct reconnection if preferred strap UUID is already cached by CoreBluetooth
+            if let pref = preferredStrapUUID,
+               let cached = cm.retrievePeripherals(withIdentifiers: [pref]).first {
+                peripheralsById[pref] = cached
+                stateText = "Reconnecting to \(preferredStrapName ?? "saved strap")..."
+                cached.delegate = self
+                activePeripheral = cached
+                cm.connect(cached, options: nil)
+            }
             isScanning = true
             stateText = "Scanning for ANT+/BLE chest straps..."
             cm.scanForPeripherals(withServices: [heartRateServiceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
@@ -111,6 +204,14 @@ public final class BLEHeartRateMonitor: NSObject, ObservableObject {
                         self.hrr60DropBpm = drop
                         Haptics.success()
                         let rhrRMSSD = self.liveRMSSD
+                        let strapSource = self.deviceName ?? "BLE Chest Strap"
+                        Self.appendHRR60Record(
+                            peakBPM: baseline,
+                            endBPM: endBPM,
+                            dropBpm: drop,
+                            rmssdMs: rhrRMSSD,
+                            source: strapSource
+                        )
                         Task {
                             await HealthKitManager.shared.saveHeartRateToHealth(
                                 bpm: Double(endBPM),
@@ -186,6 +287,13 @@ extension BLEHeartRateMonitor: CBCentralManagerDelegate, CBPeripheralDelegate {
             switch state {
             case .poweredOn:
                 if self.isScanning {
+                    if let pref = self.preferredStrapUUID,
+                       let cached = central.retrievePeripherals(withIdentifiers: [pref]).first {
+                        self.peripheralsById[pref] = cached
+                        cached.delegate = self
+                        self.activePeripheral = cached
+                        central.connect(cached, options: nil)
+                    }
                     self.stateText = "Scanning for ANT+/BLE chest straps..."
                     central.scanForPeripherals(withServices: [self.heartRateServiceUUID], options: nil)
                 }
@@ -219,15 +327,23 @@ extension BLEHeartRateMonitor: CBCentralManagerDelegate, CBPeripheralDelegate {
                 self.discoveredDevices.append(DiscoveredStrap(id: pid, name: name, rssi: rssiVal))
                 self.stateText = "Found \(self.discoveredDevices.count) HR device(s)"
             }
+            if pid == self.preferredStrapUUID && !self.isConnected && self.activePeripheral == nil {
+                self.connect(to: pid)
+            }
         }
     }
 
     nonisolated public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        let pid = peripheral.identifier
         let pname = peripheral.name ?? "HR Strap"
         Task { @MainActor in
             self.isConnected = true
             self.deviceName = pname
             self.stateText = "Connected · \(pname)"
+            self.preferredStrapUUID = pid
+            self.preferredStrapName = pname
+            UserDefaults.standard.set(pid.uuidString, forKey: Self.preferredStrapKey)
+            UserDefaults.standard.set(pname, forKey: Self.preferredStrapNameKey)
             Haptics.success()
             peripheral.discoverServices([self.heartRateServiceUUID])
         }
@@ -236,6 +352,7 @@ extension BLEHeartRateMonitor: CBCentralManagerDelegate, CBPeripheralDelegate {
     nonisolated public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
             self.isConnected = false
+            self.activePeripheral = nil
             self.stateText = "Connection failed"
         }
     }
@@ -243,6 +360,7 @@ extension BLEHeartRateMonitor: CBCentralManagerDelegate, CBPeripheralDelegate {
     nonisolated public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
             self.isConnected = false
+            self.activePeripheral = nil
             self.liveBPM = nil
             self.stateText = "Strap disconnected"
         }
@@ -346,6 +464,9 @@ public struct ChestStrapWatchSheet: View {
                 VStack(spacing: 16) {
                     watchCard
                     bleCard
+                    if !ble.hrr60History.isEmpty {
+                        hrrHistoryCard
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
@@ -435,6 +556,22 @@ public struct ChestStrapWatchSheet: View {
                 .font(.caption)
                 .foregroundStyle(ApexTheme.secondaryText)
 
+            if let prefName = ble.preferredStrapName {
+                HStack {
+                    Image(systemName: "bolt.horizontal.circle.fill")
+                        .foregroundStyle(ApexTheme.standCyan)
+                    Text("Preferred Auto-Reconnect: \(prefName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Forget") {
+                        ble.clearPreferredStrap()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ApexTheme.accentAmber)
+                }
+            }
+
             if ble.isConnected {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading) {
@@ -513,6 +650,34 @@ public struct ChestStrapWatchSheet: View {
                         .background(ApexTheme.cardElevated, in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
+            }
+        }
+        .padding(18)
+        .appleCard(cornerRadius: 20)
+    }
+
+    private var hrrHistoryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("HRR-60 Recovery History")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+
+            ForEach(ble.hrr60History.prefix(6)) { item in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("-\(item.dropBpm) bpm drop (\(item.peakBPM) → \(item.endBPM) bpm)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(item.dropBpm >= 22 ? ApexTheme.green : ApexTheme.orange)
+                        Text(item.source + (item.rmssdMs.map { String(format: " · %.0f ms RMSSD", $0) } ?? ""))
+                            .font(.caption)
+                            .foregroundStyle(ApexTheme.secondaryText)
+                    }
+                    Spacer()
+                    Text(item.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(ApexTheme.secondaryText)
+                }
+                .padding(.vertical, 4)
             }
         }
         .padding(18)

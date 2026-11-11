@@ -52,6 +52,8 @@ targets:
       - Widgets/ApexWidgets.swift
     info:
       path: Widgets/Info.plist
+    entitlements:
+      path: Widgets/APEXWidgets.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: club.apex.lifemaxx.ios.widgets
@@ -63,9 +65,12 @@ targets:
     platform: watchOS
     deploymentTarget: "10.0"
     sources:
+      - ApexSharedTypes.swift
       - Watch/APEXWatchApp.swift
     info:
       path: Watch/Info.plist
+    entitlements:
+      path: Watch/APEXWatch.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: club.apex.lifemaxx.ios.watchkitapp

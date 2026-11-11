@@ -3,6 +3,13 @@ import PDFKit
 import UIKit
 import UniformTypeIdentifiers
 
+public struct NutritionTargetsBackup: Codable, Equatable {
+    public let calorieTarget: Double
+    public let proteinTargetG: Double
+    public let fiberTargetG: Double
+    public let waterTargetMl: Double
+}
+
 // MARK: - Portable Cross-Device Snapshot (.apexbackup) & Mac Continuity Coordinator
 public struct ApexBackupPayload: Codable {
     public let version: Int
@@ -20,6 +27,28 @@ public struct ApexBackupPayload: Codable {
     public let completedWorkouts: [LoggedStrengthWorkout]
     public let meals: [LoggedFoodEntry]
     public let recipes: [CustomRecipe]
+
+    // Extended v2 Offline Stores (optional for backward compatibility with v1 .apexbackup files)
+    public var workoutSets: [WorkoutSetEntry]? = nil
+    public var faceScans: [FaceScanRecord]? = nil
+    public var trueDepthSnapshots: [TrueDepthMeshSnapshot]? = nil
+    public var opticalPulseHistory: [OpticalPulseMeasurement]? = nil
+    public var voiceBiomarkers: [VoiceBiomarkerReading]? = nil
+    public var breathworkSessions: [BreathworkSessionRecord]? = nil
+    public var postureSessions: [PostureSessionRecord]? = nil
+    public var thermalSessions: [ThermalSessionRecord]? = nil
+    public var nBackSessions: [NBackSessionRecord]? = nil
+    public var mewingSessions: [MewingSessionRecord]? = nil
+    public var decathlonBenchmarks: DecathlonBenchmarkState? = nil
+    public var labHistory: [LabPanelSnapshot]? = nil
+    public var hydrationHistory: [HydrationCaffeineDay]? = nil
+    public var supplements: [DailySupplement]? = nil
+    public var nutritionGoals: NutritionTargetsBackup? = nil
+    public var coachMessages: [CoachMessage]? = nil
+    public var hrr60History: [HRR60Record]? = nil
+    public var customTags: [JournalTag]? = nil
+    public var customProtocols: [ExperimentProtocol]? = nil
+    public var customExercises: [BevelExercise]? = nil
 }
 
 @MainActor
@@ -36,6 +65,8 @@ public final class ApexBackupCoordinator: ObservableObject {
     public func buildSnapshot(health: HealthKitManager) -> ApexBackupPayload {
         let strength = StrengthBuilderStore.shared
         let nutrition = NutritionLogStore.shared
+        let experiment = ExperimentLabStore.shared
+        let brain = ThermalBrainStore.shared
         let lab = LabPanelStore.load()
 
         let expLogs: [ExperimentLogEntry] = {
@@ -53,8 +84,11 @@ public final class ApexBackupCoordinator: ObservableObject {
             return copy
         }
 
+        // Strip large preview JPEG blobs from FaceScan records if needed while keeping all landmark metrics
+        let compactFaces = Array(FaceScanStore.load().prefix(30))
+
         return ApexBackupPayload(
-            version: 1,
+            version: 2,
             exportedAt: Date(),
             deviceName: UIDevice.current.name,
             unitSystem: ApexUnitPreferences.current.rawValue,
@@ -62,13 +96,38 @@ public final class ApexBackupCoordinator: ObservableObject {
             sleepGoalHours: health.baselineSleepGoalHours,
             clinicalPhenoAge: health.clinicalPhenoAge,
             labPanel: lab,
-            dailyTagsByDate: ExperimentLabStore.shared.dailyTagsByDate,
+            dailyTagsByDate: experiment.dailyTagsByDate,
             experimentLogs: expLogs,
-            activeProtocolId: ExperimentLabStore.shared.activeProtocolId,
+            activeProtocolId: experiment.activeProtocolId,
             bestRecords: strength.bestRecords,
-            completedWorkouts: Array(strength.completedWorkouts.prefix(40)),
+            completedWorkouts: Array(strength.completedWorkouts.prefix(60)),
             meals: compactMeals,
-            recipes: nutrition.recipes
+            recipes: nutrition.recipes,
+            workoutSets: Array(WorkoutSetStore.load().prefix(60)),
+            faceScans: compactFaces,
+            trueDepthSnapshots: Array(TrueDepthTwinStore.load().prefix(20)),
+            opticalPulseHistory: OpticalPulseStore.load(),
+            voiceBiomarkers: VoiceBiomarkerStore.shared.history,
+            breathworkSessions: BreathworkHistoryStore.load(),
+            postureSessions: SpatialPostureHapticsEngine.loadHistory(),
+            thermalSessions: brain.thermalSessions,
+            nBackSessions: brain.nBackSessions,
+            mewingSessions: brain.mewingSessions,
+            decathlonBenchmarks: brain.decathlon,
+            labHistory: LabPanelStore.loadHistory(),
+            hydrationHistory: nutrition.hydrationHistory,
+            supplements: nutrition.supplements,
+            nutritionGoals: NutritionTargetsBackup(
+                calorieTarget: nutrition.calorieTarget,
+                proteinTargetG: nutrition.proteinTargetG,
+                fiberTargetG: nutrition.fiberTargetG,
+                waterTargetMl: nutrition.waterTargetMl
+            ),
+            coachMessages: Array(ApexIntelligenceEngine.shared.messages.suffix(40)),
+            hrr60History: BLEHeartRateMonitor.loadHRR60History(),
+            customTags: experiment.customTags,
+            customProtocols: experiment.customProtocols,
+            customExercises: strength.customExercises
         )
     }
 
@@ -92,7 +151,7 @@ public final class ApexBackupCoordinator: ObservableObject {
                 NSUbiquitousKeyValueStore.default.set(data, forKey: cloudKey)
                 NSUbiquitousKeyValueStore.default.synchronize()
             }
-            lastBackupStatus = "Exported \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)) snapshot."
+            lastBackupStatus = "Exported \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)) v2 snapshot."
             return url
         } catch {
             lastBackupStatus = "Backup export failed: \(error.localizedDescription)"
@@ -143,11 +202,20 @@ public final class ApexBackupCoordinator: ObservableObject {
         if let lab = payload.labPanel {
             LabPanelStore.save(lab)
         }
+        if let labHist = payload.labHistory {
+            LabPanelStore.saveHistory(labHist)
+        }
         if let tagBytes = try? JSONEncoder().encode(payload.dailyTagsByDate) {
             UserDefaults.standard.set(tagBytes, forKey: "apex_daily_journal_tags_v1")
         }
         if let expBytes = try? JSONEncoder().encode(payload.experimentLogs) {
             UserDefaults.standard.set(expBytes, forKey: "apex_experiment_logs_v1")
+        }
+        if let customTags = payload.customTags, let d = try? JSONEncoder().encode(customTags) {
+            UserDefaults.standard.set(d, forKey: "apex_custom_journal_tags_v1")
+        }
+        if let customProtocols = payload.customProtocols, let d = try? JSONEncoder().encode(customProtocols) {
+            UserDefaults.standard.set(d, forKey: "apex_custom_experiment_protocols_v1")
         }
         UserDefaults.standard.set(payload.activeProtocolId, forKey: "apex_active_experiment_id")
 
@@ -157,18 +225,78 @@ public final class ApexBackupCoordinator: ObservableObject {
         if let histBytes = try? JSONEncoder().encode(payload.completedWorkouts) {
             UserDefaults.standard.set(histBytes, forKey: "apex_strength_history_v1")
         }
+        if let customEx = payload.customExercises, let d = try? JSONEncoder().encode(customEx) {
+            UserDefaults.standard.set(d, forKey: "apex_strength_custom_ex_v1")
+        }
         if let mealsBytes = try? JSONEncoder().encode(payload.meals) {
             UserDefaults.standard.set(mealsBytes, forKey: "apex_ios_logged_meals_v1")
         }
         if let recipesBytes = try? JSONEncoder().encode(payload.recipes) {
             UserDefaults.standard.set(recipesBytes, forKey: "apex_ios_custom_recipes_v1")
         }
+        if let hydrationHist = payload.hydrationHistory, let d = try? JSONEncoder().encode(hydrationHist) {
+            UserDefaults.standard.set(d, forKey: "apex_hydration_caffeine_history_v1")
+        }
+        if let supps = payload.supplements, let d = try? JSONEncoder().encode(supps) {
+            UserDefaults.standard.set(d, forKey: "apex_supplements_v1")
+        }
+        if let goals = payload.nutritionGoals {
+            NutritionLogStore.shared.calorieTarget = goals.calorieTarget
+            NutritionLogStore.shared.proteinTargetG = goals.proteinTargetG
+            NutritionLogStore.shared.fiberTargetG = goals.fiberTargetG
+            NutritionLogStore.shared.waterTargetMl = goals.waterTargetMl
+        }
+
+        if let sets = payload.workoutSets {
+            WorkoutSetStore.save(sets)
+        }
+        if let faces = payload.faceScans {
+            FaceScanStore.save(faces)
+        }
+        if let twins = payload.trueDepthSnapshots {
+            TrueDepthTwinStore.save(twins)
+        }
+        if let pulses = payload.opticalPulseHistory, let d = try? JSONEncoder().encode(pulses) {
+            UserDefaults.standard.set(d, forKey: "apex_optical_pulse_history_v1")
+        }
+        if let voices = payload.voiceBiomarkers, let d = try? JSONEncoder().encode(voices) {
+            UserDefaults.standard.set(d, forKey: "apex_voice_biomarker_history_v1")
+        }
+        if let breaths = payload.breathworkSessions {
+            BreathworkHistoryStore.save(breaths)
+        }
+        if let postures = payload.postureSessions {
+            SpatialPostureHapticsEngine.saveHistory(postures)
+            SpatialPostureHapticsEngine.shared.sessionHistory = SpatialPostureHapticsEngine.loadHistory()
+        }
+        if let thermals = payload.thermalSessions, let d = try? JSONEncoder().encode(thermals) {
+            UserDefaults.standard.set(d, forKey: "apex_thermal_sessions_v1")
+        }
+        if let nback = payload.nBackSessions, let d = try? JSONEncoder().encode(nback) {
+            UserDefaults.standard.set(d, forKey: "apex_nback_history_v1")
+        }
+        if let mewing = payload.mewingSessions, let d = try? JSONEncoder().encode(mewing) {
+            UserDefaults.standard.set(d, forKey: "apex_mewing_history_v1")
+        }
+        if let dec = payload.decathlonBenchmarks, let d = try? JSONEncoder().encode(dec) {
+            UserDefaults.standard.set(d, forKey: "apex_decathlon_benchmarks_v1")
+        }
+        if let coachMsgs = payload.coachMessages {
+            ApexIntelligenceEngine.shared.replaceMessages(coachMsgs)
+        }
+        if let hrrList = payload.hrr60History {
+            BLEHeartRateMonitor.saveHRR60History(hrrList)
+            BLEHeartRateMonitor.shared.reloadHistory()
+        }
 
         StrengthBuilderStore.shared.reloadFromDisk()
         NutritionLogStore.shared.reloadFromDisk()
         ExperimentLabStore.shared.reloadFromDisk()
+        ThermalBrainStore.shared.reloadFromDisk()
+        VoiceBiomarkerStore.shared.reloadFromDisk()
+        OpticalPulseStore.shared.reloadFromDisk()
 
-        lastBackupStatus = "Restored backup from \(payload.deviceName) (\(payload.exportedAt.formatted(date: .abbreviated, time: .shortened)))."
+        lastBackupStatus = "Restored full v\(payload.version) backup from \(payload.deviceName) (\(payload.exportedAt.formatted(date: .abbreviated, time: .shortened)))."
         return true
     }
 }
@@ -222,9 +350,9 @@ public enum ClinicalPDFGenerator {
                 ensureSpace(20)
                 let labelAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 10.5, weight: .medium), .foregroundColor: UIColor.darkGray]
                 let valAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold), .foregroundColor: UIColor.black]
-                (label as NSString).draw(in: CGRect(x: margin, y: y, width: contentWidth * 0.56, height: 16), withAttributes: labelAttrs)
+                (label as NSString).draw(in: CGRect(x: margin, y: y, width: contentWidth * 0.54, height: 16), withAttributes: labelAttrs)
                 let valSize = (value as NSString).size(withAttributes: valAttrs)
-                let valX = max(margin + contentWidth * 0.56, pageRect.width - margin - valSize.width)
+                let valX = max(margin + contentWidth * 0.54, pageRect.width - margin - valSize.width)
                 (value as NSString).draw(in: CGRect(x: valX, y: y, width: pageRect.width - margin - valX, height: 16), withAttributes: valAttrs)
                 y += 18
             }
@@ -268,6 +396,7 @@ public enum ClinicalPDFGenerator {
             drawRow(label: "Body Fat / Lean Mass", value: "\(health.bodyFatPercent.map { String(format: "%.1f%%", $0) } ?? "—") / \(health.leanBodyMassKg.map { ApexUnitPreferences.formatWeight(kg: $0) } ?? "—")")
             drawRow(label: "Fitness Biological Age", value: health.biologicalAge.map { String(format: "%.1f years", $0) } ?? "Not recorded")
             drawRow(label: "Bloodwork Levine PhenoAge", value: health.clinicalPhenoAge.map { String(format: "%.1f years", $0) } ?? "Not scanned")
+            drawRow(label: "Dunedin Pace of Aging", value: health.paceOfAging.map { String(format: "%.2f yr/yr", $0) } ?? "Awaiting wearable/lab input")
 
             if let lab = LabPanelStore.load() {
                 drawText("Latest Saved Lab Biomarkers (Scanned \(lab.scannedAt.formatted(date: .abbreviated, time: .omitted))):", font: .systemFont(ofSize: 9.5, weight: .semibold), color: .darkGray, spacingAfter: 4)
@@ -275,21 +404,34 @@ public enum ClinicalPDFGenerator {
                 drawRow(label: "  Fasting Glucose / hs-CRP", value: "\(ApexUnitPreferences.formatGlucose(mgDl: lab.glucoseMgDL)) · \(String(format: "%.2f mg/L", lab.crpMgL))")
                 drawRow(label: "  Lymphocyte % / MCV / RDW", value: String(format: "%.1f%% · %.1f fL · %.1f%%", lab.lymphocytePct, lab.mcvFL, lab.rdwPct))
                 drawRow(label: "  Alkaline Phosphatase / WBC", value: String(format: "%.0f U/L · %.1f K/uL", lab.alkPhosUL, lab.wbcCount))
+                if let apoB = lab.apoBMgDL { drawRow(label: "  Apolipoprotein B (ApoB)", value: "\(Int(apoB.rounded())) mg/dL") }
+                if let a1c = lab.hba1cPct { drawRow(label: "  HbA1c", value: String(format: "%.1f%%", a1c)) }
+                if let vitD = lab.vitaminDNgML { drawRow(label: "  Vitamin D (25-OH)", value: "\(Int(vitD.rounded())) ng/mL") }
+                if let t = lab.totalTestosteroneNgDL { drawRow(label: "  Total Testosterone", value: "\(Int(t.rounded())) ng/dL") }
+                if let ft = lab.freeTestosteronePgML { drawRow(label: "  Free Testosterone", value: String(format: "%.1f pg/mL", ft)) }
+                if let tsh = lab.tshMIUL { drawRow(label: "  TSH", value: String(format: "%.2f mIU/L", tsh)) }
             } else {
-                drawText("No clinical blood panel saved yet. Scan a lab report in APEX Bloodwork OCR to include Biomarkers & Levine PhenoAge.", font: .systemFont(ofSize: 10, weight: .regular), color: .darkGray, spacingAfter: 4)
+                drawText("No clinical blood panel saved yet. Scan a lab report or PDF in APEX Bloodwork OCR to include Biomarkers & Levine PhenoAge.", font: .systemFont(ofSize: 10, weight: .regular), color: .darkGray, spacingAfter: 4)
             }
 
-            // 4. Metabolic Nutrition & CGM Summary
+            // 4. Metabolic Nutrition, Hydration & CGM Summary
             let nutrition = NutritionLogStore.shared
-            drawSectionHeader("4. Metabolic Fuel & Blood Glucose")
+            let activeCaf = nutrition.activeCaffeineRemainingMg
+            drawSectionHeader("4. Metabolic Fuel, Hydration, Supplements & CGM")
             drawRow(label: "Nutrition Quality Score Today", value: nutrition.nutritionQualityScore.map { "\($0) / 100 (\(nutrition.todaysMeals.count) meals)" } ?? "0 meals logged")
             drawRow(label: "Macro Intake Today", value: "\(Int(nutrition.todayCalories)) kcal · \(Int(nutrition.todayProtein))g P · \(Int(nutrition.todayCarbs))g C · \(Int(nutrition.todayFat))g F")
-            drawRow(label: "Hydration & Caffeine", value: "\(Int(nutrition.waterMlToday)) mL water · \(Int(nutrition.caffeineMgToday)) mg caffeine")
+            drawRow(label: "Fiber & Sodium", value: "\(Int(nutrition.todayFiber))g fiber · \(Int(nutrition.todaySodiumMg)) mg Na")
+            drawRow(label: "Hydration & Caffeine", value: "\(ApexUnitPreferences.formatVolume(ml: nutrition.waterMlToday)) · \(Int(nutrition.caffeineMgToday)) mg (active ~\(Int(activeCaf)) mg)")
             drawRow(label: "Latest Glucose Reading", value: health.glucoseSamples24h.last.map { ApexUnitPreferences.formatGlucose(mgDl: $0.value) } ?? "No glucose sample in 24h")
+            if !nutrition.supplements.isEmpty {
+                let todayKey = HealthKitManager.currentDayKey()
+                let takenCount = nutrition.supplements.filter { $0.takenDayKeys.contains(todayKey) }.count
+                drawRow(label: "Daily Supplement Dispensary", value: "\(takenCount) / \(nutrition.supplements.count) taken today")
+            }
 
             // 5. Significant Causal Journal Impacts (>= 3 paired days only)
             let expStore = ExperimentLabStore.shared
-            let impacts = JournalTag.presets.map { tag in
+            let impacts = expStore.allTags.map { tag in
                 (tag, expStore.journalCorrelation(forTagId: tag.id, health: health))
             }.filter { $0.1.hasEnoughData }
 
@@ -313,6 +455,36 @@ public enum ClinicalPDFGenerator {
                 for (exId, rec) in sortedPRs {
                     let exName = allExercises.first(where: { $0.id == exId })?.name ?? exId
                     drawRow(label: exName, value: "\(ApexUnitPreferences.formatWeight(kg: rec.best1RM)) (Last: \(ApexUnitPreferences.formatWeight(kg: rec.lastWeightKg)) x \(rec.lastReps))")
+                }
+            }
+
+            // 7. Neural, Thermal, Acoustic & Autonomic Sessions
+            let brain = ThermalBrainStore.shared
+            let breaths = BreathworkHistoryStore.load()
+            let hrrs = BLEHeartRateMonitor.loadHRR60History()
+            let faces = FaceScanStore.load()
+            let voiceLatest = VoiceBiomarkerStore.shared.latest
+            if !brain.thermalSessions.isEmpty || !brain.nBackSessions.isEmpty || !breaths.isEmpty || !hrrs.isEmpty || !faces.isEmpty || voiceLatest != nil {
+                drawSectionHeader("7. Thermal, Acoustic, Structural & Autonomic Tests")
+                if let latestHRR = hrrs.first {
+                    drawRow(label: "Latest 60s HR Recovery (\(latestHRR.source))", value: "-\(latestHRR.dropBpm) bpm (\(latestHRR.peakBPM) -> \(latestHRR.endBPM) bpm)")
+                }
+                if !breaths.isEmpty {
+                    drawRow(label: "Breathwork Sessions Completed", value: "\(breaths.count) sessions")
+                }
+                if !brain.thermalSessions.isEmpty {
+                    drawRow(label: "Sauna / Cold Contrast Sessions", value: "\(brain.thermalSessions.count) logged")
+                }
+                if let nback = brain.nBackSessions.first {
+                    drawRow(label: "Latest Dual N-Back Score", value: "\(nback.nLevel)-Back · \(nback.accuracyPct)% accuracy")
+                }
+                if let v = voiceLatest {
+                    let chestStr = v.chestResonancePct.map { String(format: " · %.0f%% chest", $0) } ?? ""
+                    let cnsStr = v.cnsStressScore.map { " · \($0)/100 CNS" } ?? ""
+                    drawRow(label: "Vocal Resonance & CNS Score", value: String(format: "%.0f Hz F0%@%@", v.fundamentalPitchHz, chestStr, cnsStr))
+                }
+                if !faces.isEmpty {
+                    drawRow(label: "Facial Symmetry Scans Logged", value: "\(faces.count) scans")
                 }
             }
 

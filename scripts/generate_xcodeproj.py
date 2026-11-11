@@ -81,7 +81,9 @@ def generate() -> None:
     info_fid = add_file_ref("Info.plist", "Info.plist", "text.plist.xml")
     ent_fid = add_file_ref("APEX_iOS.entitlements", "APEX_iOS.entitlements", "text.plist.entitlements")
     widget_info_fid = add_file_ref("Widgets/Info.plist", "Widgets/Info.plist", "text.plist.xml")
+    widget_ent_fid = add_file_ref("Widgets/APEXWidgets.entitlements", "Widgets/APEXWidgets.entitlements", "text.plist.entitlements")
     watch_info_fid = add_file_ref("Watch/Info.plist", "Watch/Info.plist", "text.plist.xml")
+    watch_ent_fid = add_file_ref("Watch/APEXWatch.entitlements", "Watch/APEXWatch.entitlements", "text.plist.entitlements")
 
     app_prod_fid = add_file_ref("APEX_iOS.app", "APEX_iOS.app", expl_type="wrapper.application")
     widget_prod_fid = add_file_ref("APEXWidgets.appex", "APEXWidgets.appex", expl_type="wrapper.app-extension")
@@ -139,8 +141,16 @@ def generate() -> None:
     cfg_wat_rel = uid("cfg:wat:rel")
 
     sources_children = "\n".join(f"\t\t\t\t{swift_ref_map[n]} /* {n} */," for n in main_swift_files)
-    widget_children = "\n".join(f"\t\t\t\t{swift_ref_map[w]} /* {w} */," for w in ["Widgets/ApexWidgetIntents.swift", "Widgets/ApexWidgets.swift"])
-    watch_children = f"\t\t\t\t{swift_ref_map['Watch/APEXWatchApp.swift']} /* Watch/APEXWatchApp.swift */,\n\t\t\t\t{watch_info_fid} /* Watch/Info.plist */,"
+    widget_children = "\n".join([
+        *(f"\t\t\t\t{swift_ref_map[w]} /* {w} */," for w in ["Widgets/ApexWidgetIntents.swift", "Widgets/ApexWidgets.swift"]),
+        f"\t\t\t\t{widget_info_fid} /* Widgets/Info.plist */,",
+        f"\t\t\t\t{widget_ent_fid} /* Widgets/APEXWidgets.entitlements */,",
+    ])
+    watch_children = (
+        f"\t\t\t\t{swift_ref_map['Watch/APEXWatchApp.swift']} /* Watch/APEXWatchApp.swift */,\n"
+        f"\t\t\t\t{watch_info_fid} /* Watch/Info.plist */,\n"
+        f"\t\t\t\t{watch_ent_fid} /* Watch/APEXWatch.entitlements */,"
+    )
     build_files_str = "\n".join(build_files)
     file_refs_str = "\n".join(file_refs)
     main_resources_str = "\n".join(f"\t\t\t\t{r}," for r in main_resources)
@@ -461,6 +471,7 @@ def generate() -> None:
 \t\t\tisa = XCBuildConfiguration;
 \t\t\tbuildSettings = {{
 \t\t\t\tAPPLICATION_EXTENSION_API_ONLY = YES;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = Widgets/APEXWidgets.entitlements;
 \t\t\t\tINFOPLIST_FILE = Widgets/Info.plist;
 \t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
 \t\t\t\tLD_RUNPATH_SEARCH_PATHS = (
@@ -479,6 +490,7 @@ def generate() -> None:
 \t\t\tisa = XCBuildConfiguration;
 \t\t\tbuildSettings = {{
 \t\t\t\tAPPLICATION_EXTENSION_API_ONLY = YES;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = Widgets/APEXWidgets.entitlements;
 \t\t\t\tINFOPLIST_FILE = Widgets/Info.plist;
 \t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
 \t\t\t\tLD_RUNPATH_SEARCH_PATHS = (
@@ -496,6 +508,7 @@ def generate() -> None:
 \t\t{cfg_wat_dbg} /* Debug */ = {{
 \t\t\tisa = XCBuildConfiguration;
 \t\t\tbuildSettings = {{
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = Watch/APEXWatch.entitlements;
 \t\t\t\tINFOPLIST_FILE = Watch/Info.plist;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.watchkitapp;
 \t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
@@ -510,6 +523,7 @@ def generate() -> None:
 \t\t{cfg_wat_rel} /* Release */ = {{
 \t\t\tisa = XCBuildConfiguration;
 \t\t\tbuildSettings = {{
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = Watch/APEXWatch.entitlements;
 \t\t\t\tINFOPLIST_FILE = Watch/Info.plist;
 \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = club.apex.lifemaxx.ios.watchkitapp;
 \t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";

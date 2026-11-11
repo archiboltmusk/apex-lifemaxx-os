@@ -122,6 +122,7 @@ public struct LongevityView: View {
             .sheet(isPresented: $showPaywallSheet) {
                 ApexProPaywallSheet()
             }
+            .modifier(LongevityToolRouterModifier())
         }
     }
 
@@ -217,9 +218,28 @@ public struct LongevityView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.9))
                 }
-            Text("Connect Apple Health or log an active workout to calculate your biological fitness age from live vitals.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+                if let pace = health.paceOfAging {
+                    HStack(spacing: 8) {
+                        Image(systemName: "speedometer")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(pace <= 0.90 ? ApexTheme.accentEmerald : (pace <= 1.05 ? ApexTheme.standCyan : ApexTheme.accentAmber))
+                        Text("Dunedin Pace of Aging:")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.2f yr/yr", pace))
+                            .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(ApexTheme.elevatedSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            } else {
+                Text("Connect Apple Health or log an active workout to calculate your biological fitness age from live vitals.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
         }
         .appleCard(padding: 18, cornerRadius: 22)
@@ -274,14 +294,14 @@ public struct LongevityView: View {
                 )
                 bodyCompTile(
                     label: "Body Weight",
-                    value: latestWeight.map { String(format: "%.1f kg", $0) } ?? "—",
+                    value: latestWeight.map { ApexUnitPreferences.formatWeight(kg: $0) } ?? "—",
                     sub: health.weightHistory.isEmpty ? "No scale log" : "\(health.weightHistory.count)d trend",
                     tint: ApexTheme.accentVolt
                 )
                 bodyCompTile(
                     label: "Body Fat / Lean",
                     value: health.bodyFatPercent.map { String(format: "%.1f%%", $0) } ?? "—",
-                    sub: health.leanBodyMassKg.map { String(format: "%.1f kg lean", $0) } ?? "No body comp",
+                    sub: health.leanBodyMassKg.map { ApexUnitPreferences.formatWeight(kg: $0) + " lean" } ?? "No body comp",
                     tint: ApexTheme.accentEmerald
                 )
             }
@@ -574,69 +594,15 @@ public struct LongevityView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - 3C. AirPods Spatial Posture & Morning Voice Biomarker Row
+    // MARK: - 3C. AirPods Spatial Posture, Voice & Bio-Optimization Lab
     private var spatialPostureAndVoiceRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                Haptics.tap(.medium)
-                postureEngine.togglePostureMonitoring()
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "airpodspro")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(postureEngine.isForwardHeadSlouching ? ApexTheme.accentAmber : ApexTheme.standCyan)
-                        Spacer()
-                        Circle()
-                            .fill(postureEngine.isMonitoringPosture ? ApexTheme.accentEmerald : Color.gray.opacity(0.4))
-                            .frame(width: 7, height: 7)
-                    }
-                    Text("Cervical Posture")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(postureEngine.isMonitoringPosture
-                         ? String(format: "%.0f° pitch · %d cues", postureEngine.headPitchDegrees, postureEngine.slouchEventsCount)
-                         : (postureEngine.isAirPodsAvailable ? "Tap to monitor neck" : "Connect AirPods Pro"))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .appleCard(padding: 14, cornerRadius: 18)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                Haptics.tap()
-                showVoiceCheck = true
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(ApexTheme.accentIndigo)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text("Vocal Resonance")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(voiceStore.latest.map { String(format: "%.0f Hz · %.1f%% jit", $0.fundamentalPitchHz, $0.jitterPercent) } ?? "5s F0 morning check")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .appleCard(padding: 14, cornerRadius: 18)
-            }
-            .buttonStyle(.plain)
-        }
+        LongevitySpatialAndBioSection(
+            postureEngine: postureEngine,
+            voiceStore: voiceStore,
+            onOpenVoice: { showVoiceCheck = true },
+            onOpenBreathwork: { showBreathworkCoach = true },
+            onOpenBloodwork: { showBloodworkOCR = true }
+        )
     }
 
     // MARK: - 4. Clinical PDF Dossier, Haptic Breathwork, Alerts, Backup & Pro Membership
@@ -890,15 +856,20 @@ private struct CompanionSettingsSheet: View {
 // MARK: - 60-Day Biology Long-Horizon Trends Sheet
 private struct Biology60DayTrendsSheet: View {
     @ObservedObject var health: HealthKitManager
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitRaw: String = "metric"
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        let weightUnit = ApexUnitPreferences.weightUnitLabel
+        let weightPoints = health.weightHistory.map {
+            DailyMetricPoint(date: $0.date, value: ApexUnitPreferences.weightValue(kg: $0.value))
+        }
+        return NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     trendChartCard(title: "60-Day HRV Trend", unit: "ms", color: ApexTheme.standCyan, points: health.hrvHistory)
                     trendChartCard(title: "60-Day Resting HR", unit: "bpm", color: ApexTheme.moveCrimson, points: health.rhrHistory)
-                    trendChartCard(title: "60-Day Body Weight", unit: "kg", color: ApexTheme.accentVolt, points: health.weightHistory)
+                    trendChartCard(title: "60-Day Body Weight (\(unitRaw == "imperial" ? "lbs" : "kg"))", unit: weightUnit, color: ApexTheme.accentVolt, points: weightPoints)
                     trendChartCard(title: "VO₂ Max Trajectory", unit: "mL/kg", color: ApexTheme.accentEmerald, points: health.vo2History)
                 }
                 .padding(16)
@@ -954,5 +925,270 @@ private struct Biology60DayTrendsSheet: View {
             }
         }
         .appleCard(padding: 16, cornerRadius: 18)
+    }
+}
+
+// MARK: - Spatial Posture, Bio-Optimization, Cognitive Lab & Health XML Section
+private struct LongevitySpatialAndBioSection: View {
+    @ObservedObject var postureEngine: SpatialPostureHapticsEngine
+    @ObservedObject var voiceStore: VoiceBiomarkerStore
+    @ObservedObject private var brainStore = ThermalBrainStore.shared
+    let onOpenVoice: () -> Void
+    let onOpenBreathwork: () -> Void
+    let onOpenBloodwork: () -> Void
+
+    @State private var showPostureCoach: Bool = false
+    @State private var activeThermalTab: ThermalAndBrainSuiteSheet.TabMode? = nil
+    @State private var showXMLImporter: Bool = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Button {
+                    Haptics.tap(.medium)
+                    showPostureCoach = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "airpodspro")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(postureEngine.isForwardHeadSlouching ? ApexTheme.accentAmber : ApexTheme.standCyan)
+                            Spacer()
+                            Circle()
+                                .fill(postureEngine.isMonitoringPosture ? ApexTheme.accentEmerald : Color.gray.opacity(0.4))
+                                .frame(width: 7, height: 7)
+                        }
+                        Text("Cervical Posture")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text(postureEngine.isMonitoringPosture
+                             ? String(format: "%.0f° pitch · %d cues", postureEngine.headPitchDegrees, postureEngine.slouchEventsCount)
+                             : (postureEngine.isAirPodsAvailable ? "Calibrate & Monitor" : "Coach & Metronome"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .appleCard(padding: 14, cornerRadius: 18)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Haptics.tap()
+                    onOpenVoice()
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(ApexTheme.accentIndigo)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text("Vocal Resonance")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text(voiceStore.latest.map { String(format: "%.0f Hz · %.1f%% jit", $0.fundamentalPitchHz, $0.jitterPercent) } ?? "5s F0 morning check")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .appleCard(padding: 14, cornerRadius: 18)
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Bio-Optimization & Brain Lab")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("Thermal exposure, binaural NSDR, Dual N-Back & XML import")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    labTile(
+                        icon: "flame.fill",
+                        title: "Thermal Contrast",
+                        sub: brainStore.thermalSessions.isEmpty ? "Sauna · Cold · Mew" : "\(brainStore.thermalSessions.count) sessions logged",
+                        tint: ApexTheme.moveCrimson
+                    ) {
+                        activeThermalTab = .thermal
+                    }
+
+                    labTile(
+                        icon: "headphones",
+                        title: "Binaural NSDR",
+                        sub: "6/10/40 Hz · Focus & Rest",
+                        tint: ApexTheme.standCyan
+                    ) {
+                        activeThermalTab = .sound
+                    }
+
+                    labTile(
+                        icon: "brain.head.profile",
+                        title: "Dual N-Back",
+                        sub: brainStore.nBackSessions.first.map { "\($0.nLevel)-Back · \($0.accuracyPct)%" } ?? "Working memory test",
+                        tint: ApexTheme.accentIndigo
+                    ) {
+                        activeThermalTab = .nback
+                    }
+
+                    labTile(
+                        icon: "figure.strengthtraining.functional",
+                        title: "Decathlon 10",
+                        sub: "Age-span targets",
+                        tint: ApexTheme.accentVolt
+                    ) {
+                        activeThermalTab = .decathlon
+                    }
+                }
+
+                Button {
+                    Haptics.tap()
+                    showXMLImporter = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.down.doc.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(ApexTheme.accentEmerald)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Import Apple Health export.xml")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Text("90-day on-device history restore without Mac")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(12)
+                    .background(ApexTheme.elevatedSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .appleCard(padding: 16, cornerRadius: 20)
+        }
+        .sheet(isPresented: $showPostureCoach) {
+            PostureCoachSheet()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $activeThermalTab) { tab in
+            ThermalAndBrainSuiteSheet(initialTab: tab)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showXMLImporter) {
+            HealthXMLImportSheet()
+        }
+    }
+
+    private func labTile(
+        icon: String,
+        title: String,
+        sub: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(sub)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ApexTheme.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct LongevityToolRouterModifier: ViewModifier {
+    @ObservedObject private var router = ApexNavigationRouter.shared
+
+    @State private var activeThermalTab: ThermalAndBrainSuiteSheet.TabMode? = nil
+    @State private var showPostureCoach: Bool = false
+    @State private var showBreathwork: Bool = false
+    @State private var showXMLImport: Bool = false
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                consumeRoute(router.requestedToolSheet)
+            }
+            .onChange(of: router.requestedToolSheet) { _, newValue in
+                consumeRoute(newValue)
+            }
+            .sheet(item: $activeThermalTab) { tab in
+                ThermalAndBrainSuiteSheet(initialTab: tab)
+            }
+            .sheet(isPresented: $showPostureCoach) {
+                PostureCoachSheet()
+            }
+            .sheet(isPresented: $showBreathwork) {
+                BreathworkHapticsView()
+            }
+            .sheet(isPresented: $showXMLImport) {
+                HealthXMLImportSheet()
+            }
+    }
+
+    private func consumeRoute(_ route: String?) {
+        guard let route, !route.isEmpty else { return }
+        switch route.lowercased() {
+        case "sauna", "cold", "thermal":
+            activeThermalTab = .thermal
+        case "nsdr", "sound":
+            activeThermalTab = .sound
+        case "nback":
+            activeThermalTab = .nback
+        case "decathlon":
+            activeThermalTab = .decathlon
+        case "posture":
+            showPostureCoach = true
+        case "breathwork":
+            showBreathwork = true
+        case "xml":
+            showXMLImport = true
+        default:
+            break
+        }
+        router.requestedToolSheet = nil
     }
 }

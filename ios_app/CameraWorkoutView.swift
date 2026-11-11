@@ -31,8 +31,10 @@ public struct CameraWorkoutView: View {
     @State private var isSavingWorkout: Bool = false
     @State private var savedBanner: String? = nil
     @State private var showWatchStrapSheet: Bool = false
+    @State private var showPostureCoachSheet: Bool = false
     @AppStorage("apex_workout_load_kg") private var externalLoadKg: Double = 60.0
     @AppStorage("apex_athlete_height_cm") private var athleteHeightCm: Double = 175.0
+    @AppStorage(ApexUnitPreferences.unitKey) private var unitSystemRaw: String = ApexUnitSystem.metric.rawValue
 
     // Live Workout Timer
     @State private var sessionSeconds: Int = 0
@@ -145,6 +147,16 @@ public struct CameraWorkoutView: View {
                     HStack(spacing: 10) {
                         Button {
                             Haptics.tap()
+                            showPostureCoachSheet = true
+                        } label: {
+                            Image(systemName: postureHaptics.isMonitoringPosture ? "figure.stand.line.dotted.figure.stand" : "figure.stand")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(postureHaptics.isForwardHeadSlouching ? ApexTheme.accentAmber : (postureHaptics.isMonitoringPosture ? ApexTheme.accentEmerald : .secondary))
+                        }
+                        .accessibilityLabel("AirPods Spatial Posture & Tempo Coach")
+
+                        Button {
+                            Haptics.tap()
                             postureHaptics.isTempoHapticsEnabled.toggle()
                             if postureHaptics.isTempoHapticsEnabled {
                                 postureHaptics.startEccentricMetronome()
@@ -191,6 +203,11 @@ public struct CameraWorkoutView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showPostureCoachSheet) {
+                PostureCoachSheet()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
             .onReceive(timer) { _ in
                 if isTimerRunning {
                     sessionSeconds += 1
@@ -210,6 +227,7 @@ public struct CameraWorkoutView: View {
                     trainSegment = requestedSeg
                     router.requestedTrainSegment = nil
                 }
+                applyRequestedExercise(router.requestedExerciseRaw)
             }
             .onChange(of: router.requestedTrainSegment) { _, requestedSeg in
                 if let seg = requestedSeg {
@@ -229,18 +247,22 @@ public struct CameraWorkoutView: View {
                 isTimerRunning = false
             }
             .onChange(of: router.requestedExerciseRaw) { _, raw in
-                guard let name = raw?.lowercased() else { return }
-                trainSegment = 1
-                if let matched = ExerciseMode.allCases.first(where: { $0.rawValue.lowercased().contains(name) }) {
-                    selectedExercise = matched
-                }
-                router.requestedExerciseRaw = nil
+                applyRequestedExercise(raw)
             }
             .onDisappear {
                 poseController.stop()
                 isTimerRunning = false
             }
         }
+    }
+
+    private func applyRequestedExercise(_ raw: String?) {
+        guard let name = raw?.lowercased() else { return }
+        trainSegment = 1
+        if let matched = ExerciseMode.allCases.first(where: { $0.rawValue.lowercased().contains(name) }) {
+            selectedExercise = matched
+        }
+        router.requestedExerciseRaw = nil
     }
 
     // MARK: - Dynamic Island Rest Countdown Banner
@@ -267,7 +289,7 @@ public struct CameraWorkoutView: View {
 
             Button {
                 Haptics.tap()
-                activityMgr.stopRestTimer()
+                activityMgr.stopRestTimer(endActivity: true)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18))
@@ -365,6 +387,21 @@ public struct CameraWorkoutView: View {
                     .clipShape(Capsule())
 
                     Spacer()
+
+                    if poseController.cameraAvailable {
+                        Button {
+                            Haptics.tap()
+                            poseController.switchCameraPosition()
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath.camera")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(7)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel("Switch Front or Rear Camera")
+                    }
 
                     Text(formatDuration(sessionSeconds))
                         .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -483,9 +520,10 @@ public struct CameraWorkoutView: View {
             .appleCard(padding: 12, cornerRadius: 14)
 
             // User Load & Athlete Height Calibration Bar
+            let _ = unitSystemRaw
             HStack(spacing: 12) {
                 if selectedExercise.isBodyweight {
-                    Label("Bodyweight Load (\(Int((health.bodyWeightKg ?? 75.0).rounded())) kg)", systemImage: "figure.strengthtraining.functional")
+                    Label("Bodyweight Load (\(ApexUnitPreferences.formatWeight(kg: health.bodyWeightKg ?? 75.0)))", systemImage: "figure.strengthtraining.functional")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -493,17 +531,19 @@ public struct CameraWorkoutView: View {
                     HStack(spacing: 8) {
                         Button {
                             Haptics.tap()
-                            externalLoadKg = max(5, externalLoadKg - 2.5)
+                            let stepKg = ApexUnitPreferences.isImperial ? (5.0 / 2.20462) : 2.5
+                            externalLoadKg = max(5, externalLoadKg - stepKg)
                         } label: {
                             Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
                         }
-                        Text("\(String(format: "%.1f", externalLoadKg).replacingOccurrences(of: ".0", with: "")) kg bar")
+                        Text("\(ApexUnitPreferences.formatWeight(kg: externalLoadKg)) bar")
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(.white)
                         Button {
                             Haptics.tap()
-                            externalLoadKg = min(350, externalLoadKg + 2.5)
+                            let stepKg = ApexUnitPreferences.isImperial ? (5.0 / 2.20462) : 2.5
+                            externalLoadKg = min(350, externalLoadKg + stepKg)
                         } label: {
                             Image(systemName: "plus.circle.fill").foregroundStyle(ApexTheme.accentVolt)
                         }
@@ -698,6 +738,7 @@ public struct CameraWorkoutView: View {
             )
             workoutHistory.insert(entry, at: 0)
             WorkoutSetStore.save(workoutHistory)
+            health.addStrengthStrainBonus(min(4.0, Double(reps) * 0.12))
 
             health.syncEventToMac(extraPayload: [
                 "workoutSet": [
@@ -808,9 +849,11 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     var bodyWeightKg: Double = 75.0
     let cameraAvailable: Bool
     let session = AVCaptureSession()
+    @Published var cameraPosition: AVCaptureDevice.Position = .front
 
     private let poseQueue = DispatchQueue(label: "apex.body.pose.queue", qos: .userInteractive)
     private let synthesizer = AVSpeechSynthesizer()
+    private var videoOutput = AVCaptureVideoDataOutput()
     private var exerciseMode: CameraWorkoutView.ExerciseMode = .squats
     private var repPhase: String = "UP"
     private var eccentricStartTime: Date = Date()
@@ -823,8 +866,43 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     private var isConfigured = false
 
     override init() {
-        self.cameraAvailable = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) != nil
+        let hasFront = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) != nil
+        let hasBack = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) != nil
+        self.cameraAvailable = hasFront || hasBack
         super.init()
+        if !hasFront && hasBack {
+            self.cameraPosition = .back
+        }
+    }
+
+    func switchCameraPosition() {
+        let nextPos: AVCaptureDevice.Position = (cameraPosition == .front) ? .back : .front
+        guard AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: nextPos) != nil else { return }
+        DispatchQueue.main.async {
+            self.cameraPosition = nextPos
+            self.guidanceCue = nextPos == .back ? "Switched to rear tripod camera" : "Switched to front camera"
+        }
+        poseQueue.async { [weak self] in
+            guard let self = self, self.isConfigured else { return }
+            self.session.beginConfiguration()
+            for input in self.session.inputs {
+                self.session.removeInput(input)
+            }
+            if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: nextPos),
+               let input = try? AVCaptureDeviceInput(device: device),
+               self.session.canAddInput(input) {
+                self.session.addInput(input)
+            }
+            if let conn = self.videoOutput.connection(with: .video) {
+                if conn.isVideoRotationAngleSupported(90) {
+                    conn.videoRotationAngle = 90
+                }
+                if conn.isVideoMirroringSupported {
+                    conn.isVideoMirrored = (nextPos == .front)
+                }
+            }
+            self.session.commitConfiguration()
+        }
     }
 
     func setExerciseMode(_ mode: CameraWorkoutView.ExerciseMode) {
@@ -860,13 +938,14 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
             return
         }
 
+        let initialPos = cameraPosition
         poseQueue.async { [weak self] in
             guard let self = self else { return }
             if !self.isConfigured {
                 self.session.beginConfiguration()
                 self.session.sessionPreset = .high
 
-                if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+                if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: initialPos),
                    let input = try? AVCaptureDeviceInput(device: device),
                    self.session.canAddInput(input) {
                     self.session.addInput(input)
@@ -879,12 +958,13 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
                 if self.session.canAddOutput(output) {
                     self.session.addOutput(output)
                 }
+                self.videoOutput = output
                 if let conn = output.connection(with: .video) {
                     if conn.isVideoRotationAngleSupported(90) {
                         conn.videoRotationAngle = 90
                     }
                     if conn.isVideoMirroringSupported {
-                        conn.isVideoMirrored = true
+                        conn.isVideoMirrored = (initialPos == .front)
                     }
                 }
                 self.session.commitConfiguration()
@@ -1001,16 +1081,32 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
             if let h = hip, let k = knee, let a = ankle {
                 let angle = Self.angleBetween(p1: h, vertex: k, p2: a)
                 jointAngle = angle
-                processCycle(angle: angle, downThreshold: 102, upThreshold: 156, cueDown: "Parallel depth hit — drive up")
+                let hipBelowKnee = h.y >= (k.y - 0.025)
+                if angle <= 118 && !hipBelowKnee && exerciseMode == .squats && formFaultCue == nil {
+                    formFaultCue = "Sink hip crease to parallel"
+                }
+                processCycle(
+                    angle: angle,
+                    downThreshold: 102,
+                    upThreshold: 156,
+                    cueDown: hipBelowKnee ? "Below parallel depth hit — drive up" : "Depth hit — drive up"
+                )
             }
 
         case .rdl:
             let shoulder = joints[.leftShoulder] ?? joints[.rightShoulder]
             let hip = joints[.leftHip] ?? joints[.rightHip]
             let knee = joints[.leftKnee] ?? joints[.rightKnee]
+            let ankle = joints[.leftAnkle] ?? joints[.rightAnkle]
             if let s = shoulder, let h = hip, let k = knee {
                 let angle = Self.angleBetween(p1: s, vertex: h, p2: k)
                 jointAngle = angle
+                if let a = ankle {
+                    let kneeAngle = Self.angleBetween(p1: h, vertex: k, p2: a)
+                    if kneeAngle < 138 && formFaultCue == nil {
+                        formFaultCue = "Soft knees only — hinge at hips"
+                    }
+                }
                 processCycle(angle: angle, downThreshold: 105, upThreshold: 162, cueDown: "Hip hinge loaded — lock glutes")
             }
 
@@ -1136,10 +1232,10 @@ private final class PosePreviewContainer: UIView {
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
 }
 
-private enum WorkoutSetStore {
+public enum WorkoutSetStore {
     private static let key = "apex_ios_workout_sets_v1"
 
-    static func load() -> [WorkoutSetEntry] {
+    public static func load() -> [WorkoutSetEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([WorkoutSetEntry].self, from: data) else {
             return []
@@ -1147,7 +1243,7 @@ private enum WorkoutSetStore {
         return decoded
     }
 
-    static func save(_ entries: [WorkoutSetEntry]) {
+    public static func save(_ entries: [WorkoutSetEntry]) {
         if let encoded = try? JSONEncoder().encode(Array(entries.prefix(25))) {
             UserDefaults.standard.set(encoded, forKey: key)
         }

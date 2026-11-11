@@ -1,6 +1,33 @@
 import SwiftUI
 import CoreHaptics
 import Combine
+import AVFoundation
+
+public struct BreathworkSessionRecord: Codable, Identifiable {
+    public let id: UUID
+    public let date: Date
+    public let protocolName: String
+    public let durationMinutes: Double
+    public let cyclesCompleted: Int
+}
+
+public enum BreathworkHistoryStore {
+    private static let key = "apex_breathwork_history_v1"
+
+    public static func load() -> [BreathworkSessionRecord] {
+        guard let d = UserDefaults.standard.data(forKey: key),
+              let dec = try? JSONDecoder().decode([BreathworkSessionRecord].self, from: d) else {
+            return []
+        }
+        return dec
+    }
+
+    public static func save(_ items: [BreathworkSessionRecord]) {
+        if let d = try? JSONEncoder().encode(Array(items.prefix(40))) {
+            UserDefaults.standard.set(d, forKey: key)
+        }
+    }
+}
 
 public struct BreathworkPattern: Identifiable, Hashable {
     public let id: String
@@ -30,6 +57,17 @@ public struct BreathworkPattern: Identifiable, Hashable {
             accentColor: ApexTheme.standCyan
         ),
         BreathworkPattern(
+            id: "phys_sigh",
+            name: "Physiological Sigh",
+            subtitle: "3s In · 1s Top-Up · 6s Out · 1s Pause",
+            benefit: "Alveolar reinflation & rapid sympathetic braking",
+            inhaleSec: 3.0,
+            holdTopSec: 1.0,
+            exhaleSec: 6.0,
+            holdBottomSec: 1.0,
+            accentColor: ApexTheme.accentEmerald
+        ),
+        BreathworkPattern(
             id: "box_4444",
             name: "Tactical Box",
             subtitle: "4s In · 4s Hold · 4s Out · 4s Hold",
@@ -39,6 +77,17 @@ public struct BreathworkPattern: Identifiable, Hashable {
             exhaleSec: 4.0,
             holdBottomSec: 4.0,
             accentColor: ApexTheme.accentVolt
+        ),
+        BreathworkPattern(
+            id: "oxygen_surge",
+            name: "Oxygen Surge",
+            subtitle: "2s In · 2s Out (Energizing)",
+            benefit: "Pre-session alertness & sympathetic primer",
+            inhaleSec: 2.0,
+            holdTopSec: 0.0,
+            exhaleSec: 2.0,
+            holdBottomSec: 0.0,
+            accentColor: ApexTheme.moveCrimson
         ),
         BreathworkPattern(
             id: "sleep_478",
@@ -69,14 +118,21 @@ public final class BreathworkSessionController: ObservableObject {
     @Published public var targetMinutes: Int = 3
     @Published public var isRunning: Bool = false
     @Published public var hapticsEnabled: Bool = true
+    @Published public var audioCuesEnabled: Bool = true
     @Published public var currentPhase: Phase = .ready
     @Published public var phaseProgress: Double = 0
     @Published public var breathScale: CGFloat = 0.56
     @Published public var elapsedSeconds: Double = 0
     @Published public var cyclesCompleted: Int = 0
     @Published public var healthSaveStatus: String? = nil
+    @Published public var sessionHistory: [BreathworkSessionRecord] = BreathworkHistoryStore.load()
 
     private var engine: CHHapticEngine?
+    private var audioEngine: AVAudioEngine?
+    private var audioPlayer: AVAudioPlayerNode?
+    private var inhaleChime: AVAudioPCMBuffer?
+    private var holdChime: AVAudioPCMBuffer?
+    private var exhaleChime: AVAudioPCMBuffer?
     private var timerCancellable: AnyCancellable?
     private var phaseElapsed: Double = 0
     private var lastTickDate: Date?
@@ -90,6 +146,7 @@ public final class BreathworkSessionController: ObservableObject {
         isRunning = false
         timerCancellable?.cancel()
         timerCancellable = nil
+        audioEngine?.stop()
         currentPhase = .ready
         phaseProgress = 0
         breathScale = 0.56
@@ -123,9 +180,20 @@ public final class BreathworkSessionController: ObservableObject {
 
     public func finishSession(health: HealthKitManager) {
         let loggedMins = elapsedSeconds / 60.0
+        let protoName = selectedPattern.name
+        let doneCycles = cyclesCompleted
         stopAll()
         currentPhase = .completed
         if loggedMins >= 0.5 {
+            let record = BreathworkSessionRecord(
+                id: UUID(),
+                date: Date(),
+                protocolName: protoName,
+                durationMinutes: (loggedMins * 10).rounded() / 10,
+                cyclesCompleted: doneCycles
+            )
+            sessionHistory.insert(record, at: 0)
+            BreathworkHistoryStore.save(sessionHistory)
             Haptics.success()
             Task {
                 let saved = await health.logMindfulSession(minutes: loggedMins)
@@ -209,8 +277,74 @@ public final class BreathworkSessionController: ObservableObject {
     private func enterPhase(_ next: Phase) {
         currentPhase = next
         phaseProgress = 0
-        guard hapticsEnabled else { return }
-        playPhaseHaptics(for: next)
+        if audioCuesEnabled {
+            playAudioChime(for: next)
+        }
+        if hapticsEnabled {
+            playPhaseHaptics(for: next)
+        }
+    }
+
+    private func prepareAudioChimes() {
+        if audioEngine == nil {
+            let eng = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            eng.attach(player)
+            let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+            eng.connect(player, to: eng.mainMixerNode, format: format)
+            audioEngine = eng
+            audioPlayer = player
+            inhaleChime = makeChimeBuffer(freq: 396.0, duration: 0.28, gain: 0.16, format: format)
+            holdChime = makeChimeBuffer(freq: 528.0, duration: 0.20, gain: 0.12, format: format)
+            exhaleChime = makeChimeBuffer(freq: 285.0, duration: 0.36, gain: 0.16, format: format)
+        }
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        if audioEngine?.isRunning != true {
+            try? audioEngine?.start()
+        }
+    }
+
+    private func playAudioChime(for phase: Phase) {
+        let buf: AVAudioPCMBuffer? = {
+            switch phase {
+            case .inhale: return inhaleChime
+            case .holdTop, .holdBottom: return holdChime
+            case .exhale: return exhaleChime
+            case .ready, .completed: return nil
+            }
+        }()
+        if audioEngine == nil || audioEngine?.isRunning != true {
+            prepareAudioChimes()
+        }
+        let chosen = buf ?? {
+            switch phase {
+            case .inhale: return inhaleChime
+            case .holdTop, .holdBottom: return holdChime
+            case .exhale: return exhaleChime
+            default: return nil
+            }
+        }()
+        guard let player = audioPlayer, let buffer = chosen else { return }
+        player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+        if !player.isPlaying { player.play() }
+    }
+
+    private func makeChimeBuffer(freq: Double, duration: Double, gain: Float, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let count = AVAudioFrameCount(format.sampleRate * duration)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else { return nil }
+        buffer.frameLength = count
+        guard let ch = buffer.floatChannelData?[0] else { return nil }
+        let sr = format.sampleRate
+        for i in 0..<Int(count) {
+            let t = Double(i) / sr
+            let attack = min(1.0, t / 0.015)
+            let decay = exp(-t * 9.5)
+            let fundamental = sin(2.0 * .pi * freq * t)
+            let overtone = 0.25 * sin(2.0 * .pi * (freq * 1.5) * t)
+            ch[i] = Float((fundamental + overtone) * attack * decay) * gain
+        }
+        return buffer
     }
 
     private func prepareHapticEngine() {
@@ -337,6 +471,9 @@ public struct BreathworkHapticsView: View {
                             .foregroundStyle(ApexTheme.accentEmerald)
                             .multilineTextAlignment(.center)
                             .appleCard(padding: 14, cornerRadius: 16)
+                    }
+                    if !controller.sessionHistory.isEmpty {
+                        historySection
                     }
                 }
                 .padding(.horizontal, 16)
@@ -544,7 +681,36 @@ public struct BreathworkHapticsView: View {
             Toggle("Closed-Eyes CoreHaptics Ramp", isOn: $controller.hapticsEnabled)
                 .font(.system(size: 14, weight: .medium))
                 .tint(ApexTheme.standCyan)
+
+            Toggle("Soft Harmonic Audio Chimes", isOn: $controller.audioCuesEnabled)
+                .font(.system(size: 14, weight: .medium))
+                .tint(ApexTheme.standCyan)
         }
         .appleCard(padding: 14, cornerRadius: 18)
+    }
+
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recent Breathwork Sessions")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+            ForEach(controller.sessionHistory.prefix(6)) { s in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.protocolName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text(s.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(String(format: "%.1fm · %d cyc", s.durationMinutes, s.cyclesCompleted))
+                        .font(.system(size: 12, weight: .bold).monospacedDigit())
+                        .foregroundStyle(ApexTheme.standCyan)
+                }
+                .appleCard(padding: 12, cornerRadius: 14)
+            }
+        }
     }
 }
