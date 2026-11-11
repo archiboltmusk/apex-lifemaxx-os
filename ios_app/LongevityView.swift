@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Charts
 
 // MARK: - Longevity, Bloodwork PhenoAge, Circadian Intelligence & Bonjour Mac Continuity
 public struct LongevityView: View {
@@ -20,6 +21,7 @@ public struct LongevityView: View {
     @State private var showBloodworkOCR: Bool = false
     @State private var showExperimentLab: Bool = false
     @State private var showVoiceCheck: Bool = false
+    @State private var showTrends60Sheet: Bool = false
     @State private var syncJustCompleted: Bool = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -31,6 +33,8 @@ public struct LongevityView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
                     biologicalAgeCard
+
+                    biologyBaselinesCard
 
                     bloodworkOCRCard
 
@@ -49,7 +53,7 @@ public struct LongevityView: View {
                 .padding(.bottom, 32)
             }
             .background(ApexTheme.background)
-            .navigationTitle("Longevity")
+            .navigationTitle("Biology")
             .navigationBarTitleDisplayMode(.large)
             .onReceive(timer) { _ in
                 if isDeadHangRunning {
@@ -87,6 +91,11 @@ public struct LongevityView: View {
             .sheet(isPresented: $showVoiceCheck) {
                 VoiceBiomarkerSheet()
                     .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showTrends60Sheet) {
+                Biology60DayTrendsSheet(health: health)
+                    .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
         }
@@ -184,13 +193,103 @@ public struct LongevityView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.9))
                 }
-            } else {
-                Text("Connect Apple Health or log an active workout to calculate your biological fitness age from live vitals.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+            Text("Connect Apple Health or log an active workout to calculate your biological fitness age from live vitals.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
             }
         }
         .appleCard(padding: 18, cornerRadius: 22)
+    }
+
+    // MARK: - 1B. 60-Day Biology Baselines & Body Composition
+    private var biologyBaselinesCard: some View {
+        let avg60Hrv = averageMetric(health.hrvHistory)
+        let avg60Rhr = averageMetric(health.rhrHistory)
+        let latestWeight = health.weightHistory.last?.value ?? health.bodyWeightKg
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("60-Day Biology & Composition")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Long-horizon HRV, RHR & HealthKit body comp")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    Haptics.tap()
+                    showTrends60Sheet = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("60d Charts")
+                        Image(systemName: "chart.xyaxis.line")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ApexTheme.standCyan)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(ApexTheme.standCyan.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                bodyCompTile(
+                    label: "60d HRV Avg",
+                    value: avg60Hrv.map { "\(Int($0.rounded())) ms" } ?? "—",
+                    sub: health.hrvHistory.isEmpty ? "Needs HealthKit" : "\(health.hrvHistory.count)d sampled",
+                    tint: ApexTheme.standCyan
+                )
+                bodyCompTile(
+                    label: "60d RHR Avg",
+                    value: avg60Rhr.map { "\(Int($0.rounded())) bpm" } ?? "—",
+                    sub: health.rhrHistory.isEmpty ? "Needs HealthKit" : "\(health.rhrHistory.count)d sampled",
+                    tint: ApexTheme.moveCrimson
+                )
+                bodyCompTile(
+                    label: "Body Weight",
+                    value: latestWeight.map { String(format: "%.1f kg", $0) } ?? "—",
+                    sub: health.weightHistory.isEmpty ? "No scale log" : "\(health.weightHistory.count)d trend",
+                    tint: ApexTheme.accentVolt
+                )
+                bodyCompTile(
+                    label: "Body Fat / Lean",
+                    value: health.bodyFatPercent.map { String(format: "%.1f%%", $0) } ?? "—",
+                    sub: health.leanBodyMassKg.map { String(format: "%.1f kg lean", $0) } ?? "No body comp",
+                    tint: ApexTheme.accentEmerald
+                )
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func averageMetric(_ series: [DailyMetricPoint]) -> Double? {
+        guard !series.isEmpty else { return nil }
+        return series.reduce(0) { $0 + $1.value } / Double(series.count)
+    }
+
+    private func bodyCompTile(label: String, value: String, sub: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(sub)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(ApexTheme.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - 2. Native VisionKit Lab Bloodwork OCR Trigger
@@ -368,6 +467,16 @@ public struct LongevityView: View {
                 circadianRow(icon: "cup.and.saucer.fill", color: ApexTheme.accentAmber, label: "Caffeine Cutoff", time: caffeineCutoff)
                 Divider().background(Color.white.opacity(0.08))
                 circadianRow(icon: "moon.stars.fill", color: ApexTheme.accentIndigo, label: "Optimal Bedtime", time: targetBedtime)
+                Divider().background(Color.white.opacity(0.08))
+                circadianRow(
+                    icon: "bed.double.fill",
+                    color: ApexTheme.standCyan,
+                    label: "Sleep Needed / 7d Debt",
+                    time: health.sleepNeededHours.map { needed in
+                        let debt = health.sleepDebtHours ?? 0
+                        return String(format: "%.1fh · %+.1fh debt", needed, debt)
+                    } ?? "Sync Health Sleep"
+                )
             }
         }
         .appleCard(padding: 18, cornerRadius: 22)
@@ -410,10 +519,10 @@ public struct LongevityView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("N-of-1 Experiment Lab")
+                    Text("N-of-1 Experiment Lab & Journal")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
-                    Text("\(active.title) · \(summary.onDaysCount)/14 days logged")
+                    Text("\(active.title) · \(summary.onDaysCount)/14d · \(experimentStore.dailyTagsToday.count) journal tags")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -658,5 +767,75 @@ private struct CompanionSettingsSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 60-Day Biology Long-Horizon Trends Sheet
+private struct Biology60DayTrendsSheet: View {
+    @ObservedObject var health: HealthKitManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    trendChartCard(title: "60-Day HRV Trend", unit: "ms", color: ApexTheme.standCyan, points: health.hrvHistory)
+                    trendChartCard(title: "60-Day Resting HR", unit: "bpm", color: ApexTheme.moveCrimson, points: health.rhrHistory)
+                    trendChartCard(title: "60-Day Body Weight", unit: "kg", color: ApexTheme.accentVolt, points: health.weightHistory)
+                    trendChartCard(title: "VO₂ Max Trajectory", unit: "mL/kg", color: ApexTheme.accentEmerald, points: health.vo2History)
+                }
+                .padding(16)
+            }
+            .background(ApexTheme.background)
+            .navigationTitle("60-Day Baselines")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func trendChartCard(title: String, unit: String, color: Color, points: [DailyMetricPoint]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                if let last = points.last {
+                    Text(String(format: "%.1f %@", last.value, unit))
+                        .font(.system(size: 13, weight: .bold).monospacedDigit())
+                        .foregroundStyle(color)
+                }
+            }
+
+            if points.isEmpty {
+                Text("No Apple Health history recorded yet for this biomarker.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 18)
+            } else {
+                Chart(points) { point in
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value(unit, point.value)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(color)
+
+                    AreaMark(
+                        x: .value("Date", point.date),
+                        y: .value(unit, point.value)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(color.opacity(0.16))
+                }
+                .frame(height: 150)
+                .chartYScale(domain: .automatic(includesZero: false))
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 18)
     }
 }

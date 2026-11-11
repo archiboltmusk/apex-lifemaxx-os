@@ -35,6 +35,58 @@ export default function GlucoseCircadianHub() {
   const remainingCaffeineMg = +(caffeineDoseMg * Math.pow(0.5, hoursSinceCaffeine / caffeineHalfLife)).toFixed(1);
   const timeToSleepClearance = Math.max(0, +(caffeineHalfLife * Math.log2(caffeineDoseMg / 15) - hoursSinceCaffeine).toFixed(1));
 
+  // CGM / Blood Glucose Log (HealthKit synced + Manual fingerstick)
+  const [glucoseLogs, setGlucoseLogs] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_glucose_logs_v1') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [newGlucoseVal, setNewGlucoseVal] = useState('');
+  const [newGlucoseCtx, setNewGlucoseCtx] = useState('Post-Meal 60m');
+
+  useEffect(() => {
+    const refreshGlucose = () => {
+      try {
+        setGlucoseLogs(JSON.parse(localStorage.getItem('apex_glucose_logs_v1') || '[]'));
+      } catch {}
+    };
+    window.addEventListener('apex:glucose-updated', refreshGlucose);
+    return () => window.removeEventListener('apex:glucose-updated', refreshGlucose);
+  }, []);
+
+  const handleAddGlucoseLog = () => {
+    const val = Math.round(Number(newGlucoseVal));
+    if (!val || val < 40 || val > 400) return;
+    playPlunk();
+    playCoinChime();
+    const entry = {
+      id: `glu-${Date.now()}`,
+      valueMgDl: val,
+      context: newGlucoseCtx,
+      date: new Date().toISOString(),
+    };
+    const next = [entry, ...glucoseLogs].slice(0, 48);
+    setGlucoseLogs(next);
+    setNewGlucoseVal('');
+    try {
+      localStorage.setItem('apex_glucose_logs_v1', JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent('apex:glucose-updated'));
+    } catch {}
+  };
+
+  const glucoseAvg = glucoseLogs.length > 0
+    ? Math.round(glucoseLogs.reduce((s, g) => s + Number(g.valueMgDl || 0), 0) / glucoseLogs.length)
+    : null;
+  const glucoseMax = glucoseLogs.length > 0
+    ? Math.max(...glucoseLogs.map((g) => Number(g.valueMgDl || 0)))
+    : null;
+  const glucoseMin = glucoseLogs.length > 0
+    ? Math.min(...glucoseLogs.map((g) => Number(g.valueMgDl || 0)))
+    : null;
+  const postMealExcursion = glucoseMax != null && glucoseMin != null ? glucoseMax - glucoseMin : null;
+
   // GLUT4 Timer Interval
   useEffect(() => {
     let interval = null;
@@ -81,6 +133,77 @@ export default function GlucoseCircadianHub() {
 
   return (
     <div className="space-y-6">
+      {/* 0. BEVEL CGM & POST-MEAL BLOOD GLUCOSE EXCURSION MONITOR */}
+      <div className="liquid-glass-elevated rounded-[26px] p-6 border border-white/15 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-[10px] font-mono text-[#00F0FF] font-black uppercase tracking-wider">
+              METABOLIC CGM &amp; POST-MEAL SPIKE ENGINE
+            </span>
+            <h3 className="text-sm font-bold text-white tracking-tight">24h Blood Glucose &amp; Glycemic Excursion</h3>
+          </div>
+          <div className="flex items-center space-x-2 text-xs font-mono">
+            <span className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-white font-bold">
+              AVG: {glucoseAvg != null ? `${glucoseAvg} mg/dL` : '—'}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-[#10B981]/20 border border-[#10B981]/40 text-[#10B981] font-bold">
+              SPIKE Δ: {postMealExcursion != null ? `+${postMealExcursion} mg/dL` : '—'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+          <input
+            type="number"
+            value={newGlucoseVal}
+            onChange={(e) => setNewGlucoseVal(e.target.value)}
+            placeholder="Glucose (mg/dL)"
+            className="w-40 px-3 py-2 rounded-[10px] bg-black/50 border border-white/15 text-white"
+          />
+          <select
+            value={newGlucoseCtx}
+            onChange={(e) => setNewGlucoseCtx(e.target.value)}
+            className="px-3 py-2 rounded-[10px] bg-black/50 border border-white/15 text-white"
+          >
+            <option>Fasting</option>
+            <option>Pre-Meal</option>
+            <option>Post-Meal 60m</option>
+            <option>Post-Meal 120m</option>
+            <option>Bedtime</option>
+          </select>
+          <button
+            onClick={handleAddGlucoseLog}
+            className="px-4 py-2 rounded-[10px] bg-[#E5FE40] text-black font-black"
+          >
+            Log Reading
+          </button>
+        </div>
+
+        {glucoseLogs.length === 0 ? (
+          <div className="p-4 rounded-[14px] bg-black/40 border border-dashed border-white/15 text-xs font-mono text-[#A1A1AA]">
+            No blood glucose readings synced yet. Connect a HealthKit-compatible CGM on iPhone Fuel or log a reading above to track post-meal spikes.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-end space-x-1.5 h-20 pt-2">
+              {glucoseLogs.slice(0, 16).reverse().map((g) => {
+                const v = Number(g.valueMgDl || 90);
+                const pct = Math.max(15, Math.min(100, ((v - 55) / 145) * 100));
+                const color = v > 140 ? '#FA114F' : v > 115 ? '#F59E0B' : '#10B981';
+                return (
+                  <div key={g.id} title={`${g.valueMgDl} mg/dL (${g.context})`} className="flex-1 flex flex-col items-center">
+                    <div className="w-full h-14 bg-black/50 rounded-md flex items-end overflow-hidden">
+                      <div className="w-full rounded-md" style={{ height: `${pct}%`, backgroundColor: color }} />
+                    </div>
+                    <span className="text-[9px] font-mono text-[#8A8A8A] mt-1">{g.valueMgDl}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* 1. CIRCADIAN PEAK STRENGTH & 1RM WINDOW */}
       <div className="liquid-glass-elevated rounded-[26px] p-6 border border-white/15 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">

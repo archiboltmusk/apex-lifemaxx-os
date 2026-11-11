@@ -67,7 +67,7 @@ public struct StartDeadHangIntent: AppIntent {
     @MainActor
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         ApexNavigationRouter.shared.shouldAutoStartDeadHang = true
-        ApexNavigationRouter.shared.selectedTab = 3
+        ApexNavigationRouter.shared.selectedTab = 4
         return .result(dialog: "Starting your Dead Hang endurance timer.")
     }
 }

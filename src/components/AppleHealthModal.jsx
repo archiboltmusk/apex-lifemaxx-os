@@ -221,6 +221,12 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
         rhr: xmlResult.metrics.restingHeartRate,
         hrv: xmlResult.metrics.hrvMs,
         vo2Max: xmlResult.metrics.vo2Max,
+        bloodOxygen: xmlResult.metrics.bloodOxygen,
+        respiratoryRate: xmlResult.metrics.respiratoryRate,
+        wristTempDelta: xmlResult.metrics.wristTempDeltaC,
+        bodyFatPercent: xmlResult.metrics.bodyFatPercent,
+        leanMassKg: xmlResult.metrics.leanMassKg,
+        glucoseLatest: xmlResult.metrics.bloodGlucoseMgDl,
         source: xmlResult.sourceName || 'Apple Health export.xml',
         setAbsolute: true,
       });

@@ -1,7 +1,7 @@
 import Foundation
 import ActivityKit
 
-// MARK: - Shared 7-Day Telemetry Sample
+// MARK: - Shared 7-Day & Intraday Telemetry Samples
 public struct DailyMetricPoint: Codable, Identifiable, Equatable {
     public var id: Date { date }
     public let date: Date
@@ -10,6 +10,19 @@ public struct DailyMetricPoint: Codable, Identifiable, Equatable {
     public init(date: Date, value: Double) {
         self.date = date
         self.value = value
+    }
+}
+
+public struct HourlyMetricPoint: Codable, Identifiable, Equatable {
+    public var id: Date { date }
+    public let date: Date
+    public let value: Double
+    public let label: String
+
+    public init(date: Date, value: Double, label: String = "") {
+        self.date = date
+        self.value = value
+        self.label = label
     }
 }
 
@@ -22,6 +35,8 @@ public struct ApexWidgetSnapshot: Codable {
     public var standHours: Double
     public var standTarget: Double
     public var readinessScore: Int?
+    public var energyBank: Int?
+    public var strainScore: Double?
     public var hrv: Double?
     public var hrvDeltaPercent: Int?
     public var restingHR: Double?
@@ -40,6 +55,8 @@ public struct ApexWidgetSnapshot: Codable {
         standHours: Double = 0,
         standTarget: Double = 12,
         readinessScore: Int? = nil,
+        energyBank: Int? = nil,
+        strainScore: Double? = nil,
         hrv: Double? = nil,
         hrvDeltaPercent: Int? = nil,
         restingHR: Double? = nil,
@@ -57,6 +74,8 @@ public struct ApexWidgetSnapshot: Codable {
         self.standHours = standHours
         self.standTarget = standTarget
         self.readinessScore = readinessScore
+        self.energyBank = energyBank
+        self.strainScore = strainScore
         self.hrv = hrv
         self.hrvDeltaPercent = hrvDeltaPercent
         self.restingHR = restingHR
@@ -141,6 +160,7 @@ public final class ApexNavigationRouter: ObservableObject {
 
     @Published public var selectedTab: Int = 0
     @Published public var requestedExerciseRaw: String? = nil
+    @Published public var requestedTrainSegment: Int? = nil
     @Published public var shouldAutoStartDeadHang: Bool = false
 
     private init() {}
@@ -155,8 +175,10 @@ public final class ApexNavigationRouter: ObservableObject {
             if let ex = url.pathComponents.dropFirst().first, !ex.isEmpty {
                 requestedExerciseRaw = ex
             }
-        case "longevity":
+        case "nutrition", "fuel":
             selectedTab = 3
+        case "longevity", "biology":
+            selectedTab = 4
             if url.pathComponents.contains("deadhang") {
                 shouldAutoStartDeadHang = true
             }

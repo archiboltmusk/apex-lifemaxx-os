@@ -157,6 +157,9 @@ xcrun --sdk iphonesimulator swiftc \
     ios_app/VoiceBiomarkerView.swift \
     ios_app/FaceScanView.swift \
     ios_app/CameraWorkoutView.swift \
+    ios_app/StrengthBuilderView.swift \
+    ios_app/NutritionCGMView.swift \
+    ios_app/BevelMetricsViews.swift \
     ios_app/BloodworkOCRView.swift \
     ios_app/LongevityView.swift \
     ios_app/SummaryView.swift \

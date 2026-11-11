@@ -35,14 +35,47 @@ export default function AIConsigliere({ healthData, onConnectHealth }) {
     const move = healthData?.activityRings?.move?.current || 0;
     const moveTarget = healthData?.activityRings?.move?.target || 750;
     const sleep = healthData?.metrics?.sleep?.totalHours || 0;
-    const readiness = healthData?.readinessScore ?? (hrv > 0 && rhr > 0 ? Math.min(99, Math.max(35, Math.round(50 + (hrv - 50) * 0.5 - (rhr - 55) * 0.6))) : null);
+    const bevel = healthData?.bevel || {};
+    const readiness = bevel.readiness ?? healthData?.readinessScore ?? (hrv > 0 && rhr > 0 ? Math.min(99, Math.max(35, Math.round(50 + (hrv - 50) * 0.5 - (rhr - 55) * 0.6))) : null);
+    const strain = bevel.strain ?? (move > 0 ? +((Math.min(1, move / Math.max(100, moveTarget))) * 18).toFixed(1) : null);
+    const energyBank = bevel.energyBank ?? (readiness != null ? Math.max(12, Math.min(99, Math.round(readiness - (strain || 0) * 2))) : null);
+    const stressScore = bevel.stressScore ?? (hrv > 0 && rhr > 0 ? Math.max(8, Math.min(95, Math.round(62 - (hrv - 45) * 0.45 + Math.max(0, rhr - 58) * 0.8))) : null);
     let labsCount = 0;
     let mealsCount = 0;
+    let nutritionScore = null;
+    let glucoseLatest = healthData?.metrics?.glucoseLatest || null;
+    let journalTagsToday = [];
     try {
       labsCount = JSON.parse(localStorage.getItem('apex_user_bloodwork') || '[]').length;
       mealsCount = JSON.parse(localStorage.getItem('apex_logged_meals') || '[]').length;
+      const nutSum = JSON.parse(localStorage.getItem('apex_ios_nutrition_summary') || 'null');
+      nutritionScore = nutSum?.qualityScore || null;
+      const gLogs = JSON.parse(localStorage.getItem('apex_glucose_logs_v1') || '[]');
+      if (!glucoseLatest && gLogs[0]?.valueMgDl) glucoseLatest = gLogs[0].valueMgDl;
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const jMap = JSON.parse(localStorage.getItem('apex_daily_journal_tags_v1') || '{}');
+      journalTagsToday = jMap[todayKey] || [];
     } catch {}
-    return { hrv, rhr, vo2, move, moveTarget, sleep, readiness, labsCount, mealsCount, isSynced: hrv > 0 || move > 0 };
+    return {
+      hrv,
+      rhr,
+      vo2,
+      move,
+      moveTarget,
+      sleep,
+      readiness,
+      strain,
+      energyBank,
+      stressScore,
+      sleepNeeded: bevel.sleepNeededHours || null,
+      sleepDebt: bevel.sleepDebtHours ?? null,
+      labsCount,
+      mealsCount,
+      nutritionScore,
+      glucoseLatest,
+      journalTagsToday,
+      isSynced: hrv > 0 || move > 0 || Boolean(bevel.strain),
+    };
   };
 
   const [messages, setMessages] = useState(() => {
@@ -90,8 +123,16 @@ export default function AIConsigliere({ healthData, onConnectHealth }) {
       let reply = '';
       const lower = prompt.toLowerCase();
 
-      if (!t.isSynced && t.labsCount === 0 && t.mealsCount === 0) {
-        reply = `No physiological streams are connected yet for "${prompt}". Connect Apple Health in the header, start a Face/Workout camera session, or upload your bloodwork PDF/CSV so I can reference your actual numbers.`;
+      if (!t.isSynced && t.labsCount === 0 && t.mealsCount === 0 && !t.glucoseLatest) {
+        reply = `No physiological streams are connected yet for "${prompt}". Connect Apple Health in the header, start a Face/Workout camera session, log Fuel/Glucose, or upload your bloodwork so I can reference your real numbers.`;
+      } else if (lower.includes('morning briefing')) {
+        const targetLow = t.readiness != null ? Math.max(4, Math.round(6 + (t.readiness / 100) * 8)) : '—';
+        const targetHigh = typeof targetLow === 'number' ? Math.min(20, targetLow + 4) : '—';
+        reply = `Morning Briefing: Recovery Readiness is ${t.readiness ?? '—'}%, Energy Bank at ${t.energyBank ?? '—'}% (HRV ${t.hrv || '—'} ms, RHR ${t.rhr || '—'} bpm). Adaptive Strain Target today is ${targetLow}–${targetHigh}. ${t.sleepNeeded ? `Tonight's sleep need: ${t.sleepNeeded.toFixed(1)}h.` : ''} Prioritize electrolytes & outdoor light before noon.`;
+      } else if (lower.includes('evening wrap') || lower.includes('wrap-up')) {
+        reply = `Evening Wrap-Up: Closed at Strain ${t.strain ?? '—'}/21 (${t.move} kcal), Intraday Stress ${t.stressScore ?? '—'}/100, Energy Bank ${t.energyBank ?? '—'}%. Meals logged: ${t.mealsCount}${t.nutritionScore ? ` (Quality ${t.nutritionScore}/100)` : ''}${t.glucoseLatest ? `, Glucose ${t.glucoseLatest} mg/dL` : ''}. Active Journal tags: ${t.journalTagsToday.length ? t.journalTagsToday.join(', ') : 'none yet'}. Target ${t.sleepNeeded ? `${t.sleepNeeded.toFixed(1)}h sleep` : 'consistent bedtime'} tonight.`;
+      } else if (lower.includes('energy') || lower.includes('stress') || lower.includes('strain')) {
+        reply = `Autonomic Status: Energy Bank ${t.energyBank ?? '—'}%, Stress ${t.stressScore ?? '—'}/100, Daily Strain ${t.strain ?? '—'}/21. ${t.energyBank != null && t.energyBank < 45 ? 'Metabolic reserve is dipping — favor restorative walking or a 20m NSDR reset.' : 'Reserve is healthy for focused training or deep cognitive work.'}`;
       } else if (coachPersona === 'buddy') {
         if (lower.includes('push') || lower.includes('workout') || lower.includes('exercise')) {
           reply = t.readiness != null
@@ -227,25 +268,37 @@ export default function AIConsigliere({ healthData, onConnectHealth }) {
           )}
         </div>
 
-        {/* Quick Suggestion Chips */}
+        {/* Quick Suggestion Chips + Bevel Briefings */}
         <div className="flex items-center space-x-2 pb-3 overflow-x-auto no-scrollbar text-[11px] font-mono text-[#A1A1AA]">
+          <button
+            onClick={() => handleSend('Give me my Morning Briefing')}
+            className="px-2.5 py-1 rounded-full bg-[#E5FE40]/15 hover:bg-[#E5FE40]/25 text-[#E5FE40] border border-[#E5FE40]/40 font-bold shrink-0 transition"
+          >
+            Morning Briefing
+          </button>
+          <button
+            onClick={() => handleSend('Give me my Evening Wrap-Up')}
+            className="px-2.5 py-1 rounded-full bg-[#00F0FF]/15 hover:bg-[#00F0FF]/25 text-[#00F0FF] border border-[#00F0FF]/40 font-bold shrink-0 transition"
+          >
+            Evening Wrap-Up
+          </button>
+          <button
+            onClick={() => handleSend('How is my Energy Bank, Stress & Strain?')}
+            className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
+          >
+            "Energy &amp; Stress?"
+          </button>
           <button
             onClick={() => handleSend('Should I push today or recover?')}
             className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
           >
-            "Should I push today or recover?"
+            "Push or recover?"
           </button>
           <button
-            onClick={() => handleSend('How was my week and sleep?')}
+            onClick={() => handleSend('How was my sleep?')}
             className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
           >
-            "How was my week and sleep?"
-          </button>
-          <button
-            onClick={() => handleSend('What patterns should I know?')}
-            className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 shrink-0 transition"
-          >
-            "What patterns should I know?"
+            "How was my sleep?"
           </button>
         </div>
 

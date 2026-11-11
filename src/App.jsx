@@ -196,6 +196,25 @@ export default function App() {
             ...prev.metrics.vo2Max,
             value: sample.vo2Max || prev.metrics.vo2Max.value,
           },
+          bloodOxygen: sample.bloodOxygen || prev.metrics.bloodOxygen,
+          respiratoryRate: sample.respiratoryRate || prev.metrics.respiratoryRate,
+          wristTempDelta: sample.wristTempDelta ?? prev.metrics.wristTempDelta,
+          bodyFatPercent: sample.bodyFatPercent || prev.metrics.bodyFatPercent,
+          leanMassKg: sample.leanMassKg || prev.metrics.leanMassKg,
+          glucoseLatest: sample.glucoseLatest || prev.metrics.glucoseLatest,
+        },
+        bevel: {
+          ...(prev.bevel || {}),
+          readiness: sample.readiness ?? prev.bevel?.readiness ?? null,
+          strain: sample.strain ?? prev.bevel?.strain ?? null,
+          energyBank: sample.energyBank ?? prev.bevel?.energyBank ?? null,
+          stressScore: sample.stressScore ?? prev.bevel?.stressScore ?? null,
+          sleepNeededHours: sample.sleepNeededHours ?? prev.bevel?.sleepNeededHours ?? null,
+          sleepDebtHours: sample.sleepDebtHours ?? prev.bevel?.sleepDebtHours ?? null,
+          vitalsInRange: sample.vitalsInRange ?? prev.bevel?.vitalsInRange ?? 0,
+          vitalsTotal: sample.vitalsTotal ?? prev.bevel?.vitalsTotal ?? 0,
+          stressCurve: Array.isArray(sample.stressCurve) ? sample.stressCurve : (prev.bevel?.stressCurve || []),
+          energyCurve: Array.isArray(sample.energyCurve) ? sample.energyCurve : (prev.bevel?.energyCurve || []),
         },
         sleepStages: {
           ...prev.sleepStages,
@@ -234,9 +253,107 @@ export default function App() {
         vo2Max: payload.vo2 || payload.vo2Max,
         sleepHours: payload.sleepHours,
         deepSleepHours: payload.deepSleepHours,
+        bloodOxygen: payload.bloodOxygen,
+        respiratoryRate: payload.respiratoryRate,
+        wristTempDelta: payload.wristTempDelta,
+        bodyFatPercent: payload.bodyFatPercent,
+        leanMassKg: payload.leanMassKg,
+        glucoseLatest: payload.glucoseLatest,
+        readiness: payload.readiness,
+        strain: payload.strain,
+        energyBank: payload.energyBank,
+        stressScore: payload.stressScore,
+        sleepNeededHours: payload.sleepNeededHours,
+        sleepDebtHours: payload.sleepDebtHours,
+        vitalsInRange: payload.vitalsInRange,
+        vitalsTotal: payload.vitalsTotal,
+        stressCurve: payload.stressCurve,
+        energyCurve: payload.energyCurve,
         source: payload.source || 'iPhone · Apple HealthKit Live',
         setAbsolute: payload.setAbsolute || false,
       });
+
+      // Merge iOS Nutrition Summary & Logged Meal Entry
+      if (payload.nutritionSummary) {
+        try {
+          localStorage.setItem('apex_ios_nutrition_summary', JSON.stringify({
+            ...payload.nutritionSummary,
+            updatedAt: new Date().toISOString(),
+          }));
+          window.dispatchEvent(new CustomEvent('apex:meals-updated'));
+        } catch {}
+      }
+
+      if (payload.mealEntry) {
+        try {
+          const existingMeals = JSON.parse(localStorage.getItem('apex_logged_meals') || '[]');
+          const m = payload.mealEntry;
+          const normalized = {
+            id: m.id || `ios-meal-${Date.now()}`,
+            name: m.name || 'iPhone Meal',
+            calories: Number(m.calories || 0),
+            protein: Number(m.protein || 0),
+            carbs: Number(m.carbs || 0),
+            fat: Number(m.fat || 0),
+            fiber: Number(m.fiber || 0),
+            sugar: Number(m.sugar || 0),
+            source: m.source || 'iPhone Fuel',
+            date: m.date || new Date().toISOString(),
+          };
+          const dedupedMeals = [normalized, ...existingMeals.filter((x) => x.id !== normalized.id)].slice(0, 60);
+          localStorage.setItem('apex_logged_meals', JSON.stringify(dedupedMeals));
+          setLoggedMealsSummary({
+            count: dedupedMeals.length,
+            calories: dedupedMeals.reduce((s, item) => s + Number(item.calories || 0), 0),
+            protein: dedupedMeals.reduce((s, item) => s + Number(item.protein || 0), 0),
+          });
+          window.dispatchEvent(new CustomEvent('apex:meals-updated'));
+          showToast(`iPhone Meal Synced · ${normalized.name}`);
+        } catch {}
+      }
+
+      // Merge iOS Blood Glucose Reading
+      if (payload.glucoseLatest && Number(payload.glucoseLatest) > 0) {
+        try {
+          const existingGlucose = JSON.parse(localStorage.getItem('apex_glucose_logs_v1') || '[]');
+          const entry = {
+            id: `hk-${new Date().toISOString().slice(0, 16)}`,
+            valueMgDl: Math.round(Number(payload.glucoseLatest)),
+            context: 'Apple Health CGM',
+            date: new Date().toISOString(),
+          };
+          const dedupedGlucose = [entry, ...existingGlucose.filter((g) => g.id !== entry.id)].slice(0, 48);
+          localStorage.setItem('apex_glucose_logs_v1', JSON.stringify(dedupedGlucose));
+          window.dispatchEvent(new CustomEvent('apex:glucose-updated'));
+        } catch {}
+      }
+
+      // Merge iOS 7d Muscle Volume Map & Strength Workouts
+      if (payload.muscleVolumes7d && typeof payload.muscleVolumes7d === 'object') {
+        try {
+          localStorage.setItem('apex_ios_muscle_volumes_7d', JSON.stringify({
+            volumes: payload.muscleVolumes7d,
+            updatedAt: new Date().toISOString(),
+          }));
+          window.dispatchEvent(new CustomEvent('apex:muscles-updated'));
+        } catch {}
+      }
+
+      // Merge iOS Daily Journal Tags
+      if (Array.isArray(payload.journalTagsToday) || payload.dailyTagsByDate) {
+        try {
+          if (payload.dailyTagsByDate && typeof payload.dailyTagsByDate === 'object') {
+            localStorage.setItem('apex_daily_journal_tags_v1', JSON.stringify(payload.dailyTagsByDate));
+          }
+          if (Array.isArray(payload.journalTagsToday)) {
+            localStorage.setItem('apex_ios_journal_tags_today', JSON.stringify({
+              tags: payload.journalTagsToday,
+              date: new Date().toISOString().slice(0, 10),
+            }));
+          }
+          window.dispatchEvent(new CustomEvent('apex:journal-updated'));
+        } catch {}
+      }
 
       // Merge iOS Face Scan into Mac localStorage & UI toast
       if (payload.faceScan) {

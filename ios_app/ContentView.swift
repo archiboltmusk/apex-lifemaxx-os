@@ -25,11 +25,17 @@ public struct ContentView: View {
                 }
                 .tag(2)
 
-            LongevityView()
+            NutritionCGMView()
                 .tabItem {
-                    Label("Longevity", systemImage: "hourglass")
+                    Label("Fuel", systemImage: "fork.knife")
                 }
                 .tag(3)
+
+            LongevityView()
+                .tabItem {
+                    Label("Biology", systemImage: "hourglass")
+                }
+                .tag(4)
         }
         .tint(ApexTheme.accentVolt)
         .onChange(of: router.selectedTab) { _, _ in

@@ -69,6 +69,37 @@ public struct ExperimentCorrelationSummary {
     public let verdict: String
 }
 
+public struct JournalTag: Identifiable, Hashable {
+    public let id: String
+    public let title: String
+    public let icon: String
+    public let category: String
+
+    public static let presets: [JournalTag] = [
+        JournalTag(id: "hydration", title: "Hydration", icon: "drop.fill", category: "Intake"),
+        JournalTag(id: "caffeine_cutoff", title: "Caffeine Cutoff", icon: "cup.and.saucer.fill", category: "Intake"),
+        JournalTag(id: "late_meal", title: "Late Meal", icon: "fork.knife", category: "Timing"),
+        JournalTag(id: "alcohol", title: "Alcohol", icon: "wineglass.fill", category: "Intake"),
+        JournalTag(id: "cold_plunge", title: "Cold Plunge", icon: "snowflake", category: "Recovery"),
+        JournalTag(id: "sauna", title: "Sauna", icon: "flame.fill", category: "Recovery"),
+        JournalTag(id: "sunlight", title: "Sunlight", icon: "sun.max.fill", category: "Circadian"),
+        JournalTag(id: "magnesium", title: "Magnesium", icon: "pills.fill", category: "Supplement"),
+        JournalTag(id: "creatine", title: "Creatine", icon: "bolt.fill", category: "Supplement"),
+        JournalTag(id: "high_stress", title: "High Stress", icon: "waveform.path.ecg", category: "State"),
+        JournalTag(id: "nasal_tape", title: "Nasal Tape", icon: "wind", category: "Sleep")
+    ]
+}
+
+public struct JournalImpactSummary {
+    public let tagId: String
+    public let pairedDaysCount: Int
+    public let baselineDaysCount: Int
+    public let hrvDeltaPct: Double?
+    public let rhrDeltaBpm: Double?
+    public let sleepDeltaMin: Double?
+    public let hasEnoughData: Bool
+}
+
 // MARK: - Store
 @MainActor
 public final class ExperimentLabStore: ObservableObject {
@@ -78,8 +109,10 @@ public final class ExperimentLabStore: ObservableObject {
         didSet { UserDefaults.standard.set(activeProtocolId, forKey: "apex_active_experiment_id") }
     }
     @Published public private(set) var logs: [ExperimentLogEntry] = []
+    @Published public private(set) var dailyTagsByDate: [String: [String]] = [:]
 
     private let logsKey = "apex_experiment_logs_v1"
+    private let journalTagsKey = "apex_daily_journal_tags_v1"
 
     private init() {
         self.activeProtocolId = UserDefaults.standard.string(forKey: "apex_active_experiment_id") ?? ExperimentProtocol.presets[0].id
@@ -87,14 +120,40 @@ public final class ExperimentLabStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([ExperimentLogEntry].self, from: data) {
             self.logs = decoded
         }
+        if let tagData = UserDefaults.standard.data(forKey: journalTagsKey),
+           let decodedTags = try? JSONDecoder().decode([String: [String]].self, from: tagData) {
+            self.dailyTagsByDate = decodedTags
+        }
     }
 
     public var activeProtocol: ExperimentProtocol {
         ExperimentProtocol.presets.first(where: { $0.id == activeProtocolId }) ?? ExperimentProtocol.presets[0]
     }
 
+    public var dailyTagsToday: [String] {
+        dailyTagsByDate[todayKey()] ?? []
+    }
+
     public func todayKey() -> String {
         Self.dayKey(for: Date())
+    }
+
+    public func toggleJournalTag(_ tagId: String) {
+        let key = todayKey()
+        var current = dailyTagsByDate[key] ?? []
+        if let idx = current.firstIndex(of: tagId) {
+            current.remove(at: idx)
+        } else {
+            current.append(tagId)
+        }
+        dailyTagsByDate[key] = current
+        persist()
+        Haptics.selection()
+
+        HealthKitManager.shared.syncEventToMac(extraPayload: [
+            "journalTagsToday": current,
+            "dailyTagsByDate": dailyTagsByDate
+        ])
     }
 
     public func logToday(adhered: Bool) {
@@ -123,14 +182,86 @@ public final class ExperimentLabStore: ObservableObject {
         let relevantLogs = logs.filter { $0.protocolId == protocolId }
         let onKeys = Set(relevantLogs.filter { $0.adhered }.map { $0.dateKey })
         let offKeys = Set(relevantLogs.filter { !$0.adhered }.map { $0.dateKey })
+        let deltas = computeOutcomeDeltas(onKeys: onKeys, offKeys: offKeys, health: health)
 
-        let hrvByDay = Dictionary(uniqueKeysWithValues: health.hrvHistory.map { (Self.dayKey(for: $0.date), $0.value) })
-        let rhrByDay = Dictionary(uniqueKeysWithValues: health.rhrHistory.map { (Self.dayKey(for: $0.date), $0.value) })
-        let sleepByDay = Dictionary(uniqueKeysWithValues: health.sleepHistory.map { (Self.dayKey(for: $0.date), $0.value) })
+        let totalDays = onKeys.count + offKeys.count
+        let verdict: String
+        if onKeys.isEmpty && offKeys.isEmpty {
+            verdict = "Log both Protocol On and Control Off days across 14 days to pair HealthKit outcomes."
+        } else if offKeys.isEmpty {
+            verdict = "Logged \(onKeys.count) On day(s). Log at least 1 Control (Off) day to isolate baseline delta."
+        } else if onKeys.isEmpty {
+            verdict = "Logged \(offKeys.count) Control day(s). Log at least 1 Protocol On day to compute delta."
+        } else if totalDays < 3 {
+            verdict = "Log \(max(0, 3 - totalDays)) more day(s) across On & Off states for statistical confidence."
+        } else if let hrvD = deltas.hrvDeltaPct, hrvD >= 5 {
+            verdict = "Positive signal: HRV averages +\(Int(hrvD.rounded()))% higher on protocol days."
+        } else if let rhrD = deltas.rhrDeltaBpm, rhrD <= -1.5 {
+            verdict = "Positive signal: Resting HR drops \(String(format: "%.1f", abs(rhrD))) bpm on protocol days."
+        } else {
+            verdict = "Neutral delta across \(totalDays) logged days — continue logging On/Off days through Day 14."
+        }
+
+        return ExperimentCorrelationSummary(
+            onDaysCount: onKeys.count,
+            offDaysCount: offKeys.count,
+            hrvDeltaPct: deltas.hrvDeltaPct,
+            rhrDeltaBpm: deltas.rhrDeltaBpm,
+            sleepDeltaMin: deltas.sleepDeltaMin,
+            verdict: verdict
+        )
+    }
+
+    /// Lag-1 correlation: pairs a tag logged on day D against next-day (D+1) HRV, RHR, and Sleep outcomes.
+    public func journalCorrelation(forTagId tagId: String, health: HealthKitManager) -> JournalImpactSummary {
+        let cal = Calendar(identifier: .gregorian)
+        var taggedNextKeys = Set<String>()
+        var untaggedLoggedNextKeys = Set<String>()
+
+        for (key, tags) in dailyTagsByDate {
+            guard let tagDate = Self.formatter.date(from: key),
+                  let nextDate = cal.date(byAdding: .day, value: 1, to: tagDate) else { continue }
+            let nextKey = Self.dayKey(for: nextDate)
+            if tags.contains(tagId) {
+                taggedNextKeys.insert(nextKey)
+            } else {
+                untaggedLoggedNextKeys.insert(nextKey)
+            }
+        }
+
+        let healthKeys = Set(health.hrvHistory.map { Self.dayKey(for: $0.date) })
+            .union(health.rhrHistory.map { Self.dayKey(for: $0.date) })
+            .union(health.sleepHistory.map { Self.dayKey(for: $0.date) })
+
+        let baselineKeys = untaggedLoggedNextKeys.isEmpty
+            ? healthKeys.subtracting(taggedNextKeys)
+            : untaggedLoggedNextKeys
+
+        let pairedWithOutcomeCount = taggedNextKeys.intersection(healthKeys).count
+        let enoughData = pairedWithOutcomeCount >= 3 && !baselineKeys.intersection(healthKeys).isEmpty
+
+        let deltas = enoughData
+            ? computeOutcomeDeltas(onKeys: taggedNextKeys, offKeys: baselineKeys, health: health)
+            : (hrvDeltaPct: nil, rhrDeltaBpm: nil, sleepDeltaMin: nil)
+
+        return JournalImpactSummary(
+            tagId: tagId,
+            pairedDaysCount: pairedWithOutcomeCount,
+            baselineDaysCount: baselineKeys.intersection(healthKeys).count,
+            hrvDeltaPct: deltas.hrvDeltaPct,
+            rhrDeltaBpm: deltas.rhrDeltaBpm,
+            sleepDeltaMin: deltas.sleepDeltaMin,
+            hasEnoughData: enoughData
+        )
+    }
+
+    private func computeOutcomeDeltas(onKeys: Set<String>, offKeys: Set<String>, health: HealthKitManager) -> (hrvDeltaPct: Double?, rhrDeltaBpm: Double?, sleepDeltaMin: Double?) {
+        let hrvByDay = Dictionary(health.hrvHistory.map { (Self.dayKey(for: $0.date), $0.value) }, uniquingKeysWith: { _, latest in latest })
+        let rhrByDay = Dictionary(health.rhrHistory.map { (Self.dayKey(for: $0.date), $0.value) }, uniquingKeysWith: { _, latest in latest })
+        let sleepByDay = Dictionary(health.sleepHistory.map { (Self.dayKey(for: $0.date), $0.value) }, uniquingKeysWith: { _, latest in latest })
 
         let onHRV = onKeys.compactMap { hrvByDay[$0] }
         let offHRV = offKeys.compactMap { hrvByDay[$0] }
-
         let hrvDeltaPct: Double? = {
             guard !onHRV.isEmpty, !offHRV.isEmpty else { return nil }
             let mOn = onHRV.reduce(0, +) / Double(onHRV.count)
@@ -153,37 +284,15 @@ public final class ExperimentLabStore: ObservableObject {
             return ((onSleep.reduce(0, +) / Double(onSleep.count)) - (offSleep.reduce(0, +) / Double(offSleep.count))) * 60.0
         }()
 
-        let totalDays = onKeys.count + offKeys.count
-        let verdict: String
-        if onKeys.isEmpty && offKeys.isEmpty {
-            verdict = "Log both Protocol On and Control Off days across 14 days to pair HealthKit outcomes."
-        } else if offKeys.isEmpty {
-            verdict = "Logged \(onKeys.count) On day(s). Log at least 1 Control (Off) day to isolate baseline delta."
-        } else if onKeys.isEmpty {
-            verdict = "Logged \(offKeys.count) Control day(s). Log at least 1 Protocol On day to compute delta."
-        } else if totalDays < 3 {
-            verdict = "Log \(max(0, 3 - totalDays)) more day(s) across On & Off states for statistical confidence."
-        } else if let hrvD = hrvDeltaPct, hrvD >= 5 {
-            verdict = "Positive signal: HRV averages +\(Int(hrvD.rounded()))% higher on protocol days."
-        } else if let rhrD = rhrDeltaBpm, rhrD <= -1.5 {
-            verdict = "Positive signal: Resting HR drops \(String(format: "%.1f", abs(rhrD))) bpm on protocol days."
-        } else {
-            verdict = "Neutral delta across \(totalDays) logged days — continue logging On/Off days through Day 14."
-        }
-
-        return ExperimentCorrelationSummary(
-            onDaysCount: onKeys.count,
-            offDaysCount: offKeys.count,
-            hrvDeltaPct: hrvDeltaPct,
-            rhrDeltaBpm: rhrDeltaBpm,
-            sleepDeltaMin: sleepDeltaMin,
-            verdict: verdict
-        )
+        return (hrvDeltaPct, rhrDeltaBpm, sleepDeltaMin)
     }
 
     private func persist() {
         if let data = try? JSONEncoder().encode(logs) {
             UserDefaults.standard.set(data, forKey: logsKey)
+        }
+        if let tagData = try? JSONEncoder().encode(dailyTagsByDate) {
+            UserDefaults.standard.set(tagData, forKey: journalTagsKey)
         }
     }
 
@@ -215,6 +324,7 @@ public struct ExperimentLabSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    dailyJournalSection
                     activeExperimentCard(active: active, summary: summary, todayLog: todayLog)
                     protocolPickerSection
                 }
@@ -296,6 +406,115 @@ public struct ExperimentLabSheet: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .padding(.top, 2)
+        }
+        .padding(18)
+        .appleCard(cornerRadius: 20)
+    }
+
+    private var dailyJournalSection: some View {
+        let activeTags = Set(store.dailyTagsToday)
+        let columns = [GridItem(.adaptive(minimum: 120), spacing: 8)]
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Daily Journal & Lag-1 Impact")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text("Tap today's habits — correlates against next-day HRV, RHR & Sleep")
+                        .font(.caption)
+                        .foregroundStyle(ApexTheme.secondaryText)
+                }
+                Spacer()
+                Text("\(activeTags.count) active")
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(ApexTheme.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(ApexTheme.blue.opacity(0.16), in: Capsule())
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(JournalTag.presets) { tag in
+                    let isOn = activeTags.contains(tag.id)
+                    Button {
+                        store.toggleJournalTag(tag.id)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: tag.icon)
+                                .font(.caption.weight(.semibold))
+                            Text(tag.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .padding(.horizontal, 8)
+                        .foregroundStyle(isOn ? .white : ApexTheme.secondaryText)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(isOn ? ApexTheme.blue.opacity(0.28) : Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(isOn ? ApexTheme.blue : Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider().background(Color.white.opacity(0.08))
+
+            let taggedPresets = JournalTag.presets.filter { tag in
+                store.dailyTagsByDate.values.contains(where: { $0.contains(tag.id) })
+            }
+            if taggedPresets.isEmpty {
+                Text("Log tags across ≥3 days alongside Apple Health sleep & HRV to unlock Lag-1 impact coefficients.")
+                    .font(.caption)
+                    .foregroundStyle(ApexTheme.secondaryText)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(taggedPresets) { tag in
+                        let impact = store.journalCorrelation(forTagId: tag.id, health: health)
+                        HStack(spacing: 10) {
+                            Image(systemName: tag.icon)
+                                .foregroundStyle(ApexTheme.blue)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(tag.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Text(impact.hasEnoughData
+                                     ? "Paired \(impact.pairedDaysCount)d vs \(impact.baselineDaysCount)d base"
+                                     : "Paired \(impact.pairedDaysCount)/3 days needed")
+                                    .font(.caption2)
+                                    .foregroundStyle(ApexTheme.secondaryText)
+                            }
+                            Spacer()
+                            if impact.hasEnoughData {
+                                HStack(spacing: 8) {
+                                    if let hrvD = impact.hrvDeltaPct {
+                                        Text(String(format: "%+.0f%% HRV", hrvD))
+                                            .font(.caption.weight(.bold).monospacedDigit())
+                                            .foregroundStyle(hrvD >= 0 ? ApexTheme.green : ApexTheme.orange)
+                                    }
+                                    if let rhrD = impact.rhrDeltaBpm {
+                                        Text(String(format: "%+.1f RHR", rhrD))
+                                            .font(.caption.weight(.bold).monospacedDigit())
+                                            .foregroundStyle(rhrD <= 0 ? ApexTheme.green : ApexTheme.red)
+                                    }
+                                }
+                            } else {
+                                Text("Needs ≥3d")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(ApexTheme.secondaryText)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
         }
         .padding(18)
         .appleCard(cornerRadius: 20)

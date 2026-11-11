@@ -14,6 +14,14 @@ export function parseAppleHealthXML(xmlString) {
       hrvMs: null,
       vo2Max: null,
       waterMl: 0,
+      bloodGlucoseMgDl: null,
+      respiratoryRate: null,
+      bloodOxygen: null,
+      wristTempDeltaC: null,
+      bodyFatPercent: null,
+      leanMassKg: null,
+      dietaryCalories: 0,
+      dietaryProteinG: 0,
     },
     workouts: [],
     recentSamples: [],
@@ -39,10 +47,23 @@ export function parseAppleHealthXML(xmlString) {
 
     let totalMove = 0;
     let totalExercise = 0;
-    let standHoursSet = new Set();
-    let latestRHR = null;
-    let latestHRV = null;
-    let latestVO2 = null;
+    let totalWaterMl = 0;
+    let totalDietaryKcal = 0;
+    let totalDietaryProteinG = 0;
+    const standHoursSet = new Set();
+    const latestVitals = {};
+
+    const vitalExtractors = {
+      HKQuantityTypeIdentifierRestingHeartRate: (v) => Math.round(v),
+      HKQuantityTypeIdentifierHeartRateVariabilitySDNN: (v) => Math.round(v),
+      HKQuantityTypeIdentifierVO2Max: (v) => +v.toFixed(1),
+      HKQuantityTypeIdentifierBloodGlucose: (v) => Math.round(v < 30 ? v * 18.0182 : v),
+      HKQuantityTypeIdentifierRespiratoryRate: (v) => +v.toFixed(1),
+      HKQuantityTypeIdentifierOxygenSaturation: (v) => +(v <= 1 ? v * 100 : v).toFixed(1),
+      HKQuantityTypeIdentifierAppleSleepingWristTemperature: (v) => +v.toFixed(2),
+      HKQuantityTypeIdentifierBodyFatPercentage: (v) => +(v <= 1 ? v * 100 : v).toFixed(1),
+      HKQuantityTypeIdentifierLeanBodyMass: (v) => +v.toFixed(1),
+    };
 
     while ((match = recordRegex.exec(xmlString)) !== null && count < 50000) {
       count++;
@@ -66,19 +87,18 @@ export function parseAppleHealthXML(xmlString) {
       } else if (type === 'HKQuantityTypeIdentifierAppleExerciseTime') {
         totalExercise += val;
       } else if (type === 'HKQuantityTypeIdentifierAppleStandTime') {
-        if (startDate) {
-          const hourKey = startDate.slice(0, 13);
-          standHoursSet.add(hourKey);
-        }
-      } else if (type === 'HKQuantityTypeIdentifierRestingHeartRate') {
-        latestRHR = Math.round(val);
-      } else if (type === 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN') {
-        latestHRV = Math.round(val);
-      } else if (type === 'HKQuantityTypeIdentifierVO2Max') {
-        latestVO2 = +(val.toFixed(1));
+        if (startDate) standHoursSet.add(startDate.slice(0, 13));
+      } else if (type === 'HKQuantityTypeIdentifierDietaryWater') {
+        totalWaterMl += val < 20 ? val * 1000 : val;
+      } else if (type === 'HKQuantityTypeIdentifierDietaryEnergyConsumed') {
+        totalDietaryKcal += val;
+      } else if (type === 'HKQuantityTypeIdentifierDietaryProtein') {
+        totalDietaryProteinG += val;
+      } else if (vitalExtractors[type]) {
+        latestVitals[type] = vitalExtractors[type](val);
       }
 
-      if (result.recentSamples.length < 8) {
+      if (result.recentSamples.length < 12) {
         result.recentSamples.push({
           type: type.replace('HKQuantityTypeIdentifier', ''),
           value: val,
@@ -91,9 +111,37 @@ export function parseAppleHealthXML(xmlString) {
     result.metrics.moveCalories = Math.round(totalMove);
     result.metrics.exerciseMinutes = Math.round(totalExercise);
     result.metrics.standHours = standHoursSet.size;
-    if (latestRHR) result.metrics.restingHeartRate = latestRHR;
-    if (latestHRV) result.metrics.hrvMs = latestHRV;
-    if (latestVO2) result.metrics.vo2Max = latestVO2;
+    result.metrics.waterMl = Math.round(totalWaterMl);
+    result.metrics.dietaryCalories = Math.round(totalDietaryKcal);
+    result.metrics.dietaryProteinG = Math.round(totalDietaryProteinG);
+
+    if (latestVitals.HKQuantityTypeIdentifierRestingHeartRate !== undefined) {
+      result.metrics.restingHeartRate = latestVitals.HKQuantityTypeIdentifierRestingHeartRate;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierHeartRateVariabilitySDNN !== undefined) {
+      result.metrics.hrvMs = latestVitals.HKQuantityTypeIdentifierHeartRateVariabilitySDNN;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierVO2Max !== undefined) {
+      result.metrics.vo2Max = latestVitals.HKQuantityTypeIdentifierVO2Max;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierBloodGlucose !== undefined) {
+      result.metrics.bloodGlucoseMgDl = latestVitals.HKQuantityTypeIdentifierBloodGlucose;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierRespiratoryRate !== undefined) {
+      result.metrics.respiratoryRate = latestVitals.HKQuantityTypeIdentifierRespiratoryRate;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierOxygenSaturation !== undefined) {
+      result.metrics.bloodOxygen = latestVitals.HKQuantityTypeIdentifierOxygenSaturation;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierAppleSleepingWristTemperature !== undefined) {
+      result.metrics.wristTempDeltaC = latestVitals.HKQuantityTypeIdentifierAppleSleepingWristTemperature;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierBodyFatPercentage !== undefined) {
+      result.metrics.bodyFatPercent = latestVitals.HKQuantityTypeIdentifierBodyFatPercentage;
+    }
+    if (latestVitals.HKQuantityTypeIdentifierLeanBodyMass !== undefined) {
+      result.metrics.leanMassKg = latestVitals.HKQuantityTypeIdentifierLeanBodyMass;
+    }
 
     return { success: true, data: result };
   } catch (err) {

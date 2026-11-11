@@ -14,6 +14,8 @@ public struct SummaryView: View {
 
     @State private var detailMetric: SelectedBiometricDetail? = nil
     @State private var showCoachSheet: Bool = false
+    @State private var bevelDetail: BevelDetailFocus? = nil
+    @State private var showBriefingSheet: Bool = false
 
     public init(selectedTab: Binding<Int>) {
         self._selectedTab = selectedTab
@@ -38,11 +40,17 @@ public struct SummaryView: View {
                         healthPermissionCard
                     }
 
+                    bevelBriefingLauncher
+
+                    bevelTrioSection
+
+                    bevelStressAndMonitorStrip
+
                     activityHeroCard
 
                     vitalsSection
 
-                    if hasOvernightExtras {
+                    if hasOvernightExtras || health.sleepNeededHours != nil {
                         overnightSensorsCard
                     }
 
@@ -114,6 +122,208 @@ public struct SummaryView: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(item: $bevelDetail) { focus in
+                BevelScoresDetailSheet(focus: focus, health: health)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showBriefingSheet) {
+                MorningEveningBriefingSheet(health: health)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    // MARK: - Bevel Pro Trio + Briefing + Intraday Stress & 5-Vital Health Monitor
+    private var bevelBriefingLauncher: some View {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isEvening = hour >= 18
+
+        return Button {
+            Haptics.tap()
+            showBriefingSheet = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: isEvening ? "moon.stars.fill" : "sun.horizon.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isEvening ? ApexTheme.accentIndigo : ApexTheme.accentAmber)
+                    .frame(width: 38, height: 38)
+                    .background((isEvening ? ApexTheme.accentIndigo : ApexTheme.accentAmber).opacity(0.16), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isEvening ? "Evening Wrap-Up" : "Morning Briefing")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Readiness, Strain Target & Sleep Debt")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .appleCard(padding: 14, cornerRadius: 18)
+    }
+
+    private var bevelTrioSection: some View {
+        let targetRange = health.targetStrainRange
+        let recoveryVal = health.readinessScore.map { "\($0)%" } ?? "—"
+        let recoverySub = health.readinessScore.map { $0 >= 75 ? "Primed" : ($0 >= 50 ? "Moderate" : "Recover") } ?? "Needs Health"
+        let recoveryTint = (health.readinessScore ?? 0) >= 75 ? ApexTheme.accentEmerald : (health.readinessScore == nil ? ApexTheme.secondaryText : ApexTheme.accentAmber)
+
+        let strainVal = health.todayStrainScore.map { String(format: "%.1f", $0) } ?? "—"
+        let strainSub: String = {
+            if let range = targetRange {
+                return "Goal \(Int(range.lowerBound.rounded()))–\(Int(range.upperBound.rounded()))"
+            }
+            return "0–21 scale"
+        }()
+
+        let energyVal = health.energyBankPercent.map { "\($0)%" } ?? "—"
+        let energySub = health.energyBankPercent.map { $0 >= 65 ? "Charged" : ($0 >= 35 ? "Balanced" : "Low Reserve") } ?? "Needs HR/Sleep"
+
+        return HStack(spacing: 10) {
+            bevelTrioTile(
+                title: "Recovery",
+                value: recoveryVal,
+                subtitle: recoverySub,
+                icon: "bolt.heart.fill",
+                tint: recoveryTint
+            ) {
+                bevelDetail = .recovery
+            }
+
+            bevelTrioTile(
+                title: "Strain",
+                value: strainVal,
+                subtitle: strainSub,
+                icon: "flame.fill",
+                tint: ApexTheme.accentAmber
+            ) {
+                bevelDetail = .strain
+            }
+
+            bevelTrioTile(
+                title: "Energy",
+                value: energyVal,
+                subtitle: energySub,
+                icon: "battery.75percent",
+                tint: ApexTheme.standCyan
+            ) {
+                bevelDetail = .energyBank
+            }
+        }
+    }
+
+    private func bevelTrioTile(title: String, value: String, subtitle: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(value)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .appleCard(padding: 12, cornerRadius: 18)
+    }
+
+    private var bevelStressAndMonitorStrip: some View {
+        let vitalSummary = health.vitalRangeSummary
+        let stressVal = health.currentStressScore.map { "\($0)/100" } ?? "—"
+        let stressTint: Color = {
+            guard let s = health.currentStressScore else { return ApexTheme.secondaryText }
+            return s < 40 ? ApexTheme.accentEmerald : (s < 70 ? ApexTheme.accentAmber : ApexTheme.moveCrimson)
+        }()
+        let monitorText = vitalSummary.total > 0 ? "\(vitalSummary.inRange)/\(vitalSummary.total) In Range" : "Needs Vitals"
+        let monitorTint = vitalSummary.total == 0
+            ? ApexTheme.secondaryText
+            : (vitalSummary.inRange == vitalSummary.total ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+
+        return HStack(spacing: 10) {
+            Button {
+                Haptics.tap()
+                bevelDetail = .stress
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(stressTint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Stress")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(stressVal)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .appleCard(padding: 12, cornerRadius: 16)
+
+            Button {
+                Haptics.tap()
+                bevelDetail = .healthMonitor
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(monitorTint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Health Monitor")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(monitorText)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(monitorTint)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .appleCard(padding: 12, cornerRadius: 16)
         }
     }
 
@@ -322,6 +532,39 @@ public struct SummaryView: View {
                     overnightSensorPill(label: "Wrist Temp", value: String(format: "%@%.2f°", sign, temp), color: ApexTheme.accentAmber)
                 }
             }
+
+            if health.sleepNeededHours != nil || health.sleepDebtHours != nil {
+                Button {
+                    Haptics.tap()
+                    bevelDetail = .sleepCoach
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bed.double.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(ApexTheme.accentIndigo)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Sleep Coach")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                            let neededTxt = health.sleepNeededHours.map { String(format: "Needed %.1fh", $0) } ?? "Needed —"
+                            let debtTxt = health.sleepDebtHours.map { String(format: "7d Debt %+.1fh", $0) } ?? "Debt —"
+                            Text("\(neededTxt) · \(debtTxt)")
+                                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                                .foregroundStyle(ApexTheme.accentIndigo)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                    .background(ApexTheme.elevatedSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .appleCard(padding: 16, cornerRadius: 20)
     }
@@ -463,8 +706,8 @@ public struct SummaryView: View {
             return (
                 "Recovery Priority · HRV \(delta)%",
                 "Autonomic readiness is suppressed below your 7-day baseline. Favor nasal Zone 2 walking, mobility, and earlier bedtime today.",
-                "Review Longevity & Sleep",
-                3,
+                "Review Biology & Sleep",
+                4,
                 "waveform.path.ecg"
             )
         }
@@ -498,8 +741,8 @@ public struct SummaryView: View {
             return (
                 "Evening Decompression & Circadian Prep",
                 "Review your caffeine cutoff, clinical PhenoAge, and Dead Hang endurance before winding down.",
-                "View Longevity",
-                3,
+                "View Biology",
+                4,
                 "moon.stars.fill"
             )
         }
@@ -523,9 +766,17 @@ public struct SummaryView: View {
     }
 
     private var sleepAssessment: String {
-        guard health.sleepTotalHours != nil else { return "No Sample" }
+        guard health.sleepTotalHours != nil else {
+            if let needed = health.sleepNeededHours {
+                return String(format: "Target %.1fh", needed)
+            }
+            return "No Sample"
+        }
         if (health.sleepDeepHours + health.sleepRemHours) > 0.1 {
             return String(format: "%.1fh Deep · %.1fh REM", health.sleepDeepHours, health.sleepRemHours)
+        }
+        if let needed = health.sleepNeededHours {
+            return String(format: "Target %.1fh", needed)
         }
         return "Sleep Architecture"
     }

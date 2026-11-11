@@ -78,8 +78,15 @@ public final class ApexIntelligenceEngine: ObservableObject {
     }
 
     private func buildBiometricContext(health: HealthKitManager) -> String {
+        let nutrition = NutritionLogStore.shared
+        let tagsToday = ExperimentLabStore.shared.dailyTagsToday
+        let monitor = health.vitalRangeSummary
+
         var lines: [String] = ["Current Telemetry:"]
-        lines.append("- Readiness: \(health.readinessScore.map { "\($0)%" } ?? "Unrecorded")")
+        lines.append("- Recovery Readiness: \(health.readinessScore.map { "\($0)%" } ?? "Unrecorded")")
+        lines.append("- Daily Strain: \(health.todayStrainScore.map { String(format: "%.1f / 21", $0) } ?? "Unrecorded") (Target: \(health.targetStrainRange.map { String(format: "%.0f–%.0f", $0.lowerBound, $0.upperBound) } ?? "n/a"))")
+        lines.append("- Energy Bank: \(health.energyBankPercent.map { "\($0)%" } ?? "Unrecorded")")
+        lines.append("- Intraday Stress: \(health.currentStressScore.map { "\($0)/100" } ?? "Unrecorded")")
         lines.append("- Move: \(Int(health.moveCalories))/\(Int(health.moveTarget)) kcal, Exercise: \(Int(health.exerciseMinutes))m, Steps: \(health.dailySteps)")
         if let rhr = health.restingHeartRate {
             lines.append("- Resting HR: \(Int(rhr.rounded())) bpm (7d delta: \(health.rhrDeltaBpm.map { "\($0) bpm" } ?? "n/a"))")
@@ -93,6 +100,24 @@ public final class ApexIntelligenceEngine: ObservableObject {
         if let sleep = health.sleepTotalHours {
             lines.append("- Sleep: \(String(format: "%.1f", sleep))h (Deep \(String(format: "%.1f", health.sleepDeepHours))h, REM \(String(format: "%.1f", health.sleepRemHours))h)")
         }
+        if let needed = health.sleepNeededHours {
+            lines.append("- Sleep Needed Tonight: \(String(format: "%.1f", needed))h (7d Debt: \(health.sleepDebtHours.map { String(format: "%+.1fh", $0) } ?? "n/a"))")
+        }
+        if monitor.total > 0 {
+            lines.append("- 5-Vital Health Monitor: \(monitor.inRange)/\(monitor.total) vitals in personal range")
+        }
+        if let fat = health.bodyFatPercent {
+            lines.append("- Body Fat: \(String(format: "%.1f%%", fat)), Lean Mass: \(health.leanBodyMassKg.map { String(format: "%.1f kg", $0) } ?? "n/a")")
+        }
+        if let glucose = health.glucoseSamples24h.last {
+            lines.append("- Latest Glucose: \(Int(glucose.value.rounded())) mg/dL")
+        }
+        if let nScore = nutrition.nutritionQualityScore {
+            lines.append("- Nutrition Quality Score: \(nScore)/100 (\(Int(nutrition.todayCalories.rounded())) kcal, \(Int(nutrition.todayProtein.rounded()))g P, Water \(Int(nutrition.waterMlToday.rounded()))mL, Caffeine \(Int(nutrition.caffeineMgToday.rounded()))mg)")
+        }
+        if !tagsToday.isEmpty {
+            lines.append("- Daily Journal Tags Today: \(tagsToday.joined(separator: ", "))")
+        }
         if let bio = health.biologicalAge {
             lines.append("- Fitness Biological Age: \(String(format: "%.1f", bio))y vs Chronological \(Int(health.chronologicalAge))y")
         }
@@ -104,16 +129,33 @@ public final class ApexIntelligenceEngine: ObservableObject {
 
     private func synthesizeLocalClinicalReply(question: String, health: HealthKitManager) -> String {
         let lower = question.lowercased()
+        let nutrition = NutritionLogStore.shared
 
-        if lower.contains("sleep") || lower.contains("deep") || lower.contains("rem") {
+        if lower.contains("sleep") || lower.contains("deep") || lower.contains("rem") || lower.contains("debt") {
             guard let sleep = health.sleepTotalHours else {
-                return "No overnight sleep stage samples are stored in Apple Health yet. Wear Apple Watch overnight or connect HealthKit to analyze Deep and REM recovery."
+                return "No overnight sleep stage samples are stored in Apple Health yet. Wear Apple Watch overnight or connect HealthKit to analyze Deep, REM, and Sleep Debt."
             }
+            let needText = health.sleepNeededHours.map { String(format: " Target tonight: %.1fh (7d debt %+.1fh).", $0, health.sleepDebtHours ?? 0) } ?? ""
             return String(
-                format: "You logged %.1fh total sleep (%.1fh Deep, %.1fh REM). %@ Anchor your wake time consistently and halt caffeine 8.5 hours before sleep to boost slow-wave delta output.",
-                sleep, health.sleepDeepHours, health.sleepRemHours,
-                health.sleepDeepHours < 1.2 ? "Deep sleep is below optimal (>1.4h); avoid heavy meals within 3h of bed." : "Deep sleep architecture looks solid."
+                format: "You logged %.1fh sleep (%.1fh Deep, %.1fh REM).%@ %@ Anchor wake timing consistently and finish heavy meals 3h before bed.",
+                sleep, health.sleepDeepHours, health.sleepRemHours, needText,
+                health.sleepDeepHours < 1.2 ? "Deep sleep is below optimal (>1.4h)." : "Deep sleep architecture looks solid."
             )
+        }
+
+        if lower.contains("energy") || lower.contains("stress") || lower.contains("battery") || lower.contains("strain") {
+            let energyStr = health.energyBankPercent.map { "\($0)% Energy Bank" } ?? "Energy Bank pending HealthKit"
+            let stressStr = health.currentStressScore.map { "\($0)/100 current stress" } ?? "Stress pending HR/HRV"
+            let strainStr = health.todayStrainScore.map { String(format: "%.1f/21 Strain", $0) } ?? "Strain pending movement"
+            return "Live Autonomic Balance: \(energyStr), \(stressStr), \(strainStr). \(health.energyBankPercent.map { $0 < 40 ? "Consider a 20m power nap or nasal Zone 2 decompression to recharge reserves." : "Metabolic reserve supports focused training or cognitive blocks." } ?? "Connect HealthKit on Summary for live Bevel curves.")"
+        }
+
+        if lower.contains("fuel") || lower.contains("nutri") || lower.contains("macro") || lower.contains("glucose") || lower.contains("cgm") || lower.contains("meal") {
+            if let qScore = nutrition.nutritionQualityScore {
+                let cgmStr = health.glucoseSamples24h.last.map { " Latest CGM glucose: \(Int($0.value.rounded())) mg/dL." } ?? ""
+                return "Today's Nutrition Quality Score is \(qScore)/100 across \(Int(nutrition.todayCalories.rounded())) kcal and \(Int(nutrition.todayProtein.rounded()))g protein (\(Int(nutrition.waterMlToday.rounded())) mL water).\(cgmStr) Keep protein >=1.6g/kg and pair carbs with fiber."
+            }
+            return "No meals logged in Fuel today. Scan a barcode, snap a nutrition label, or describe a meal in the Fuel tab to compute your Nutrition Quality Score and CGM response."
         }
 
         if lower.contains("pheno") || lower.contains("lab") || lower.contains("blood") {
@@ -124,7 +166,7 @@ public final class ApexIntelligenceEngine: ObservableObject {
                     clinical, diff, Int(health.chronologicalAge)
                 )
             }
-            return "No bloodwork lab panel has been scanned yet. Open Longevity -> Bloodwork Lab OCR to scan a PDF or paper slip for your exact clinical PhenoAge."
+            return "No bloodwork lab panel has been scanned yet. Open Biology -> Bloodwork Lab OCR to scan a PDF or paper slip for your exact clinical PhenoAge."
         }
 
         if lower.contains("train") || lower.contains("workout") || lower.contains("squat") || lower.contains("push") {
@@ -132,18 +174,20 @@ public final class ApexIntelligenceEngine: ObservableObject {
                 return "HRV is \(delta)% below your 7-day baseline. Swap high-CNS maximal squats today for 35 minutes of nasal Zone 2 incline walking (128–140 bpm) or light mobility."
             }
             if let rdy = health.readinessScore, rdy >= 78 {
-                return "Autonomic readiness is strong at \(rdy)%. Prime window for compound strength (Squats, Pull-ups, or Overhead Press). Cap working sets around -20% velocity loss to maximize hypertrophy without systemic burnout."
+                let targetText = health.targetStrainRange.map { String(format: " Aim for %.0f–%.0f Daily Strain.", $0.lowerBound, $0.upperBound) } ?? ""
+                return "Autonomic readiness is strong at \(rdy)%.\(targetText) Prime window for Strength Builder progression or Optical Train velocity sets."
             }
-            return "Use Optical Train's velocity readout today: warm up clean, aim for controlled 2–3s eccentrics, and stop sets once concentric speed drops by 20%."
+            return "Use Strength Builder or Optical Train today: warm up clean, log RPE accurately, and respect your target strain zone."
         }
 
         if let rdy = health.readinessScore {
             let hrvStr = health.heartRateVariability.map { "\(Int($0.rounded())) ms" } ?? "no HRV reading"
             let rhrStr = health.restingHeartRate.map { "\(Int($0.rounded())) bpm" } ?? "no RHR reading"
-            return "Readiness is \(rdy)% based on \(hrvStr) and resting heart rate \(rhrStr). Keep hydration electrolytes high, hit morning outdoor light, and match intensity to your velocity feedback."
+            let extraEnergy = health.energyBankPercent.map { " Energy Bank is at \($0)%." } ?? ""
+            return "Recovery Readiness is \(rdy)% (\(hrvStr) HRV, \(rhrStr) RHR).\(extraEnergy) Check your Daily Journal tags in Biology to spot next-day HRV patterns."
         }
 
-        return "Connect Apple Health on Summary or log a workout/lab scan so I can synthesize personalized recovery, training intensity, and longevity protocols from your live biomarkers."
+        return "Connect Apple Health on Summary, log a meal in Fuel, or start a session in Train so I can synthesize live recovery, strain target, energy bank, and longevity protocols."
     }
 }
 
@@ -155,10 +199,10 @@ public struct ApexCoachSheet: View {
     @State private var draftQuestion: String = ""
 
     private let quickPrompts = [
-        "Why did my readiness change today?",
-        "How should I train today?",
-        "Analyze my sleep stages",
-        "Explain my PhenoAge status"
+        "Why did my readiness & energy change today?",
+        "How should I hit my strain target today?",
+        "Analyze my sleep debt & stages",
+        "Review my Nutrition Quality & glucose"
     ]
 
     public init() {}

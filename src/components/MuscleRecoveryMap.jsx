@@ -173,6 +173,68 @@ export default function MuscleRecoveryMap() {
   });
 
   const [selectedMuscle, setSelectedMuscle] = useState('upper_pecs');
+
+  useEffect(() => {
+    const syncExternalMuscles = () => {
+      try {
+        const iosVolumes = JSON.parse(localStorage.getItem('apex_ios_muscle_volumes_7d') || '{}')?.volumes || {};
+        const localWorkouts = JSON.parse(localStorage.getItem('apex_logged_workouts') || '[]');
+        const mapKey = (name = '') => {
+          const l = name.toLowerCase();
+          if (l.includes('upper chest') || l.includes('incline')) return 'upper_pecs';
+          if (l.includes('chest') || l.includes('pec')) return 'lower_pecs';
+          if (l.includes('lateral')) return 'lateral_delts';
+          if (l.includes('rear') || l.includes('shoulder')) return 'rear_delts';
+          if (l.includes('lat')) return 'lats';
+          if (l.includes('back') || l.includes('trap')) return 'upper_back';
+          if (l.includes('quad')) return 'quads';
+          if (l.includes('hamstring')) return 'hamstrings';
+          if (l.includes('glute')) return 'glutes';
+          if (l.includes('tricep')) return 'triceps';
+          if (l.includes('bicep')) return 'biceps';
+          if (l.includes('calv')) return 'calves';
+          if (l.includes('core')) return 'core';
+          if (l.includes('forearm')) return 'forearms';
+          return null;
+        };
+
+        const aggregated = {};
+        Object.entries(iosVolumes).forEach(([muscleName, sets]) => {
+          const key = mapKey(muscleName);
+          if (key) aggregated[key] = (aggregated[key] || 0) + Number(sets || 0);
+        });
+        localWorkouts.forEach((ex) => {
+          const done = Array.isArray(ex.sets) ? ex.sets.filter((s) => s.completed).length : 0;
+          const key = mapKey(ex.muscle || ex.name);
+          if (key && done > 0) aggregated[key] = (aggregated[key] || 0) + done;
+        });
+
+        if (Object.keys(aggregated).length > 0) {
+          setMuscleData((prev) => {
+            const next = { ...prev };
+            Object.entries(aggregated).forEach(([k, setsCount]) => {
+              if (!next[k]) return;
+              const curr = next[k];
+              const rec = Math.max(40, Math.round(100 - (setsCount / curr.mrv) * 55));
+              next[k] = {
+                ...curr,
+                setsWeek: setsCount,
+                recovery: rec,
+                status: setsCount <= curr.mav ? 'OPTIMAL STIMULUS' : 'FATIGUED / OVERLOAD',
+              };
+            });
+            localStorage.setItem('apex_muscle_volume_data', JSON.stringify(next));
+            return next;
+          });
+        }
+      } catch {}
+    };
+
+    syncExternalMuscles();
+    window.addEventListener('apex:muscles-updated', syncExternalMuscles);
+    return () => window.removeEventListener('apex:muscles-updated', syncExternalMuscles);
+  }, []);
+
   const active = muscleData[selectedMuscle] || muscleData.upper_pecs;
 
   const handleAdjustSets = (delta) => {

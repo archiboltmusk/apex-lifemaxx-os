@@ -59,18 +59,28 @@ public class HealthKitManager: ObservableObject {
     @Published public var sleepCoreHours: Double = 0
     @Published public var sleepAwakeHours: Double = 0
 
-    // Overnight Recovery Sensors
+    // Overnight Recovery & Body Composition Sensors
     @Published public var bloodOxygenPercent: Double? = nil
     @Published public var respiratoryRateBpm: Double? = nil
     @Published public var wristTempDeltaC: Double? = nil
     @Published public var bodyWeightKg: Double? = nil
+    @Published public var bodyFatPercent: Double? = nil
+    @Published public var leanBodyMassKg: Double? = nil
 
-    // 7-Day Personal Rolling History & Baselines
+    // 7–60 Day Personal Rolling History & Baselines
     @Published public var hrvHistory: [DailyMetricPoint] = []
     @Published public var rhrHistory: [DailyMetricPoint] = []
     @Published public var vo2History: [DailyMetricPoint] = []
     @Published public var sleepHistory: [DailyMetricPoint] = []
     @Published public var moveHistory: [DailyMetricPoint] = []
+    @Published public var weightHistory: [DailyMetricPoint] = []
+
+    // Intraday Heart Rate, Stress & HealthKit / CGM Glucose Streams
+    @Published public var intradayHeartRates: [HourlyMetricPoint] = []
+    @Published public var glucoseSamples24h: [HourlyMetricPoint] = []
+    @AppStorage("apex_sleep_goal_hours") public var baselineSleepGoalHours: Double = 7.75
+    @AppStorage("apex_logged_nap_hours") public var loggedNapHoursToday: Double = 0
+    @AppStorage("apex_strength_load_bonus") public var strengthStrainBonusToday: Double = 0
 
     // Biological & Clinical Epigenetic Age
     @AppStorage("apex_chronological_age") public var chronologicalAge: Double = 26.0
@@ -180,6 +190,149 @@ public class HealthKitManager: ObservableObject {
         return max(18.0, (bio * 10).rounded() / 10)
     }
 
+    // MARK: - Bevel Pro Engine: Strain (0–21), Adaptive Target, Intraday Stress, Energy Bank & Sleep Coach
+    public var todayStrainScore: Double? {
+        let totalMove = moveCalories
+        let totalEx = exerciseMinutes
+        guard totalMove > 5 || totalEx > 1 || strengthStrainBonusToday > 0 else { return nil }
+        let kcalComponent = log1p(totalMove / 160.0) * 5.2
+        let exComponent = log1p(totalEx / 18.0) * 3.8
+        let loadComponent = min(4.5, strengthStrainBonusToday * 0.45)
+        let raw = min(21.0, kcalComponent + exComponent + loadComponent)
+        return (raw * 10).rounded() / 10
+    }
+
+    public var targetStrainRange: ClosedRange<Double>? {
+        guard let readiness = readinessScore else { return nil }
+        if readiness >= 78 { return 13.5...17.5 }
+        if readiness >= 58 { return 9.5...13.5 }
+        return 5.0...9.0
+    }
+
+    public var stressHourlyCurve: [HourlyMetricPoint] {
+        guard !intradayHeartRates.isEmpty else { return [] }
+        let rhr = restingHeartRate ?? 60.0
+        let maxHR = max(145.0, 220.0 - chronologicalAge)
+        let reserve = max(35.0, maxHR - rhr)
+        let hrvMod: Double = {
+            guard let pct = hrvDeltaPercent else { return 0 }
+            return Double(-pct) * 0.25
+        }()
+
+        let cal = Calendar.current
+        var buckets: [Int: [Double]] = [:]
+        for pt in intradayHeartRates {
+            let hr = pt.value
+            let hour = cal.component(.hour, from: pt.date)
+            let hrrRatio = max(0.0, min(1.0, (hr - rhr) / reserve))
+            let score = max(5.0, min(98.0, hrrRatio * 105.0 + 16.0 + hrvMod))
+            buckets[hour, default: []].append(score)
+        }
+
+        let todayStart = cal.startOfDay(for: Date())
+        return buckets.keys.sorted().compactMap { hour in
+            guard let vals = buckets[hour], !vals.isEmpty,
+                  let dt = cal.date(byAdding: .hour, value: hour, to: todayStart) else { return nil }
+            let mean = vals.reduce(0, +) / Double(vals.count)
+            return HourlyMetricPoint(date: dt, value: mean.rounded(), label: "\(hour):00")
+        }
+    }
+
+    public var currentStressScore: Int? {
+        if let last = stressHourlyCurve.last {
+            return Int(last.value.rounded())
+        }
+        guard let hrv = heartRateVariability, let rhr = restingHeartRate else { return nil }
+        // Single-point autonomic estimate when only latest HRV + RHR exist (no intraday HR curve)
+        let base = 42.0 + (rhr - 58.0) * 1.1 - (hrv - 55.0) * 0.35
+        return Int(max(8, min(95, base.rounded())))
+    }
+
+    public var energyBankCurve: [HourlyMetricPoint] {
+        guard let startBattery = readinessScore else { return [] }
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: Date())
+        let currentHour = max(7, cal.component(.hour, from: Date()))
+        let wakeHour = 6
+        var battery = Double(startBattery)
+        let hourlyStress = Dictionary(uniqueKeysWithValues: stressHourlyCurve.map { (cal.component(.hour, from: $0.date), $0.value) })
+        let activeDrainPerHour = min(4.8, (moveCalories / 150.0) / max(1.0, Double(currentHour - wakeHour)))
+
+        var curve: [HourlyMetricPoint] = []
+        for h in wakeHour...currentHour {
+            guard let dt = cal.date(byAdding: .hour, value: h, to: todayStart) else { continue }
+            if h > wakeHour {
+                let stressAtH = hourlyStress[h] ?? 28.0
+                let drain = activeDrainPerHour + max(0.3, (stressAtH - 18.0) * 0.08)
+                battery = max(5.0, battery - drain)
+                if loggedNapHoursToday > 0 && h == max(13, min(16, currentHour)) {
+                    battery = min(98.0, battery + loggedNapHoursToday * 14.0)
+                }
+            }
+            curve.append(HourlyMetricPoint(date: dt, value: battery.rounded(), label: "\(h):00"))
+        }
+        return curve
+    }
+
+    public var energyBankPercent: Int? {
+        guard readinessScore != nil else { return nil }
+        if let last = energyBankCurve.last {
+            return Int(last.value.rounded())
+        }
+        return readinessScore
+    }
+
+    public var sleepDebtHours: Double? {
+        let recent = Array(sleepHistory.suffix(7))
+        guard !recent.isEmpty else { return nil }
+        let target = baselineSleepGoalHours
+        var debt = 0.0
+        for (idx, pt) in recent.enumerated() {
+            let weight = Double(idx + 1) / Double(recent.count)
+            let diff = max(0.0, target - pt.value)
+            debt += diff * (0.4 + 0.6 * weight) / Double(recent.count) * 3.0
+        }
+        return (min(6.0, max(0.0, debt)) * 10).rounded() / 10
+    }
+
+    public var sleepNeededHours: Double? {
+        guard sleepTotalHours != nil || !sleepHistory.isEmpty || readinessScore != nil else { return nil }
+        let strainNeed = (todayStrainScore ?? 0) * 0.035
+        let debtRecover = (sleepDebtHours ?? 0) * 0.35
+        let napCredit = min(1.2, loggedNapHoursToday)
+        let needed = max(6.5, min(10.5, baselineSleepGoalHours + strainNeed + debtRecover - napCredit))
+        return (needed * 10).rounded() / 10
+    }
+
+    public var vitalRangeSummary: (inRange: Int, total: Int, items: [(name: String, value: String, inRange: Bool, note: String)]) {
+        var rows: [(String, String, Bool, String)] = []
+        if let rhr = restingHeartRate {
+            let baseline = rhrBaseline7d ?? rhr
+            let ok = abs(rhr - baseline) <= 5.5
+            rows.append(("Resting HR", "\(Int(rhr.rounded())) bpm", ok, ok ? "Within baseline" : "Above 7d baseline"))
+        }
+        if let hrv = heartRateVariability {
+            let baseline = hrvBaseline7d ?? hrv
+            let pct = baseline > 1 ? ((hrv - baseline) / baseline) * 100.0 : 0
+            let ok = pct >= -18.0
+            rows.append(("HRV SDNN", "\(Int(hrv.rounded())) ms", ok, ok ? "Normal vagal tone" : "Suppressed vs baseline"))
+        }
+        if let resp = respiratoryRateBpm {
+            let ok = resp >= 11.0 && resp <= 19.5
+            rows.append(("Respiratory Rate", String(format: "%.1f /m", resp), ok, ok ? "Steady" : "Elevated"))
+        }
+        if let temp = wristTempDeltaC {
+            let ok = temp >= -0.6 && temp <= 0.6
+            rows.append(("Wrist Temp", String(format: "%+.2f °C", temp), ok, ok ? "Nominal" : "Thermal shift"))
+        }
+        if let spo2 = bloodOxygenPercent {
+            let ok = spo2 >= 94.0
+            rows.append(("Blood Oxygen", "\(Int(spo2.rounded()))%", ok, ok ? "Normal SpO₂" : "Below 94%"))
+        }
+        let inRange = rows.filter { $0.2 }.count
+        return (inRange, rows.count, rows)
+    }
+
     private init() {
         self.isAvailable = HKHealthStore.isHealthDataAvailable()
         if isAvailable {
@@ -215,7 +368,18 @@ public class HealthKitManager: ObservableObject {
             .vo2Max,
             .oxygenSaturation,
             .respiratoryRate,
-            .bodyMass
+            .bodyMass,
+            .bodyFatPercentage,
+            .leanBodyMass,
+            .bloodGlucose,
+            .dietaryEnergyConsumed,
+            .dietaryProtein,
+            .dietaryCarbohydrates,
+            .dietaryFatTotal,
+            .dietaryFiber,
+            .dietarySugar,
+            .dietaryWater,
+            .dietaryCaffeine
         ]
         if #available(iOS 16.0, *) {
             quantityIds.append(.appleSleepingWristTemperature)
@@ -232,18 +396,26 @@ public class HealthKitManager: ObservableObject {
             readTypes.insert(dob)
         }
 
+        let shareQuantityIds: [HKQuantityTypeIdentifier] = [
+            .activeEnergyBurned,
+            .appleExerciseTime,
+            .heartRate,
+            .heartRateVariabilitySDNN,
+            .bloodGlucose,
+            .dietaryEnergyConsumed,
+            .dietaryProtein,
+            .dietaryCarbohydrates,
+            .dietaryFatTotal,
+            .dietaryFiber,
+            .dietarySugar,
+            .dietaryWater,
+            .dietaryCaffeine
+        ]
         var shareTypes = Set<HKSampleType>()
-        if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
-            shareTypes.insert(energy)
-        }
-        if let exTime = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) {
-            shareTypes.insert(exTime)
-        }
-        if let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) {
-            shareTypes.insert(hrType)
-        }
-        if let hrvType = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
-            shareTypes.insert(hrvType)
+        for id in shareQuantityIds {
+            if let qtyType = HKObjectType.quantityType(forIdentifier: id) {
+                shareTypes.insert(qtyType)
+            }
         }
         shareTypes.insert(HKObjectType.workoutType())
 
@@ -352,11 +524,11 @@ public class HealthKitManager: ObservableObject {
             healthStore.execute(query)
         }
 
-        // 3. 14-Day Resting HR Samples & Latest (supports 7d baseline + 14d N-of-1 trials)
+        // 3. 60-Day Resting HR Samples & Latest (7d baseline + Biology long-term trend)
         fetchRecentSamples(
             identifier: .restingHeartRate,
             unit: HKUnit(from: "count/min"),
-            daysBack: 14
+            daysBack: 60
         ) { [weak self] points in
             guard let self = self else { return }
             self.rhrHistory = points
@@ -365,11 +537,11 @@ public class HealthKitManager: ObservableObject {
             self.broadcastToMac()
         }
 
-        // 4. 14-Day HRV (SDNN) Samples & Latest (supports 7d baseline + 14d N-of-1 trials)
+        // 4. 60-Day HRV (SDNN) Samples & Latest (7d baseline + Biology long-term trend)
         fetchRecentSamples(
             identifier: .heartRateVariabilitySDNN,
             unit: .secondUnit(with: .milli),
-            daysBack: 14
+            daysBack: 60
         ) { [weak self] points in
             guard let self = self else { return }
             self.hrvHistory = points
@@ -378,12 +550,22 @@ public class HealthKitManager: ObservableObject {
             self.broadcastToMac()
         }
 
-        // 5. 7-Day / Latest VO2 Max
-        fetchRecentSamples(identifier: .vo2Max, unit: HKUnit(from: "ml/kg*min"), daysBack: 30) { [weak self] points in
+        // 5. 60-Day Weight & VO2 Max + Body Composition
+        fetchRecentSamples(identifier: .vo2Max, unit: HKUnit(from: "ml/kg*min"), daysBack: 60) { [weak self] points in
             guard let self = self else { return }
-            self.vo2History = Array(points.suffix(7))
+            self.vo2History = Array(points.suffix(14))
             self.vo2Max = points.last?.value
             self.persistWidgetSnapshot()
+        }
+        fetchRecentSamples(identifier: .bodyMass, unit: .gramUnit(with: .kilo), daysBack: 60) { [weak self] points in
+            self?.weightHistory = points
+            self?.bodyWeightKg = points.last?.value
+        }
+        fetchLatestQuantity(identifier: .bodyFatPercentage, unit: .percent()) { [weak self] val in
+            self?.bodyFatPercent = val.map { ($0 * 1000).rounded() / 10 }
+        }
+        fetchLatestQuantity(identifier: .leanBodyMass, unit: .gramUnit(with: .kilo)) { [weak self] val in
+            self?.leanBodyMassKg = val.map { ($0 * 10).rounded() / 10 }
         }
 
         // 6. Overnight Oxygen Saturation, Respiratory Rate & Wrist Temp
@@ -393,19 +575,21 @@ public class HealthKitManager: ObservableObject {
         fetchLatestQuantity(identifier: .respiratoryRate, unit: HKUnit(from: "count/min")) { [weak self] val in
             self?.respiratoryRateBpm = val.map { ($0 * 10).rounded() / 10 }
         }
-        fetchLatestQuantity(identifier: .bodyMass, unit: .gramUnit(with: .kilo)) { [weak self] val in
-            self?.bodyWeightKg = val
-        }
         if #available(iOS 16.0, *) {
             fetchLatestQuantity(identifier: .appleSleepingWristTemperature, unit: .degreeCelsius()) { [weak self] val in
                 self?.wristTempDeltaC = val.map { ($0 * 100).rounded() / 100 }
             }
         }
 
-        // 7. 7-Day Active Energy Collection for Trend Charts
+        // 7. 7-Day Active Energy Collection, Intraday Today HR (Stress Engine) & 24h Blood Glucose (CGM)
         fetch7DayCumulativeCollection(identifier: .activeEnergyBurned, unit: .kilocalorie()) { [weak self] points in
             self?.moveHistory = points
         }
+        fetchIntradaySamplesToday(identifier: .heartRate, unit: HKUnit(from: "count/min")) { [weak self] points in
+            self?.intradayHeartRates = points
+            self?.persistWidgetSnapshot()
+        }
+        fetchRecent24hGlucose()
 
         // 8. 7-Day Sleep Stage Architecture & Last Night Summary
         fetchSleepArchitecture(calendar: calendar, now: now)
@@ -458,6 +642,101 @@ public class HealthKitManager: ObservableObject {
                 self.persistWidgetSnapshot()
             }
         }
+    }
+
+    // MARK: - Dietary Intake & Glucose HealthKit Writers + Intraday Queries
+    public func logNutritionToHealth(
+        calories: Double,
+        proteinG: Double,
+        carbsG: Double,
+        fatG: Double,
+        fiberG: Double = 0,
+        sugarG: Double = 0,
+        waterMl: Double = 0,
+        caffeineMg: Double = 0,
+        date: Date = Date()
+    ) async {
+        guard isAvailable else { return }
+        var samples: [HKQuantitySample] = []
+
+        func addSample(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit, _ val: Double) {
+            guard val > 0, let type = HKQuantityType.quantityType(forIdentifier: id) else { return }
+            samples.append(HKQuantitySample(type: type, quantity: HKQuantity(unit: unit, doubleValue: val), start: date, end: date))
+        }
+
+        addSample(.dietaryEnergyConsumed, .kilocalorie(), calories)
+        addSample(.dietaryProtein, .gram(), proteinG)
+        addSample(.dietaryCarbohydrates, .gram(), carbsG)
+        addSample(.dietaryFatTotal, .gram(), fatG)
+        addSample(.dietaryFiber, .gram(), fiberG)
+        addSample(.dietarySugar, .gram(), sugarG)
+        addSample(.dietaryWater, .literUnit(with: .milli), waterMl)
+        addSample(.dietaryCaffeine, .gramUnit(with: .milli), caffeineMg)
+
+        if !samples.isEmpty {
+            try? await healthStore.save(samples)
+        }
+    }
+
+    public func logGlucoseToHealth(mgPerDl: Double, date: Date = Date()) async {
+        guard mgPerDl >= 30, mgPerDl <= 500 else { return }
+        let unit = HKUnit(from: "mg/dL")
+        if isAvailable, let type = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) {
+            let sample = HKQuantitySample(type: type, quantity: HKQuantity(unit: unit, doubleValue: mgPerDl), start: date, end: date)
+            try? await healthStore.save([sample])
+        }
+        let point = HourlyMetricPoint(date: date, value: mgPerDl.rounded(), label: date.formatted(date: .omitted, time: .shortened))
+        glucoseSamples24h.append(point)
+        glucoseSamples24h.sort { $0.date < $1.date }
+        syncEventToMac(extraPayload: ["glucoseLatest": mgPerDl])
+    }
+
+    private func fetchIntradaySamplesToday(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        completion: @escaping ([HourlyMetricPoint]) -> Void
+    ) {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return }
+        let cal = Calendar.current
+        let now = Date()
+        let start = cal.startOfDay(for: now)
+        let pred = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: type, predicate: pred, limit: 350, sortDescriptors: [sort]) { _, samples, _ in
+            let pts = (samples as? [HKQuantitySample] ?? []).map { s in
+                HourlyMetricPoint(
+                    date: s.startDate,
+                    value: s.quantity.doubleValue(for: unit),
+                    label: s.startDate.formatted(date: .omitted, time: .shortened)
+                )
+            }
+            Task { @MainActor in completion(pts) }
+        }
+        healthStore.execute(query)
+    }
+
+    public func fetchRecent24hGlucose() {
+        guard isAvailable, let type = HKObjectType.quantityType(forIdentifier: .bloodGlucose) else { return }
+        let unit = HKUnit(from: "mg/dL")
+        let now = Date()
+        let start = Calendar.current.date(byAdding: .hour, value: -24, to: now) ?? now
+        let pred = HKQuery.predicateForSamples(withStart: start, end: now, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: type, predicate: pred, limit: 300, sortDescriptors: [sort]) { [weak self] _, samples, _ in
+            let pts = (samples as? [HKQuantitySample] ?? []).map { s in
+                HourlyMetricPoint(
+                    date: s.startDate,
+                    value: s.quantity.doubleValue(for: unit).rounded(),
+                    label: s.startDate.formatted(date: .omitted, time: .shortened)
+                )
+            }
+            Task { @MainActor in
+                if !pts.isEmpty {
+                    self?.glucoseSamples24h = pts
+                }
+            }
+        }
+        healthStore.execute(query)
     }
 
     public func saveHeartRateToHealth(bpm: Double, hrvMs: Double? = nil) async {
@@ -719,6 +998,8 @@ public class HealthKitManager: ObservableObject {
             standHours: standHours,
             standTarget: standTarget,
             readinessScore: readinessScore,
+            energyBank: energyBankPercent,
+            strainScore: todayStrainScore,
             hrv: heartRateVariability,
             hrvDeltaPercent: hrvDeltaPercent,
             restingHR: restingHeartRate,
@@ -858,12 +1139,33 @@ public class HealthKitManager: ObservableObject {
             "remSleepHours": (sleepRemHours * 10).rounded() / 10,
             "bloodOxygen": bloodOxygenPercent ?? 0,
             "respiratoryRate": respiratoryRateBpm ?? 0,
+            "wristTempDelta": wristTempDeltaC ?? 0,
+            "bodyFatPercent": bodyFatPercent ?? 0,
+            "leanMassKg": leanBodyMassKg ?? 0,
             "readiness": readinessScore ?? 0,
+            "strain": todayStrainScore ?? 0,
+            "energyBank": energyBankPercent ?? 0,
+            "stressScore": currentStressScore ?? 0,
+            "sleepNeededHours": sleepNeededHours ?? 0,
+            "sleepDebtHours": sleepDebtHours ?? 0,
+            "vitalsInRange": vitalRangeSummary.inRange,
+            "vitalsTotal": vitalRangeSummary.total,
+            "journalTagsToday": ExperimentLabStore.shared.dailyTagsToday,
+            "dailyTagsByDate": ExperimentLabStore.shared.dailyTagsByDate,
             "deadHangBest": UserDefaults.standard.integer(forKey: "apex_best_deadhang_sec"),
             "setAbsolute": true,
             "source": "iPhone · Apple HealthKit Live",
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
+        if let latestGlucose = glucoseSamples24h.last?.value {
+            payload["glucoseLatest"] = latestGlucose
+        }
+        if !stressHourlyCurve.isEmpty {
+            payload["stressCurve"] = stressHourlyCurve.map { ["label": $0.label, "value": Int($0.value)] }
+        }
+        if !energyBankCurve.isEmpty {
+            payload["energyCurve"] = energyBankCurve.map { ["label": $0.label, "value": Int($0.value)] }
+        }
 
         if let extra = extraPayload {
             for (k, v) in extra {

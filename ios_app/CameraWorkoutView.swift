@@ -25,6 +25,7 @@ public struct CameraWorkoutView: View {
     @ObservedObject private var bleHR = BLEHeartRateMonitor.shared
     @StateObject private var poseController = BodyPoseController()
 
+    @State private var trainSegment: Int = 0
     @State private var selectedExercise: ExerciseMode = .squats
     @State private var isVoiceEnabled: Bool = true
     @State private var isSavingWorkout: Bool = false
@@ -96,20 +97,40 @@ public struct CameraWorkoutView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
-                    exerciseSelector
+                    Picker("Training Mode", selection: $trainSegment) {
+                        Text("Builder").tag(0)
+                        Text("Optical").tag(1)
+                        Text("Plan").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: trainSegment) { _, newSeg in
+                        Haptics.selection()
+                        if newSeg != 1 {
+                            poseController.stop()
+                            isTimerRunning = false
+                        }
+                    }
 
                     if activityMgr.isRestTimerRunning {
                         restCountdownPill
                     }
 
-                    viewfinderHero
+                    if trainSegment == 0 {
+                        StrengthBuilderView()
+                    } else if trainSegment == 1 {
+                        exerciseSelector
 
-                    kinematicMetricsBar
+                        viewfinderHero
 
-                    sessionControls
+                        kinematicMetricsBar
 
-                    if !workoutHistory.isEmpty {
-                        completedSetsSection
+                        sessionControls
+
+                        if !workoutHistory.isEmpty {
+                            completedSetsSection
+                        }
+                    } else {
+                        AdaptiveTrainingPlanView()
                     }
                 }
                 .padding(.horizontal, 16)
@@ -185,6 +206,16 @@ public struct CameraWorkoutView: View {
                 poseController.externalLoadKg = externalLoadKg
                 poseController.athleteHeightCm = athleteHeightCm
                 poseController.bodyWeightKg = health.bodyWeightKg ?? 75.0
+                if let requestedSeg = router.requestedTrainSegment {
+                    trainSegment = requestedSeg
+                    router.requestedTrainSegment = nil
+                }
+            }
+            .onChange(of: router.requestedTrainSegment) { _, requestedSeg in
+                if let seg = requestedSeg {
+                    trainSegment = seg
+                    router.requestedTrainSegment = nil
+                }
             }
             .onChange(of: externalLoadKg) { _, val in
                 poseController.externalLoadKg = val
@@ -199,6 +230,7 @@ public struct CameraWorkoutView: View {
             }
             .onChange(of: router.requestedExerciseRaw) { _, raw in
                 guard let name = raw?.lowercased() else { return }
+                trainSegment = 1
                 if let matched = ExerciseMode.allCases.first(where: { $0.rawValue.lowercased().contains(name) }) {
                     selectedExercise = matched
                 }

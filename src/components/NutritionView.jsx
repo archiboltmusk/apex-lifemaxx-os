@@ -28,9 +28,21 @@ export default function NutritionView({ onOpenScanner }) {
     }
   });
   const [meals, setMeals] = useState(loadLoggedMeals);
+  const [iosSummary, setIosSummary] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_ios_nutrition_summary') || 'null');
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
-    const refreshMeals = () => setMeals(loadLoggedMeals());
+    const refreshMeals = () => {
+      setMeals(loadLoggedMeals());
+      try {
+        setIosSummary(JSON.parse(localStorage.getItem('apex_ios_nutrition_summary') || 'null'));
+      } catch {}
+    };
     window.addEventListener('storage', refreshMeals);
     window.addEventListener('apex:meals-updated', refreshMeals);
     return () => {
@@ -44,16 +56,37 @@ export default function NutritionView({ onOpenScanner }) {
       acc.calories += Number(m.calories) || 0;
       acc.protein += Number(m.protein) || 0;
       acc.carbs += Number(m.carbs) || 0;
-      acc.fats += Number(m.fats) || 0;
+      acc.fats += Number(m.fat ?? m.fats) || 0;
+      acc.fiber += Number(m.fiber) || 0;
+      acc.sugar += Number(m.sugar) || 0;
       return acc;
     },
-    { calories: 0, protein: 0, carbs: 0, fats: 0 }
+    { calories: 0, protein: 0, carbs: 0, fats: 0, fiber: 0, sugar: 0 }
   );
 
-  const calories = { current: totals.calories, target: NUTRITION_MACRO_DATA.calories.target };
-  const protein = { current: totals.protein, target: NUTRITION_MACRO_DATA.protein.target };
-  const carbs = { current: totals.carbs, target: NUTRITION_MACRO_DATA.carbs.target };
-  const fats = { current: totals.fats, target: NUTRITION_MACRO_DATA.fats.target };
+  const effectiveCalories = totals.calories || iosSummary?.calories || 0;
+  const effectiveProtein = totals.protein || iosSummary?.protein || 0;
+  const effectiveCarbs = totals.carbs || iosSummary?.carbs || 0;
+  const effectiveFats = totals.fats || iosSummary?.fat || 0;
+  const effectiveFiber = totals.fiber || iosSummary?.fiber || 0;
+  const effectiveSugar = totals.sugar || iosSummary?.sugar || 0;
+
+  const nutritionQualityScore = (() => {
+    if (meals.length === 0 && !iosSummary?.qualityScore) return null;
+    if (iosSummary?.qualityScore && meals.length === 0) return iosSummary.qualityScore;
+    const calRatio = Math.min(1.2, effectiveCalories / Math.max(1000, NUTRITION_MACRO_DATA.calories.target));
+    const proteinRatio = Math.min(1.0, effectiveProtein / Math.max(60, NUTRITION_MACRO_DATA.protein.target));
+    const fiberRatio = Math.min(1.0, effectiveFiber / 32);
+    const sugarPenalty = Math.max(0, (effectiveSugar - 38) * 0.45);
+    const wholeRatio = meals.filter((m) => (m.fiber || 0) >= 3 && (m.sugar || 0) < 12).length / Math.max(1, meals.length);
+    const raw = 28 + proteinRatio * 34 + fiberRatio * 18 + wholeRatio * 15 + (calRatio >= 0.7 && calRatio <= 1.15 ? 5 : 0) - sugarPenalty;
+    return Math.round(Math.max(12, Math.min(100, raw)));
+  })();
+
+  const calories = { current: effectiveCalories, target: NUTRITION_MACRO_DATA.calories.target };
+  const protein = { current: effectiveProtein, target: NUTRITION_MACRO_DATA.protein.target };
+  const carbs = { current: effectiveCarbs, target: NUTRITION_MACRO_DATA.carbs.target };
+  const fats = { current: effectiveFats, target: NUTRITION_MACRO_DATA.fats.target };
 
   const toggleSupp = (name) => {
     playPlunk();
@@ -116,6 +149,35 @@ export default function NutritionView({ onOpenScanner }) {
           )}
         </div>
       )}
+      {/* BEVEL NUTRITION QUALITY SCORE + FIBER / SUGAR */}
+      <div className="liquid-glass-elevated rounded-[22px] p-5 border border-white/15 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <span className="text-[10px] font-mono text-[#E5FE40] font-black uppercase tracking-wider">
+            BEVEL NUTRITION QUALITY SCORE
+          </span>
+          <div className="flex items-baseline space-x-2 mt-1">
+            <span className="text-3xl font-mono font-black text-white">
+              {nutritionQualityScore != null ? `${nutritionQualityScore}/100` : '—'}
+            </span>
+            <span className="text-xs font-mono text-[#A1A1AA]">
+              {nutritionQualityScore != null
+                ? 'Protein density · Fiber · Glycemic & Sugar control'
+                : 'Log a meal in Scanner or iPhone Fuel to score diet quality'}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center space-x-3 font-mono text-xs">
+          <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/10">
+            <span className="text-[#8A8A8A] block text-[9px]">FIBER</span>
+            <strong className="text-[#10B981]">{effectiveFiber}g / 32g</strong>
+          </div>
+          <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/10">
+            <span className="text-[#8A8A8A] block text-[9px]">SUGAR</span>
+            <strong className={effectiveSugar > 38 ? 'text-[#FA114F]' : 'text-[#00F0FF]'}>{effectiveSugar}g</strong>
+          </div>
+        </div>
+      </div>
+
       {/* MACRO OVERVIEW */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="liquid-glass rounded-[20px] p-4 border border-white/10">

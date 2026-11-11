@@ -89,10 +89,25 @@ export default function MealScanner() {
   const [proteinG, setProteinG] = useState(0);
   const [carbsG, setCarbsG] = useState(0);
   const [fatsG, setFatsG] = useState(0);
+  const [fiberG, setFiberG] = useState(0);
+  const [sugarG, setSugarG] = useState(0);
   const [calories, setCalories] = useState(0);
   const [giIndex, setGiIndex] = useState(0);
   const [leucineG, setLeucineG] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Bevel Pro Food Engines: Describe Meal, Barcode Lookup (OpenFoodFacts), Custom Recipes
+  const [describeText, setDescribeText] = useState('');
+  const [barcodeCode, setBarcodeCode] = useState('');
+  const [barcodeStatus, setBarcodeStatus] = useState('');
+  const [isFetchingBarcode, setIsFetchingBarcode] = useState(false);
+  const [customRecipes, setCustomRecipes] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_custom_recipes_v1') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   // Logged meals history
   const [loggedMeals, setLoggedMeals] = useState(() => {
@@ -215,6 +230,102 @@ export default function MealScanner() {
     setMealLogged(false);
   };
 
+  const handleDescribeParse = () => {
+    const q = describeText.trim().toLowerCase();
+    if (!q) return;
+    playPlunk();
+    const DB = [
+      { keys: ['egg'], kcal: 72, p: 6.3, c: 0.4, f: 4.8, fib: 0, sug: 0.2, unitG: 50 },
+      { keys: ['chicken'], kcal: 165, p: 31, c: 0, f: 3.6, fib: 0, sug: 0, unitG: 100 },
+      { keys: ['salmon'], kcal: 208, p: 20, c: 0, f: 13, fib: 0, sug: 0, unitG: 100 },
+      { keys: ['steak', 'ribeye', 'beef'], kcal: 250, p: 26, c: 0, f: 15, fib: 0, sug: 0, unitG: 100 },
+      { keys: ['rice'], kcal: 130, p: 2.7, c: 28, f: 0.3, fib: 0.4, sug: 0.1, unitG: 100 },
+      { keys: ['oats', 'oatmeal'], kcal: 150, p: 5, c: 27, f: 2.5, fib: 4, sug: 1, unitG: 40 },
+      { keys: ['avocado'], kcal: 160, p: 2, c: 8.5, f: 14.7, fib: 6.7, sug: 0.7, unitG: 100 },
+      { keys: ['banana'], kcal: 105, p: 1.3, c: 27, f: 0.4, fib: 3.1, sug: 14.4, unitG: 118 },
+      { keys: ['whey', 'protein shake'], kcal: 120, p: 24, c: 2, f: 1.5, fib: 0, sug: 1, unitG: 30 },
+      { keys: ['yogurt', 'greek'], kcal: 97, p: 10, c: 3.6, f: 5, fib: 0, sug: 3.6, unitG: 100 },
+      { keys: ['sweet potato', 'potato'], kcal: 86, p: 1.6, c: 20, f: 0.1, fib: 3, sug: 4.2, unitG: 100 },
+    ];
+    let tot = { kcal: 0, p: 0, c: 0, f: 0, fib: 0, sug: 0, hits: 0 };
+    q.split(/[,&+]|and/).forEach((chunk) => {
+      const part = chunk.trim();
+      const gramMatch = part.match(/(\d+(?:\.\d+)?)\s*g\b/);
+      const countMatch = part.match(/(\d+(?:\.\d+)?)/);
+      const item = DB.find((d) => d.keys.some((k) => part.includes(k)));
+      if (!item) return;
+      tot.hits += 1;
+      const mult = gramMatch ? parseFloat(gramMatch[1]) / item.unitG : countMatch ? parseFloat(countMatch[1]) : 1;
+      tot.kcal += item.kcal * mult;
+      tot.p += item.p * mult;
+      tot.c += item.c * mult;
+      tot.f += item.f * mult;
+      tot.fib += item.fib * mult;
+      tot.sug += item.sug * mult;
+    });
+    if (tot.hits === 0) {
+      setBarcodeStatus('Unrecognized food keywords — enter macros manually or use Barcode lookup.');
+      setIsEditing(true);
+      setMealName(describeText.trim());
+      return;
+    }
+    setMealName(describeText.trim());
+    setCalories(Math.round(tot.kcal));
+    setProteinG(Math.round(tot.p));
+    setCarbsG(Math.round(tot.c));
+    setFatsG(Math.round(tot.f));
+    setFiberG(Math.round(tot.fib));
+    setSugarG(Math.round(tot.sug));
+    setGiIndex(tot.c > 25 && tot.fib < 4 ? 64 : 42);
+    setLeucineG(+(tot.p * 0.08).toFixed(1));
+    setMealLogged(false);
+    setBarcodeStatus('Parsed meal macros cleanly — review & tap Commit Meal.');
+    playCoinChime();
+  };
+
+  const handleBarcodeLookup = async () => {
+    const clean = barcodeCode.replace(/\s+/g, '');
+    if (clean.length < 6) return;
+    playPlunk();
+    setIsFetchingBarcode(true);
+    setBarcodeStatus('Querying OpenFoodFacts v2 database...');
+    try {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(clean)}.json`);
+      const json = await res.json();
+      const prod = json?.product;
+      const n = prod?.nutriments;
+      if (json?.status === 1 && prod && n) {
+        setMealName(prod.product_name || `Barcode ${clean}`);
+        setCalories(Math.round(n['energy-kcal_serving'] ?? n['energy-kcal_100g'] ?? 0));
+        setProteinG(Math.round(n.proteins_serving ?? n.proteins_100g ?? 0));
+        setCarbsG(Math.round(n.carbohydrates_serving ?? n.carbohydrates_100g ?? 0));
+        setFatsG(Math.round(n.fat_serving ?? n.fat_100g ?? 0));
+        setFiberG(Math.round(n.fiber_serving ?? n.fiber_100g ?? 0));
+        setSugarG(Math.round(n.sugars_serving ?? n.sugars_100g ?? 0));
+        setBarcodeStatus(`Loaded ${prod.product_name || clean} (OpenFoodFacts). Review & Log!`);
+        setMealLogged(false);
+        playCoinChime();
+      } else {
+        setBarcodeStatus(`No product found for barcode ${clean}. Enter macros manually.`);
+      }
+    } catch {
+      setBarcodeStatus('Network unreachable for OpenFoodFacts — enter macros manually.');
+    } finally {
+      setIsFetchingBarcode(false);
+    }
+  };
+
+  const handleSaveAsRecipe = () => {
+    if (!mealName || calories <= 0) return;
+    playCoinChime();
+    const rec = { id: `rec-${Date.now()}`, name: mealName, calories, protein: proteinG, carbs: carbsG, fats: fatsG, fiber: fiberG, sugar: sugarG };
+    const next = [rec, ...customRecipes.filter((r) => r.name !== rec.name)].slice(0, 12);
+    setCustomRecipes(next);
+    try {
+      localStorage.setItem('apex_custom_recipes_v1', JSON.stringify(next));
+    } catch {}
+  };
+
   const handleLogMeal = () => {
     playPlunk();
     playCoinChime();
@@ -228,6 +339,8 @@ export default function MealScanner() {
         protein: proteinG,
         carbs: carbsG,
         fats: fatsG,
+        fiber: fiberG,
+        sugar: sugarG,
         glycemicLoad,
         leucine: leucineG,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -278,6 +391,80 @@ export default function MealScanner() {
 
   return (
     <div className="space-y-6">
+      {/* BEVEL PRO: DESCRIBE MEAL, BARCODE LOOKUP & CUSTOM RECIPES */}
+      <div className="liquid-glass rounded-[22px] p-5 border border-white/10 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-[10px] font-mono text-[#E5FE40] font-black uppercase tracking-wider">
+              BEVEL FUEL ENGINES · NLP, BARCODE &amp; RECIPES
+            </span>
+            <h4 className="text-sm font-bold text-white">Describe Meal or Scan UPC/EAN Barcode</h4>
+          </div>
+          {mealName && calories > 0 && (
+            <button
+              onClick={handleSaveAsRecipe}
+              className="px-3 py-1 rounded-[10px] bg-white/10 hover:bg-white/20 text-[11px] font-mono font-bold text-[#E5FE40]"
+            >
+              + Save Custom Recipe
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono">
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={describeText}
+              onChange={(e) => setDescribeText(e.target.value)}
+              placeholder="Describe meal: e.g. 3 eggs, 200g chicken, avocado"
+              className="flex-1 px-3 py-2 rounded-[12px] bg-black/50 border border-white/15 text-xs text-white"
+            />
+            <button
+              onClick={handleDescribeParse}
+              className="px-3.5 py-2 rounded-[12px] bg-[#E5FE40] text-black text-xs font-black shrink-0"
+            >
+              Parse
+            </button>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={barcodeCode}
+              onChange={(e) => setBarcodeCode(e.target.value)}
+              placeholder="UPC / EAN Barcode (e.g. 3017620422003)"
+              className="flex-1 px-3 py-2 rounded-[12px] bg-black/50 border border-white/15 text-xs text-white"
+            />
+            <button
+              onClick={handleBarcodeLookup}
+              disabled={isFetchingBarcode}
+              className="px-3.5 py-2 rounded-[12px] bg-[#00F0FF] text-black text-xs font-black shrink-0"
+            >
+              {isFetchingBarcode ? '...' : 'Lookup'}
+            </button>
+          </div>
+        </div>
+
+        {barcodeStatus && (
+          <div className="text-[11px] font-mono text-[#00F0FF]">{barcodeStatus}</div>
+        )}
+
+        {customRecipes.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 font-mono">
+            <span className="text-[10px] text-[#8A8A8A] uppercase">SAVED RECIPES:</span>
+            {customRecipes.map((rec) => (
+              <button
+                key={rec.id}
+                onClick={() => selectPreset({ ...rec, gi: 45, leucine: +(rec.protein * 0.08).toFixed(1) })}
+                className="px-2.5 py-1 rounded-[8px] bg-white/5 hover:bg-white/15 border border-white/10 text-[11px] text-white"
+              >
+                {rec.name} ({rec.calories} kcal)
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* AI COMPUTER VISION VIEWFINDER & INGESTION */}
       <div className="liquid-glass-elevated rounded-[26px] p-6 border border-white/15 relative overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">

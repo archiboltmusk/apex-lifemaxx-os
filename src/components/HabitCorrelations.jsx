@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Check, TrendingUp, FlaskConical } from 'lucide-react';
+import { ShieldCheck, Check, TrendingUp, FlaskConical, Tag } from 'lucide-react';
 import { playPlunk, playCoinChime } from '../utils/audioSynth';
+
+const JOURNAL_TAG_PRESETS = [
+  { id: 'hydration', label: 'Hydration' },
+  { id: 'caffeine_cutoff', label: 'Caffeine Cutoff' },
+  { id: 'late_meal', label: 'Late Meal' },
+  { id: 'alcohol', label: 'Alcohol' },
+  { id: 'cold_plunge', label: 'Cold Plunge' },
+  { id: 'sauna', label: 'Sauna' },
+  { id: 'sunlight', label: 'Sunlight' },
+  { id: 'magnesium', label: 'Magnesium' },
+  { id: 'creatine', label: 'Creatine' },
+  { id: 'high_stress', label: 'High Stress' },
+  { id: 'nasal_tape', label: 'Nasal Tape' },
+];
 
 const DEFAULT_HABITS = [
   { id: 'h1', title: 'Cryo Plunge (4°C for 3m)', impact: 'Autonomic', desc: 'Tracks catecholamine response & next-morning vagal tone', checked: false },
@@ -39,18 +53,96 @@ export default function HabitCorrelations() {
     }
   });
 
+  const todayIsoKey = new Date().toISOString().slice(0, 10);
+  const [dailyTagsByDate, setDailyTagsByDate] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_daily_journal_tags_v1') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [outcomesByDate, setOutcomesByDate] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_journal_outcomes_v1') || '{}');
+    } catch {
+      return {};
+    }
+  });
+
   useEffect(() => {
-    const onSync = () => {
+    const captureTodayOutcome = () => {
       try {
         const exp = localStorage.getItem('apex_active_experiment');
         if (exp) setSyncedExperiment(JSON.parse(exp));
         const h = JSON.parse(localStorage.getItem('apex_health_data') || 'null');
-        if (h?.metrics?.hrv?.value) setSyncedHrv(h.metrics.hrv.value);
+        const hrv = h?.metrics?.hrv?.value || null;
+        const rhr = h?.metrics?.restingHeartRate?.value || null;
+        if (hrv) setSyncedHrv(hrv);
+        if (hrv || rhr) {
+          setOutcomesByDate((prev) => {
+            const next = { ...prev, [todayIsoKey]: { hrv, rhr } };
+            localStorage.setItem('apex_journal_outcomes_v1', JSON.stringify(next));
+            return next;
+          });
+        }
+        const savedTags = JSON.parse(localStorage.getItem('apex_daily_journal_tags_v1') || '{}');
+        setDailyTagsByDate(savedTags);
       } catch {}
     };
-    window.addEventListener('appleHealthSync', onSync);
-    return () => window.removeEventListener('appleHealthSync', onSync);
-  }, []);
+
+    captureTodayOutcome();
+    window.addEventListener('appleHealthSync', captureTodayOutcome);
+    window.addEventListener('apex:journal-updated', captureTodayOutcome);
+    return () => {
+      window.removeEventListener('appleHealthSync', captureTodayOutcome);
+      window.removeEventListener('apex:journal-updated', captureTodayOutcome);
+    };
+  }, [todayIsoKey]);
+
+  const toggleJournalTag = (tagId) => {
+    playPlunk();
+    setDailyTagsByDate((prev) => {
+      const curr = prev[todayIsoKey] || [];
+      const nextToday = curr.includes(tagId) ? curr.filter((t) => t !== tagId) : [...curr, tagId];
+      if (!curr.includes(tagId)) playCoinChime();
+      const updated = { ...prev, [todayIsoKey]: nextToday };
+      try {
+        localStorage.setItem('apex_daily_journal_tags_v1', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  // True Lag-1 Paired Impact Calculation (tag on Day D -> HRV/RHR on Day D+1, needs >= 3 paired days)
+  const computeTagLag1Impact = (tagId) => {
+    const onHrv = [];
+    const offHrv = [];
+    const onRhr = [];
+    const offRhr = [];
+    Object.entries(dailyTagsByDate).forEach(([dateKey, tags]) => {
+      const d = new Date(`${dateKey}T12:00:00Z`);
+      if (isNaN(d.getTime())) return;
+      d.setUTCDate(d.getUTCDate() + 1);
+      const nextKey = d.toISOString().slice(0, 10);
+      const out = outcomesByDate[nextKey];
+      if (!out || (!out.hrv && !out.rhr)) return;
+      const tagged = Array.isArray(tags) && tags.includes(tagId);
+      if (out.hrv) (tagged ? onHrv : offHrv).push(out.hrv);
+      if (out.rhr) (tagged ? onRhr : offRhr).push(out.rhr);
+    });
+    const enough = onHrv.length >= 3 && offHrv.length >= 1;
+    let hrvDeltaPct = null;
+    if (enough) {
+      const meanOn = onHrv.reduce((a, b) => a + b, 0) / onHrv.length;
+      const meanOff = offHrv.reduce((a, b) => a + b, 0) / offHrv.length;
+      if (meanOff > 0) hrvDeltaPct = ((meanOn - meanOff) / meanOff) * 100;
+    }
+    let rhrDeltaBpm = null;
+    if (onRhr.length >= 3 && offRhr.length >= 1) {
+      rhrDeltaBpm = onRhr.reduce((a, b) => a + b, 0) / onRhr.length - offRhr.reduce((a, b) => a + b, 0) / offRhr.length;
+    }
+    return { pairedCount: onHrv.length, enough, hrvDeltaPct, rhrDeltaBpm };
+  };
 
   const toggleHabit = (id) => {
     playPlunk();
@@ -115,8 +207,47 @@ export default function HabitCorrelations() {
         )}
 
         <p className="text-xs text-[#A1A1AA] mb-4">
-          Check off completed daily interventions below or log paired On/Control days in the iPhone Experiment Lab to compute real next-morning HRV &amp; resting heart rate deltas.
+          Log daily Bevel habit tags below or via iPhone Biology -&gt; Experiment Lab &amp; Journal. Requires ≥3 paired next-day HRV samples to unlock Lag-1 coefficients.
         </p>
+
+        {/* BEVEL DAILY JOURNAL TAGS + LAG-1 IMPACT */}
+        <div className="mb-5 p-4 rounded-[18px] bg-black/40 border border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-xs font-mono font-black text-[#E5FE40]">
+              <Tag className="w-3.5 h-3.5" />
+              <span>TODAY&apos;S JOURNAL TAGS ({(dailyTagsByDate[todayIsoKey] || []).length} ACTIVE)</span>
+            </div>
+            <span className="text-[10px] font-mono text-[#8A8A8A]">Synced with iPhone Biology</span>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {JOURNAL_TAG_PRESETS.map((tag) => {
+              const active = (dailyTagsByDate[todayIsoKey] || []).includes(tag.id);
+              const impact = computeTagLag1Impact(tag.id);
+              return (
+                <button
+                  key={tag.id}
+                  onClick={() => toggleJournalTag(tag.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-mono font-bold border transition flex items-center space-x-1.5 ${
+                    active
+                      ? 'bg-[#00F0FF]/20 border-[#00F0FF] text-white'
+                      : 'bg-white/5 border-white/10 text-[#A1A1AA] hover:border-white/25'
+                  }`}
+                >
+                  <span>{tag.label}</span>
+                  {impact.enough && impact.hrvDeltaPct != null ? (
+                    <span className={impact.hrvDeltaPct >= 0 ? 'text-[#10B981]' : 'text-[#FA114F]'}>
+                      {impact.hrvDeltaPct >= 0 ? '+' : ''}
+                      {Math.round(impact.hrvDeltaPct)}%
+                    </span>
+                  ) : impact.pairedCount > 0 ? (
+                    <span className="text-[10px] text-[#8A8A8A]">({impact.pairedCount}/3d)</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Habit list */}
         <div className="space-y-2.5">
