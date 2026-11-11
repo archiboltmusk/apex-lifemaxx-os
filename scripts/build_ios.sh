@@ -10,6 +10,40 @@ cd "$PROJECT_DIR"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
+BUILD_DEVICE=0
+TEAM_ID=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --device) BUILD_DEVICE=1; shift ;;
+        --team) TEAM_ID="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+if [ "$BUILD_DEVICE" -eq 1 ]; then
+    echo "======================================================================"
+    echo "   🍏 APEX — Physical iPhone / App Store Archive Build (.xcarchive)"
+    echo "======================================================================"
+    if ! command -v xcodegen >/dev/null 2>&1; then
+        echo "Missing xcodegen (brew install xcodegen) for device archive generation."
+        exit 1
+    fi
+    (cd ios_app && xcodegen generate)
+    TEAM_FLAG=""
+    if [ -n "$TEAM_ID" ]; then
+        TEAM_FLAG="DEVELOPMENT_TEAM=$TEAM_ID"
+    fi
+    xcodebuild -project ios_app/APEX_iOS.xcodeproj \
+        -scheme APEX_iOS \
+        -configuration Release \
+        -destination "generic/platform=iOS" \
+        -archivePath "$PROJECT_DIR/APEX_iOS.xcarchive" \
+        $TEAM_FLAG \
+        archive
+    echo "✓ Created physical iOS Archive: $PROJECT_DIR/APEX_iOS.xcarchive"
+    exit 0
+fi
+
 COLOR_CYAN="\033[0;36m"
 COLOR_GREEN="\033[0;32m"
 COLOR_YELLOW="\033[0;33m"

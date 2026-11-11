@@ -30,6 +30,8 @@ public struct CameraWorkoutView: View {
     @State private var isSavingWorkout: Bool = false
     @State private var savedBanner: String? = nil
     @State private var showWatchStrapSheet: Bool = false
+    @AppStorage("apex_workout_load_kg") private var externalLoadKg: Double = 60.0
+    @AppStorage("apex_athlete_height_cm") private var athleteHeightCm: Double = 175.0
 
     // Live Workout Timer
     @State private var sessionSeconds: Int = 0
@@ -49,6 +51,25 @@ public struct CameraWorkoutView: View {
         case jacks = "Jumping Jacks"
 
         public var id: String { rawValue }
+
+        var isBodyweight: Bool {
+            switch self {
+            case .pushups, .pullups, .jacks: return true
+            default: return false
+            }
+        }
+
+        var baselineRomMeters: Double {
+            switch self {
+            case .squats: return 0.58
+            case .rdl, .lunges: return 0.54
+            case .ohp: return 0.50
+            case .curls: return 0.38
+            case .pushups: return 0.34
+            case .pullups: return 0.52
+            case .jacks: return 0.64
+            }
+        }
 
         var kcalPerRep: Double {
             switch self {
@@ -159,6 +180,17 @@ public struct CameraWorkoutView: View {
                         velocityDropPercent: poseController.velocityLossPercent
                     )
                 }
+            }
+            .onAppear {
+                poseController.externalLoadKg = externalLoadKg
+                poseController.athleteHeightCm = athleteHeightCm
+                poseController.bodyWeightKg = health.bodyWeightKg ?? 75.0
+            }
+            .onChange(of: externalLoadKg) { _, val in
+                poseController.externalLoadKg = val
+            }
+            .onChange(of: athleteHeightCm) { _, val in
+                poseController.athleteHeightCm = val
             }
             .onChange(of: selectedExercise) { _, mode in
                 poseController.setExerciseMode(mode)
@@ -399,7 +431,8 @@ public struct CameraWorkoutView: View {
                 Spacer()
                 Label(String(format: "%.1fs ecc", poseController.lastEccentricSeconds), systemImage: "arrow.down.circle")
                 Spacer()
-                Label("\(poseController.estimatedPowerWatts)W · \(poseController.estimated1RMPercent)%", systemImage: "bolt")
+                let powerSuffix = poseController.estimated1RMPercent > 0 ? "· \(poseController.estimated1RMPercent)%" : "· BW"
+                Label("\(poseController.estimatedPowerWatts)W \(powerSuffix)", systemImage: "bolt")
                 if let bpm = bleHR.liveBPM {
                     Spacer()
                     Label("\(bpm)", systemImage: "heart.fill")
@@ -415,6 +448,56 @@ public struct CameraWorkoutView: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
+            .appleCard(padding: 12, cornerRadius: 14)
+
+            // User Load & Athlete Height Calibration Bar
+            HStack(spacing: 12) {
+                if selectedExercise.isBodyweight {
+                    Label("Bodyweight Load (\(Int((health.bodyWeightKg ?? 75.0).rounded())) kg)", systemImage: "figure.strengthtraining.functional")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                } else {
+                    HStack(spacing: 8) {
+                        Button {
+                            Haptics.tap()
+                            externalLoadKg = max(5, externalLoadKg - 2.5)
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                        }
+                        Text("\(String(format: "%.1f", externalLoadKg).replacingOccurrences(of: ".0", with: "")) kg bar")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                        Button {
+                            Haptics.tap()
+                            externalLoadKg = min(350, externalLoadKg + 2.5)
+                        } label: {
+                            Image(systemName: "plus.circle.fill").foregroundStyle(ApexTheme.accentVolt)
+                        }
+                    }
+                    Spacer()
+                }
+
+                HStack(spacing: 6) {
+                    Button {
+                        Haptics.tap()
+                        athleteHeightCm = max(135, athleteHeightCm - 1)
+                    } label: {
+                        Image(systemName: "minus.circle").foregroundStyle(.secondary)
+                    }
+                    Text("\(Int(athleteHeightCm))cm")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Haptics.tap()
+                        athleteHeightCm = min(220, athleteHeightCm + 1)
+                    } label: {
+                        Image(systemName: "plus.circle").foregroundStyle(.secondary)
+                    }
+                }
+            }
             .appleCard(padding: 12, cornerRadius: 14)
         }
     }
@@ -688,6 +771,9 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     @Published var detectedJoints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
 
     var voiceCoachingEnabled: Bool = true
+    var externalLoadKg: Double = 60.0
+    var athleteHeightCm: Double = 175.0
+    var bodyWeightKg: Double = 75.0
     let cameraAvailable: Bool
     let session = AVCaptureSession()
 
@@ -698,6 +784,9 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
     private var eccentricStartTime: Date = Date()
     private var concentricStartTime: Date = Date()
     private var baselineRepPeakVelocity: Double = 0.0
+    private var tracked3DMinY: Double? = nil
+    private var tracked3DMaxY: Double? = nil
+    private var latest3DRomMeters: Double? = nil
     private var frameCounter: Int = 0
     private var isConfigured = false
 
@@ -801,11 +890,22 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
         try? handler.perform([request])
 
         var found3D = false
-        if #available(iOS 17.0, *), frameCounter % 5 == 0 {
+        var sample3DY: Double? = nil
+        if #available(iOS 17.0, *), frameCounter % 3 == 0 {
             let req3D = VNDetectHumanBodyPose3DRequest()
             try? handler.perform([req3D])
-            if let obs3D = req3D.results?.first, obs3D.bodyHeight > 0.5 {
+            if let obs3D = req3D.results?.first, obs3D.bodyHeight > 0.5,
+               let pts3D = try? obs3D.recognizedPoints(.all) {
                 found3D = true
+                let jointKey: VNHumanBodyPose3DObservation.JointName = {
+                    switch exerciseMode {
+                    case .squats, .lunges, .rdl: return .root
+                    default: return .rightWrist
+                    }
+                }()
+                if let pt = pts3D[jointKey] ?? pts3D[.centerShoulder] {
+                    sample3DY = Double(pt.localPosition.columns.3.y)
+                }
             }
         }
 
@@ -820,7 +920,19 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
         }
 
         DispatchQueue.main.async {
-            if found3D { self.is3DPoseActive = true }
+            if found3D {
+                self.is3DPoseActive = true
+                if let y3d = sample3DY {
+                    self.tracked3DMinY = min(self.tracked3DMinY ?? y3d, y3d)
+                    self.tracked3DMaxY = max(self.tracked3DMaxY ?? y3d, y3d)
+                    if let lo = self.tracked3DMinY, let hi = self.tracked3DMaxY {
+                        let span = hi - lo
+                        if span >= 0.14 && span <= 1.25 {
+                            self.latest3DRomMeters = span
+                        }
+                    }
+                }
+            }
             self.detectedJoints = mapped
             self.evaluateKinematics(mapped)
         }
@@ -916,8 +1028,14 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
 
     private func completeRep() {
         repPhase = "UP"
-        let dt = max(0.35, Date().timeIntervalSince(concentricStartTime))
-        let vel = min(1.85, (0.55 / dt * 100).rounded() / 100)
+        let dt = max(0.32, Date().timeIntervalSince(concentricStartTime))
+        let heightScale = max(0.75, min(1.30, athleteHeightCm / 175.0))
+        let romMeters = latest3DRomMeters ?? (exerciseMode.baselineRomMeters * heightScale)
+        tracked3DMinY = nil
+        tracked3DMaxY = nil
+        latest3DRomMeters = nil
+
+        let vel = min(2.10, ((romMeters / dt) * 100).rounded() / 100)
         concentricVelocity = vel
         if vel > peakVelocity {
             peakVelocity = vel
@@ -933,10 +1051,11 @@ private class BodyPoseController: NSObject, ObservableObject, AVCaptureVideoData
             velocityLossPercent = min(65, loss)
         }
 
-        // Gonzalez-Badillo velocity-to-%1RM load-velocity profile + concentric power (Watts)
+        // Gonzalez-Badillo velocity-to-%1RM load-velocity profile (barbell loads) + real load/bodyweight power (Watts)
         let pct1RM = max(45, min(98, Int(((1.45 - vel) / 1.15 * 100.0).rounded())))
-        estimated1RMPercent = pct1RM
-        estimatedPowerWatts = Int((60.0 * 9.81 * vel).rounded())
+        estimated1RMPercent = exerciseMode.isBodyweight ? 0 : pct1RM
+        let massKg = exerciseMode.isBodyweight ? max(40.0, bodyWeightKg) : max(5.0, externalLoadKg)
+        estimatedPowerWatts = Int((massKg * 9.81 * vel).rounded())
 
         repCount += 1
         if velocityLossPercent >= 20 {

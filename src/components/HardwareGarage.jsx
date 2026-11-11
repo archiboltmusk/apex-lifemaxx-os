@@ -22,22 +22,22 @@ export default function HardwareGarage({ onDeviceSelect }) {
       return window.__macDeviceTelemetry;
     }
     return {
-      userName: 'Anupam Mahato',
-      userLogin: 'anupam',
-      computerName: 'MacBook Air',
-      modelName: 'MacBook Air (Apple M5)',
-      chip: 'Apple M5 (10-Core CPU & Neural Engine)',
-      cores: 10,
+      userName: 'Mac User',
+      userLogin: 'user',
+      computerName: 'Local Mac',
+      modelName: 'Apple Silicon Mac',
+      chip: 'Apple Silicon',
+      cores: 8,
       ramGB: 16,
-      ramString: '16 GB Unified Memory',
-      primaryCamera: 'MacBook Air Camera',
-      connectedCameras: ['MacBook Air Camera', 'iPhone Camera'],
-      microphone: 'MacBook Air Microphone',
-      batteryPercent: 79,
-      batteryStatus: '79% (Discharging · Battery Power)',
-      os: 'macOS Sequoia 15.0 / Sonoma (arm64)',
-      neuralEngine: 'Apple Neural Engine 16-Core Active (ANE)',
-      metalGPU: 'Apple M5 Metal 3 High Performance GPU'
+      ramString: 'Unified Memory',
+      primaryCamera: 'Built-in Camera',
+      connectedCameras: ['Built-in Camera'],
+      microphone: 'Built-in Microphone',
+      batteryPercent: 100,
+      batteryStatus: 'AC / Native Power',
+      os: 'macOS',
+      neuralEngine: 'Apple Neural Engine Active',
+      metalGPU: 'Apple Metal GPU'
     };
   });
 
@@ -67,18 +67,18 @@ export default function HardwareGarage({ onDeviceSelect }) {
   const realDevices = [
     {
       id: 'mac_host',
-      name: telemetry.modelName || 'MacBook Air (Apple M5)',
-      model: `${telemetry.chip || 'Apple M5 10-Core'} · ${telemetry.ramString || '16 GB Unified Memory'}`,
+      name: telemetry.modelName || 'Apple Silicon Mac',
+      model: `${telemetry.chip || 'Apple Silicon'} · ${telemetry.ramString || 'Unified Memory'}`,
       category: 'Host Computer & Apple Neural Engine',
-      battery: `${telemetry.batteryPercent || 79}%`,
-      signal: 'Host PCIe 4.0 Bus',
+      battery: `${telemetry.batteryPercent ?? 100}%`,
+      signal: 'Host PCIe Bus',
       status: 'ACTIVE RUNTIME',
       icon: Laptop,
       accent: '#00F0FF',
     },
     {
       id: 'mac_cam',
-      name: telemetry.primaryCamera || 'MacBook Air Camera',
+      name: telemetry.primaryCamera || 'Built-in Camera',
       model: '1080p Front TrueDepth FaceTime HD · 60fps',
       category: 'Computer Vision & Photogrammetry Sensor',
       battery: 'Internal Bus',

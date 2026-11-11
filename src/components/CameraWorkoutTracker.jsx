@@ -111,10 +111,10 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
   const [bodyInFrame, setBodyInFrame] = useState(false);
 
   // Velocity-Based Training (VBT) & Kinematics State
-  const [concentricVelocity, setConcentricVelocity] = useState(0.72); // m/s
-  const [peakVelocity, setPeakVelocity] = useState(0.75); // m/s (Rep 1 baseline)
+  const [concentricVelocity, setConcentricVelocity] = useState(0); // m/s
+  const [peakVelocity, setPeakVelocity] = useState(0); // m/s (Rep 1 baseline)
   const [velocityLoss, setVelocityLoss] = useState(0); // % loss
-  const [repsInReserve, setRepsInReserve] = useState('3+ RIR'); // Estimated RIR
+  const [repsInReserve, setRepsInReserve] = useState('Awaiting Rep'); // Estimated RIR
   const [valgusWarning, setValgusWarning] = useState(false);
 
   // Workout Tracking State
@@ -484,7 +484,7 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
                 const next = r + 1;
                 speakCue(`${next}`, true);
                 playCoinChime();
-                setEstimatedWatts(Math.round(280 + Math.random() * 80));
+                setEstimatedWatts(Math.round(currentWeight * 9.81 * measuredVelocity));
                 try {
                   confetti({
                     particleCount: 35,
@@ -688,15 +688,15 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
           </div>
 
           <div className="p-3 rounded-[14px] bg-black/40 border border-white/10">
-            <span className="text-[10px] text-[#8A8A8A] block">3D BAR PATH</span>
-            <strong className="text-[#00F0FF] text-base">VERTICAL LASER</strong>
-            <span className="text-[9px] text-[#10B981] block">Mid-foot locked</span>
+            <span className="text-[10px] text-[#8A8A8A] block">POWER &amp; BAR LOAD</span>
+            <strong className="text-[#00F0FF] text-base">{estimatedWatts > 0 ? `${estimatedWatts} W` : '-- W'}</strong>
+            <span className="text-[9px] text-[#10B981] block">{currentWeight} kg external load</span>
           </div>
         </div>
 
         {/* Bottom Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/10">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center flex-wrap gap-2">
             {EXERCISES.map((ex, idx) => (
               <button
                 key={ex.id}
@@ -717,6 +717,22 @@ export default function CameraWorkoutTracker({ onLogSet, onAddHealthData }) {
                 {ex.name.split(' ')[0]}
               </button>
             ))}
+
+            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-[10px] bg-black/40 border border-white/15 text-xs font-mono">
+              <button
+                onClick={() => setCurrentWeight((w) => Math.max(5, w - 5))}
+                className="px-1.5 text-[#8A8A8A] hover:text-white font-bold"
+              >
+                -5
+              </button>
+              <span className="text-white font-bold">{currentWeight} kg</span>
+              <button
+                onClick={() => setCurrentWeight((w) => Math.min(350, w + 5))}
+                className="px-1.5 text-[#E5FE40] hover:text-white font-bold"
+              >
+                +5
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center space-x-2">

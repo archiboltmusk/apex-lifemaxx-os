@@ -18,9 +18,11 @@ public struct TrueDepthTwinSheet: View {
     @State private var snapshots: [TrueDepthMeshSnapshot] = TrueDepthTwinStore.load()
     @State private var yawRadians: Float = 0.0
     @State private var pitchRadians: Float = 0.0
+    @State private var baseYaw: Float = 0.0
+    @State private var basePitch: Float = 0.0
     @State private var captureStatus: String = ARFaceTrackingConfiguration.isSupported
         ? "Align TrueDepth camera to record millimeter 3D mesh"
-        : "TrueDepth LiDAR sensor requires a physical Face ID iPhone — viewing wireframe twin preview"
+        : "TrueDepth LiDAR sensor requires a physical Face ID iPhone — no saved scan yet"
 
     @StateObject private var capturer = TrueDepthMeshCapturer()
 
@@ -37,22 +39,27 @@ public struct TrueDepthTwinSheet: View {
                     RealityTwinViewport(
                         yaw: yawRadians,
                         pitch: pitchRadians,
-                        latestMesh: snapshots.first
+                        latestMesh: snapshots.first,
+                        baselineMesh: snapshots.count >= 2 ? snapshots.last : nil
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .gesture(
                         DragGesture()
                             .onChanged { val in
-                                yawRadians = Float(val.translation.width) * 0.008
-                                pitchRadians = Float(val.translation.height) * 0.005
+                                yawRadians = baseYaw + Float(val.translation.width) * 0.008
+                                pitchRadians = max(-0.75, min(0.75, basePitch + Float(val.translation.height) * 0.005))
+                            }
+                            .onEnded { _ in
+                                baseYaw = yawRadians
+                                basePitch = pitchRadians
                             }
                     )
 
                     VStack {
                         HStack {
-                            Text(snapshots.first != nil ? "3D MESH ACTIVE" : "PARAMETRIC TWIN")
+                            Text(snapshots.first != nil ? "3D MESH ACTIVE" : "NO SCAN · PREVIEW")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(ApexTheme.standCyan)
+                                .foregroundStyle(snapshots.first != nil ? ApexTheme.standCyan : .secondary)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
                                 .background(.ultraThinMaterial)
@@ -158,6 +165,7 @@ private struct RealityTwinViewport: UIViewRepresentable {
     let yaw: Float
     let pitch: Float
     let latestMesh: TrueDepthMeshSnapshot?
+    let baselineMesh: TrueDepthMeshSnapshot?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -166,36 +174,20 @@ private struct RealityTwinViewport: UIViewRepresentable {
         arView.environment.background = .color(.black)
 
         let anchor = AnchorEntity(world: [0, 0, -0.42])
+        let meshContainer = Entity()
+        anchor.addChild(meshContainer)
 
-        // Build clean sculpted wireframe-metallic cranium geometry from real mesh or smooth ellipsoid fallback
-        let mesh = MeshResource.generateSphere(radius: 0.115)
-        var mat = SimpleMaterial()
-        mat.color = .init(tint: UIColor(red: 0.0, green: 0.84, blue: 0.96, alpha: 0.88))
-        mat.metallic = 0.65
-        mat.roughness = 0.28
-
-        let headEntity = ModelEntity(mesh: mesh, materials: [mat])
-        headEntity.scale = [0.85, 1.15, 0.95]
-
-        // Sculpted jawline plane ring highlight
-        let ringMesh = MeshResource.generateBox(width: 0.18, height: 0.008, depth: 0.18, cornerRadius: 0.004)
-        var ringMat = SimpleMaterial()
-        ringMat.color = .init(tint: UIColor(red: 0.90, green: 0.99, blue: 0.25, alpha: 0.9))
-        let ringEntity = ModelEntity(mesh: ringMesh, materials: [ringMat])
-        ringEntity.position = [0, -0.06, 0.02]
-
-        anchor.addChild(headEntity)
-        anchor.addChild(ringEntity)
-        arView.scene.addAnchor(anchor)
-
-        // Subtle rim light
         let lightEntity = PointLight()
-        lightEntity.light.intensity = 1400
+        lightEntity.light.intensity = 1500
         lightEntity.light.color = .white
-        lightEntity.position = [0.2, 0.3, 0.2]
+        lightEntity.position = [0.2, 0.3, 0.25]
         anchor.addChild(lightEntity)
 
+        arView.scene.addAnchor(anchor)
         context.coordinator.headRoot = anchor
+        context.coordinator.meshContainer = meshContainer
+
+        rebuildGeometry(in: context.coordinator)
         return arView
     }
 
@@ -203,10 +195,82 @@ private struct RealityTwinViewport: UIViewRepresentable {
         let qYaw = simd_quatf(angle: yaw, axis: [0, 1, 0])
         let qPitch = simd_quatf(angle: pitch, axis: [1, 0, 0])
         context.coordinator.headRoot?.orientation = qYaw * qPitch
+
+        if context.coordinator.renderedMeshId != latestMesh?.id ||
+           context.coordinator.renderedBaselineId != baselineMesh?.id {
+            rebuildGeometry(in: context.coordinator)
+        }
+    }
+
+    private func rebuildGeometry(in coordinator: Coordinator) {
+        guard let container = coordinator.meshContainer else { return }
+        container.children.removeAll()
+        coordinator.renderedMeshId = latestMesh?.id
+        coordinator.renderedBaselineId = baselineMesh?.id
+
+        if let snap = latestMesh, snap.sampledVerticesXYZ.count >= 6 {
+            let dotMesh = MeshResource.generateSphere(radius: 0.0024)
+            var neutralMat = SimpleMaterial()
+            neutralMat.color = .init(tint: UIColor(red: 0.0, green: 0.84, blue: 0.96, alpha: 0.95))
+            neutralMat.metallic = 0.35
+            neutralMat.roughness = 0.3
+
+            var leanerMat = SimpleMaterial()
+            leanerMat.color = .init(tint: UIColor(red: 0.18, green: 0.85, blue: 0.50, alpha: 0.96))
+            leanerMat.roughness = 0.25
+
+            var bloatMat = SimpleMaterial()
+            bloatMat.color = .init(tint: UIColor(red: 1.0, green: 0.62, blue: 0.18, alpha: 0.96))
+            bloatMat.roughness = 0.25
+
+            let baseVerts = baselineMesh?.sampledVerticesXYZ
+            let vertexCount = snap.sampledVerticesXYZ.count / 3
+            for i in 0..<vertexCount {
+                let bIdx = i * 3
+                let vx = snap.sampledVerticesXYZ[bIdx] / 1000.0
+                let vy = snap.sampledVerticesXYZ[bIdx + 1] / 1000.0
+                let vz = snap.sampledVerticesXYZ[bIdx + 2] / 1000.0
+
+                var chosenMat = neutralMat
+                if let bv = baseVerts, bIdx + 2 < bv.count {
+                    let deltaMm = snap.sampledVerticesXYZ[bIdx + 2] - bv[bIdx + 2]
+                    if deltaMm > 0.8 {
+                        chosenMat = bloatMat
+                    } else if deltaMm < -0.5 {
+                        chosenMat = leanerMat
+                    }
+                }
+
+                let node = ModelEntity(mesh: dotMesh, materials: [chosenMat])
+                node.position = [vx, vy, vz]
+                container.addChild(node)
+            }
+        } else {
+            // Wireframe preview placeholder when no 3D scan has been captured yet
+            let mesh = MeshResource.generateSphere(radius: 0.108)
+            var mat = SimpleMaterial()
+            mat.color = .init(tint: UIColor(red: 0.0, green: 0.84, blue: 0.96, alpha: 0.28))
+            mat.metallic = 0.45
+            mat.roughness = 0.45
+            let headEntity = ModelEntity(mesh: mesh, materials: [mat])
+            headEntity.scale = [0.82, 1.12, 0.90]
+
+            let ringMesh = MeshResource.generateBox(width: 0.16, height: 0.005, depth: 0.16, cornerRadius: 0.0025)
+            var ringMat = SimpleMaterial()
+            ringMat.color = .init(tint: UIColor(red: 0.0, green: 0.84, blue: 0.96, alpha: 0.45))
+            let ringEntity = ModelEntity(mesh: ringMesh, materials: [ringMat])
+            ringEntity.position = [0, -0.055, 0.015]
+
+            container.addChild(headEntity)
+            container.addChild(ringEntity)
+        }
     }
 
     final class Coordinator {
         var headRoot: AnchorEntity?
+        var meshContainer: Entity?
+        var renderedMeshId: UUID?
+        var renderedBaselineId: UUID?
     }
 }
 
@@ -253,26 +317,44 @@ private final class TrueDepthMeshCapturer: NSObject, ObservableObject, ARSession
     private func snapshot(from face: ARFaceAnchor) -> TrueDepthMeshSnapshot {
         let verts = face.geometry.vertices
         var flat: [Float] = []
-        var minX: Float = 0, maxX: Float = 0
-        var zAccum: Double = 0
+        var jawMinX: Float = .greatestFiniteMagnitude
+        var jawMaxX: Float = -.greatestFiniteMagnitude
+        var faceMinX: Float = .greatestFiniteMagnitude
+        var faceMaxX: Float = -.greatestFiniteMagnitude
+        var cheekZAccum: Double = 0
+        var cheekCount = 0
+
+        for v in verts {
+            if v.x < faceMinX { faceMinX = v.x }
+            if v.x > faceMaxX { faceMaxX = v.x }
+            // Submental / lower jawline band (-85mm .. -20mm vertical, front projection)
+            if v.y >= -0.085 && v.y <= -0.020 && v.z > -0.015 {
+                if v.x < jawMinX { jawMinX = v.x }
+                if v.x > jawMaxX { jawMaxX = v.x }
+            }
+            // Zygomatic / buccal cheek band (-25mm .. +35mm vertical, lateral >= 25mm)
+            if v.y >= -0.025 && v.y <= 0.035 && abs(v.x) >= 0.025 && v.z > 0.010 {
+                cheekZAccum += Double(v.z * 1000.0)
+                cheekCount += 1
+            }
+        }
+
         let strideStep = max(1, verts.count / 180)
-        var cnt = 0
         for i in stride(from: 0, to: verts.count, by: strideStep) {
             let v = verts[i]
             flat.append(v.x * 1000.0)
             flat.append(v.y * 1000.0)
             flat.append(v.z * 1000.0)
-            if v.x < minX { minX = v.x }
-            if v.x > maxX { maxX = v.x }
-            zAccum += Double(abs(v.z) * 1000.0)
-            cnt += 1
         }
+
+        let submentalSpanMeters: Float = (jawMaxX > jawMinX) ? (jawMaxX - jawMinX) : max(0, faceMaxX - faceMinX)
+        let cheekProjMm = cheekCount > 0 ? (cheekZAccum / Double(cheekCount)) : 32.0
         return TrueDepthMeshSnapshot(
             id: UUID(),
             date: Date(),
             sampledVerticesXYZ: flat,
-            submentalWidthMm: Double(maxX - minX) * 1000.0,
-            cheekProjectionMm: zAccum / Double(max(1, cnt))
+            submentalWidthMm: Double(submentalSpanMeters) * 1000.0,
+            cheekProjectionMm: cheekProjMm
         )
     }
 }

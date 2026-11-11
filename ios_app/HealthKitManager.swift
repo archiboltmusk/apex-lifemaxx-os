@@ -17,10 +17,11 @@ public struct DiscoveredMacEndpoint: Identifiable, Equatable {
     public let name: String
     public var host: String?
     public var port: Int?
+    public var txtToken: String?
     public let nwEndpoint: NWEndpoint
 
     public static func == (lhs: DiscoveredMacEndpoint, rhs: DiscoveredMacEndpoint) -> Bool {
-        lhs.id == rhs.id && lhs.host == rhs.host && lhs.port == rhs.port
+        lhs.id == rhs.id && lhs.host == rhs.host && lhs.port == rhs.port && lhs.txtToken == rhs.txtToken
     }
 }
 
@@ -73,6 +74,8 @@ public class HealthKitManager: ObservableObject {
 
     // Biological & Clinical Epigenetic Age
     @AppStorage("apex_chronological_age") public var chronologicalAge: Double = 26.0
+    @AppStorage("apex_age_manually_set") public var isAgeManuallySet: Bool = false
+    @AppStorage("apex_mac_token") public var macSyncToken: String = ""
     @AppStorage("apex_clinical_phenoage") public var clinicalPhenoAgeValue: Double = 0
     @AppStorage("apex_clinical_phenoage_updated") public var clinicalPhenoAgeDateStr: String = ""
 
@@ -98,9 +101,10 @@ public class HealthKitManager: ObservableObject {
 
     // 7-Day HRV Personal Baseline & Delta %
     public var hrvBaseline7d: Double? {
-        guard hrvHistory.count >= 2 else { return nil }
-        let sum = hrvHistory.reduce(0.0) { $0 + $1.value }
-        return sum / Double(hrvHistory.count)
+        let recent = Array(hrvHistory.suffix(7))
+        guard recent.count >= 2 else { return nil }
+        let sum = recent.reduce(0.0) { $0 + $1.value }
+        return sum / Double(recent.count)
     }
 
     public var hrvDeltaPercent: Int? {
@@ -110,9 +114,10 @@ public class HealthKitManager: ObservableObject {
 
     // 7-Day Resting HR Personal Baseline & Delta bpm
     public var rhrBaseline7d: Double? {
-        guard rhrHistory.count >= 2 else { return nil }
-        let sum = rhrHistory.reduce(0.0) { $0 + $1.value }
-        return sum / Double(rhrHistory.count)
+        let recent = Array(rhrHistory.suffix(7))
+        guard recent.count >= 2 else { return nil }
+        let sum = recent.reduce(0.0) { $0 + $1.value }
+        return sum / Double(recent.count)
     }
 
     public var rhrDeltaBpm: Int? {
@@ -223,6 +228,9 @@ public class HealthKitManager: ObservableObject {
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
             readTypes.insert(sleep)
         }
+        if let dob = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) {
+            readTypes.insert(dob)
+        }
 
         var shareTypes = Set<HKSampleType>()
         if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
@@ -230,6 +238,12 @@ public class HealthKitManager: ObservableObject {
         }
         if let exTime = HKObjectType.quantityType(forIdentifier: .appleExerciseTime) {
             shareTypes.insert(exTime)
+        }
+        if let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) {
+            shareTypes.insert(hrType)
+        }
+        if let hrvType = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            shareTypes.insert(hrvType)
         }
         shareTypes.insert(HKObjectType.workoutType())
 
@@ -292,6 +306,9 @@ public class HealthKitManager: ObservableObject {
         let startOfDay = calendar.startOfDay(for: now)
         let todayPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
 
+        // 0. Chronological DOB from Apple Health (unless manually overridden)
+        fetchChronologicalAgeFromHealthKit()
+
         // 1. Exact Apple Watch Activity Rings (HKActivitySummaryQuery)
         var dateComponents = calendar.dateComponents([.era, .year, .month, .day], from: now)
         dateComponents.calendar = calendar
@@ -335,10 +352,11 @@ public class HealthKitManager: ObservableObject {
             healthStore.execute(query)
         }
 
-        // 3. 7-Day Resting HR Samples & Latest
-        fetch7DayDiscreteSamples(
+        // 3. 14-Day Resting HR Samples & Latest (supports 7d baseline + 14d N-of-1 trials)
+        fetchRecentSamples(
             identifier: .restingHeartRate,
-            unit: HKUnit(from: "count/min")
+            unit: HKUnit(from: "count/min"),
+            daysBack: 14
         ) { [weak self] points in
             guard let self = self else { return }
             self.rhrHistory = points
@@ -347,10 +365,11 @@ public class HealthKitManager: ObservableObject {
             self.broadcastToMac()
         }
 
-        // 4. 7-Day HRV (SDNN) Samples & Latest
-        fetch7DayDiscreteSamples(
+        // 4. 14-Day HRV (SDNN) Samples & Latest (supports 7d baseline + 14d N-of-1 trials)
+        fetchRecentSamples(
             identifier: .heartRateVariabilitySDNN,
-            unit: .secondUnit(with: .milli)
+            unit: .secondUnit(with: .milli),
+            daysBack: 14
         ) { [weak self] points in
             guard let self = self else { return }
             self.hrvHistory = points
@@ -427,6 +446,45 @@ public class HealthKitManager: ObservableObject {
             }
             healthStore.execute(query)
         }
+    }
+
+    private func fetchChronologicalAgeFromHealthKit() {
+        guard isAvailable, !isAgeManuallySet else { return }
+        if let dobComponents = try? healthStore.dateOfBirthComponents(),
+           let birthDate = Calendar.current.date(from: dobComponents) {
+            let years = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year
+            if let years, (16...105).contains(years) {
+                self.chronologicalAge = Double(years)
+                self.persistWidgetSnapshot()
+            }
+        }
+    }
+
+    public func saveHeartRateToHealth(bpm: Double, hrvMs: Double? = nil) async {
+        guard isAvailable, bpm >= 35, bpm <= 220 else { return }
+        let now = Date()
+        var samples: [HKQuantitySample] = []
+
+        if let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) {
+            let qty = HKQuantity(unit: HKUnit(from: "count/min"), doubleValue: bpm)
+            samples.append(HKQuantitySample(type: hrType, quantity: qty, start: now, end: now))
+        }
+        if let hrv = hrvMs, hrv >= 5, hrv <= 250,
+           let hrvType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            let qty = HKQuantity(unit: .secondUnit(with: .milli), doubleValue: hrv)
+            samples.append(HKQuantitySample(type: hrvType, quantity: qty, start: now, end: now))
+        }
+
+        guard !samples.isEmpty else { return }
+        try? await healthStore.save(samples)
+        if let hrv = hrvMs {
+            self.heartRateVariability = hrv
+        }
+        self.persistWidgetSnapshot()
+        self.syncEventToMac(extraPayload: [
+            "liveBpm": Int(bpm.rounded()),
+            "liveHrvMs": Int((hrvMs ?? 0).rounded())
+        ])
     }
 
     private func fetchLatestQuantity(identifier: HKQuantityTypeIdentifier, unit: HKUnit, completion: @escaping (Double?) -> Void) {
@@ -522,8 +580,8 @@ public class HealthKitManager: ObservableObject {
 
     private func fetchSleepArchitecture(calendar: Calendar, now: Date) {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return }
-        let weekAgo = calendar.date(byAdding: .day, value: -7, to: calendar.startOfDay(for: now)) ?? now
-        let pred = HKQuery.predicateForSamples(withStart: weekAgo, end: now, options: .strictStartDate)
+        let twoWeeksAgo = calendar.date(byAdding: .day, value: -14, to: calendar.startOfDay(for: now)) ?? now
+        let pred = HKQuery.predicateForSamples(withStart: twoWeeksAgo, end: now, options: .strictStartDate)
 
         let query = HKSampleQuery(sampleType: sleepType, predicate: pred, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { [weak self] _, samples, _ in
             guard let categorySamples = samples as? [HKCategorySample], !categorySamples.isEmpty else { return }
@@ -687,7 +745,11 @@ public class HealthKitManager: ObservableObject {
             var items: [DiscoveredMacEndpoint] = []
             for res in results {
                 if case let .service(name, _, _, _) = res.endpoint {
-                    items.append(DiscoveredMacEndpoint(id: name, name: name, host: nil, port: nil, nwEndpoint: res.endpoint))
+                    var txtToken: String? = nil
+                    if case let .bonjour(record) = res.metadata {
+                        txtToken = record["token"]
+                    }
+                    items.append(DiscoveredMacEndpoint(id: name, name: name, host: nil, port: nil, txtToken: txtToken, nwEndpoint: res.endpoint))
                 }
             }
             Task { @MainActor in
@@ -715,10 +777,16 @@ public class HealthKitManager: ObservableObject {
                         self.macHost = hostStr
                         self.macServerPort = portInt
                         self.macDeviceName = endpoint.name
+                        if let txtToken = endpoint.txtToken, !txtToken.isEmpty {
+                            self.macSyncToken = txtToken
+                        }
                         self.isMacReachable = true
                         if let idx = self.discoveredMacs.firstIndex(where: { $0.id == endpoint.id }) {
                             self.discoveredMacs[idx].host = hostStr
                             self.discoveredMacs[idx].port = portInt
+                        }
+                        if self.macSyncToken.isEmpty {
+                            await self.fetchPairingToken(host: hostStr, port: portInt)
                         }
                         self.broadcastToMac()
                     }
@@ -731,6 +799,20 @@ public class HealthKitManager: ObservableObject {
             }
         }
         connection.start(queue: DispatchQueue.global(qos: .utility))
+    }
+
+    private func fetchPairingToken(host: String, port: Int) async {
+        guard let infoURL = URL(string: "http://\(host):\(port)/api/pairing-info") else { return }
+        var req = URLRequest(url: infoURL)
+        req.timeoutInterval = 2.0
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = json["syncToken"] as? String,
+              !token.isEmpty else {
+            return
+        }
+        self.macSyncToken = token
     }
 
     nonisolated private static func cleanHostString(_ host: NWEndpoint.Host) -> String {
@@ -791,21 +873,43 @@ public class HealthKitManager: ObservableObject {
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else { return }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = jsonData
-        request.timeoutInterval = 2.0
+        let targetHost = cleanHost
+        let targetPort = macServerPort
+        Task { [weak self] in
+            guard let self = self else { return }
+            if self.macSyncToken.isEmpty {
+                await self.fetchPairingToken(host: targetHost, port: targetPort)
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if !self.macSyncToken.isEmpty {
+                request.setValue(self.macSyncToken, forHTTPHeaderField: "X-APEX-Sync-Token")
+            }
+            request.httpBody = jsonData
+            request.timeoutInterval = 2.0
 
-        let task = URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
-            let ok = (response as? HTTPURLResponse)?.statusCode == 200
-            Task { @MainActor in
-                self?.isMacReachable = ok
-                if ok {
-                    self?.lastSyncTimestamp = Date()
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               let httpRes = response as? HTTPURLResponse {
+                if httpRes.statusCode == 401 {
+                    await self.fetchPairingToken(host: targetHost, port: targetPort)
+                    if !self.macSyncToken.isEmpty {
+                        request.setValue(self.macSyncToken, forHTTPHeaderField: "X-APEX-Sync-Token")
+                        let (_, retryResp) = (try? await URLSession.shared.data(for: request)) ?? (Data(), URLResponse())
+                        let ok = (retryResp as? HTTPURLResponse)?.statusCode == 200
+                        self.isMacReachable = ok
+                        if ok { self.lastSyncTimestamp = Date() }
+                        return
+                    }
                 }
+                let ok = httpRes.statusCode == 200
+                self.isMacReachable = ok
+                if ok {
+                    self.lastSyncTimestamp = Date()
+                }
+            } else {
+                self.isMacReachable = false
             }
         }
-        task.resume()
     }
 }

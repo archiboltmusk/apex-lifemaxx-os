@@ -63,12 +63,23 @@ public final class OpticalPulseViewModel: ObservableObject {
         isScanning = false
         let result = captureController.computeBPMAndRMSSD()
         measuredResult = result
-        statusText = result != nil ? "Optical PPG reading locked" : "Weak pulse signal — retry with finger covering lens"
+        statusText = result != nil
+            ? "Optical PPG reading locked · \(result?.confidencePct ?? 0)% SNR confidence"
+            : "Weak pulse signal — cover rear camera gently without pressing hard"
         if let res = result {
             Haptics.success()
+            if res.confidencePct >= 60 {
+                Task {
+                    await HealthKitManager.shared.saveHeartRateToHealth(
+                        bpm: Double(res.bpm),
+                        hrvMs: Double(res.rmssdMs)
+                    )
+                }
+            }
             HealthKitManager.shared.syncEventToMac(extraPayload: [
                 "hr": res.bpm,
                 "hrv": res.rmssdMs,
+                "confidencePct": res.confidencePct,
                 "source": "iPhone Camera rPPG Optical Pulse"
             ])
         } else {
@@ -85,7 +96,10 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
     private let queue = DispatchQueue(label: "apex.optical.ppg.queue", qos: .userInteractive)
     private var isConfigured = false
     private var timestamps: [Double] = []
+    private var greenChannelMeans: [Double] = []
     private var redChannelMeans: [Double] = []
+    private var currentTorchLevel: Float = 0.25
+    private var lastTorchAdjustTime: Double = 0
     private let targetSeconds: Double = 10.0
 
     override init() {
@@ -96,7 +110,10 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
     func start() {
         guard cameraAvailable else { return }
         timestamps.removeAll()
+        greenChannelMeans.removeAll()
         redChannelMeans.removeAll()
+        currentTorchLevel = 0.25
+        lastTorchAdjustTime = 0
 
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -121,26 +138,27 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
                 self.isConfigured = true
             }
 
-            self.setTorch(enabled: true)
+            self.setTorch(enabled: true, level: self.currentTorchLevel)
             self.session.startRunning()
         }
     }
 
     func stop() {
         queue.async { [weak self] in
-            self?.setTorch(enabled: false)
+            self?.setTorch(enabled: false, level: 0)
             if self?.session.isRunning == true {
                 self?.session.stopRunning()
             }
         }
     }
 
-    private func setTorch(enabled: Bool) {
+    private func setTorch(enabled: Bool, level: Float) {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               device.hasTorch else { return }
         if (try? device.lockForConfiguration()) != nil {
             if enabled {
-                try? device.setTorchModeOn(level: 0.35)
+                let clamped = max(0.06, min(0.5, level))
+                try? device.setTorchModeOn(level: clamped)
             } else {
                 device.torchMode = .off
             }
@@ -158,7 +176,8 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
         let bpr = CVPixelBufferGetBytesPerRow(pb)
         guard let base = CVPixelBufferGetBaseAddress(pb)?.assumingMemoryBound(to: UInt8.self) else { return }
 
-        // Sample central ROI red & green pixels for clean photoplethysmography curve
+        // Sample central ROI Green (byte 1) & Red (byte 2) pixels in BGRA for clean unclipped rPPG
+        var sumG: Double = 0
         var sumR: Double = 0
         var count = 0
         let xStart = w / 3, xEnd = (w * 2) / 3
@@ -166,50 +185,85 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
         for y in stride(from: yStart, to: yEnd, by: 4) {
             let row = base.advanced(by: y * bpr)
             for x in stride(from: xStart, to: xEnd, by: 4) {
-                sumR += Double(row[x * 4 + 2]) // BGRA byte 2 = Red
+                sumG += Double(row[x * 4 + 1])
+                sumR += Double(row[x * 4 + 2])
                 count += 1
             }
         }
         guard count > 0 else { return }
+        let meanG = sumG / Double(count)
         let meanR = sumR / Double(count)
         let t = CACurrentMediaTime()
 
+        // Adaptive torch dim if Red channel approaches 8-bit rail saturation
+        if meanR >= 246.0 && currentTorchLevel > 0.08 && (t - lastTorchAdjustTime) > 0.5 {
+            currentTorchLevel = max(0.08, currentTorchLevel - 0.06)
+            lastTorchAdjustTime = t
+            setTorch(enabled: true, level: currentTorchLevel)
+        }
+
         timestamps.append(t)
+        greenChannelMeans.append(meanG)
         redChannelMeans.append(meanR)
 
         let elapsed = t - (timestamps.first ?? t)
         let prog = min(1.0, elapsed / targetSeconds)
-        let tail = Array(redChannelMeans.suffix(60))
+        let preferRed = (meanR < 242.0 && greenChannelMeans.last ?? 0 < 8.0)
+        let tail = Array((preferRed ? redChannelMeans : greenChannelMeans).suffix(60))
         onSampleUpdate?(tail, prog)
     }
 
     func computeBPMAndRMSSD() -> OpticalPulseMeasurement? {
-        guard redChannelMeans.count >= 120,
+        guard greenChannelMeans.count >= 120,
+              redChannelMeans.count == greenChannelMeans.count,
               let t0 = timestamps.first,
               let tLast = timestamps.last,
               (tLast - t0) > 4.0 else {
             return nil
         }
 
-        let n = redChannelMeans.count
+        // Choose unclipped channel (Green preferred for oxyhemoglobin AC modulation; Red only if unclipped & stronger)
+        let redClipped = redChannelMeans.filter { $0 >= 248.0 }.count > (redChannelMeans.count / 10)
+        func stdDev(_ arr: [Double]) -> Double {
+            let m = arr.reduce(0, +) / Double(max(1, arr.count))
+            let v = arr.reduce(0.0) { $0 + ($1 - m) * ($1 - m) } / Double(max(1, arr.count))
+            return sqrt(v)
+        }
+        let gStd = stdDev(greenChannelMeans)
+        let rStd = stdDev(redChannelMeans)
+        let rawSignal = (!redClipped && gStd < 0.02 && rStd > 0.03) ? redChannelMeans : greenChannelMeans
+
+        let n = rawSignal.count
         let sampleRate = Double(n - 1) / (tLast - t0)
-        // Detrend using rolling mean subtraction
+        // Detrend using rolling mean subtraction (~0.6s window)
         var detrended = [Double](repeating: 0, count: n)
-        let win = max(5, Int(sampleRate * 0.7))
+        let win = max(5, Int(sampleRate * 0.6))
         for i in 0..<n {
             let lo = max(0, i - win)
             let hi = min(n - 1, i + win)
-            let mean = redChannelMeans[lo...hi].reduce(0, +) / Double(hi - lo + 1)
-            detrended[i] = redChannelMeans[i] - mean
+            let mean = rawSignal[lo...hi].reduce(0, +) / Double(hi - lo + 1)
+            detrended[i] = rawSignal[i] - mean
         }
 
-        // Peak detection for inter-beat intervals (IBI)
+        // 3-tap smoothing to suppress quantization noise while keeping systolic peak timing
+        var smoothed = detrended
+        if n >= 3 {
+            for i in 1..<(n - 1) {
+                smoothed[i] = 0.25 * detrended[i - 1] + 0.5 * detrended[i] + 0.25 * detrended[i + 1]
+            }
+        }
+
+        let waveStd = stdDev(smoothed)
+        guard waveStd >= 0.015 else { return nil }
+        let peakThreshold = max(0.025, waveStd * 0.45)
+
+        // Adaptive Peak Detection for Inter-Beat Intervals (IBI)
         var peakTimes: [Double] = []
         let minGap = 0.33 // <= 180 bpm
         for i in 2..<(n - 2) {
-            if detrended[i] > detrended[i - 1] &&
-               detrended[i] >= detrended[i + 1] &&
-               detrended[i] > 0.04 {
+            if smoothed[i] > smoothed[i - 1] &&
+               smoothed[i] >= smoothed[i + 1] &&
+               smoothed[i] > peakThreshold {
                 let pt = timestamps[i]
                 if let lastPt = peakTimes.last, (pt - lastPt) < minGap {
                     continue
@@ -219,26 +273,40 @@ private final class OpticalPulseCaptureController: NSObject, AVCaptureVideoDataO
         }
 
         guard peakTimes.count >= 5 else { return nil }
-        var ibisMs: [Double] = []
+        var rawIbisMs: [Double] = []
         for i in 1..<peakTimes.count {
             let ibi = (peakTimes[i] - peakTimes[i - 1]) * 1000.0
             if ibi >= 350 && ibi <= 1450 {
-                ibisMs.append(ibi)
+                rawIbisMs.append(ibi)
             }
         }
-        guard ibisMs.count >= 4 else { return nil }
+        guard rawIbisMs.count >= 4 else { return nil }
 
-        let avgIbi = ibisMs.reduce(0, +) / Double(ibisMs.count)
+        // Median-filter outlier IBIs (e.g. skipped/double beat)
+        let sortedIbis = rawIbisMs.sorted()
+        let medianIbi = sortedIbis[sortedIbis.count / 2]
+        let cleanIbis = rawIbisMs.filter { abs($0 - medianIbi) <= medianIbi * 0.32 }
+        guard cleanIbis.count >= 4 else { return nil }
+
+        let avgIbi = cleanIbis.reduce(0, +) / Double(cleanIbis.count)
         let bpm = Int(max(42, min(180, (60000.0 / avgIbi).rounded())))
 
         var sqDiffSum: Double = 0
-        for i in 1..<ibisMs.count {
-            let d = ibisMs[i] - ibisMs[i - 1]
+        for i in 1..<cleanIbis.count {
+            let d = cleanIbis[i] - cleanIbis[i - 1]
             sqDiffSum += d * d
         }
-        let rmssd = Int(min(180, max(12, sqrt(sqDiffSum / Double(ibisMs.count - 1)).rounded())))
+        let rmssd = Int(min(180, max(10, sqrt(sqDiffSum / Double(cleanIbis.count - 1)).rounded())))
 
-        return OpticalPulseMeasurement(bpm: bpm, rmssdMs: rmssd, confidencePct: 88, measuredAt: Date())
+        // Computed signal confidence from kept-IBI ratio, SNR waveStd, and rhythm stability
+        let keepRatio = Double(cleanIbis.count) / Double(rawIbisMs.count)
+        let ibiStd = stdDev(cleanIbis)
+        let rhythmConsistency = max(0.0, 1.0 - (ibiStd / max(1.0, avgIbi)) * 1.8)
+        let amplitudeScore = min(1.0, waveStd / 0.25)
+        let rawConf = (0.45 * keepRatio + 0.35 * rhythmConsistency + 0.20 * amplitudeScore) * 100.0
+        let confidencePct = Int(max(45, min(99, rawConf.rounded())))
+
+        return OpticalPulseMeasurement(bpm: bpm, rmssdMs: rmssd, confidencePct: confidencePct, measuredAt: Date())
     }
 }
 
@@ -270,6 +338,9 @@ public struct OpticalPulseSheet: View {
                             Text("BPM · HRV \(res.rmssdMs) ms")
                                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                                 .foregroundStyle(ApexTheme.standCyan)
+                            Text("Confidence \(res.confidencePct)%")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(res.confidencePct >= 60 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
                         } else {
                             Image(systemName: "waveform.path.ecg")
                                 .font(.system(size: 36))

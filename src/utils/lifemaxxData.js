@@ -10,32 +10,32 @@ export const INITIAL_PILLARS = [
 ];
 
 export const APPLE_HEALTH_DATA = {
-  syncStatus: 'SYNCHRONIZED',
-  deviceSource: 'Apple Watch Ultra 2 (watchOS 11.2)',
-  lastSynced: 'Just now',
+  syncStatus: 'AWAITING SYNC',
+  deviceSource: 'Connect iPhone APEX OS or import export.xml',
+  lastSynced: 'Not synced',
   activityRings: {
-    move: { current: 840, target: 750, unit: 'kcal', percentage: 112, color: '#FA114F' },
-    exercise: { current: 54, target: 45, unit: 'min', percentage: 120, color: '#92E82A' },
-    stand: { current: 14, target: 12, unit: 'hrs', percentage: 116, color: '#00D6E6' },
+    move: { current: 0, target: 750, unit: 'kcal', percentage: 0, color: '#FA114F' },
+    exercise: { current: 0, target: 45, unit: 'min', percentage: 0, color: '#92E82A' },
+    stand: { current: 0, target: 12, unit: 'hrs', percentage: 0, color: '#00D6E6' },
   },
   metrics: {
-    restingHeartRate: { value: 48, unit: 'BPM', status: 'Athlete Elite', trend: '-2 bpm' },
-    hrv: { value: 94, unit: 'ms', status: 'Optimal Recovery', trend: '+14 ms' },
-    bloodOxygen: { value: 99, unit: '%', status: 'Perfect', trend: 'Steady' },
-    vo2Max: { value: 58.4, unit: 'mL/kg/min', status: 'Top 1% Longevity', trend: '+1.2' },
-    steps: { value: '14,840', unit: 'steps', status: 'Active Peak', trend: '11.4 km' },
-    respiratoryRate: { value: 13.1, unit: 'brpm', status: 'Normal', trend: 'Steady' },
-    wristTemperature: { value: '-0.3°F', unit: 'deviation', status: 'Baseline', trend: 'Optimal' },
-    cardioRecovery: { value: '38 bpm', unit: 'drop in 1m', status: 'Exceptional', trend: '+4 bpm' }
+    restingHeartRate: { value: 0, unit: 'BPM', status: 'Awaiting Sync', trend: '--' },
+    hrv: { value: 0, unit: 'ms', status: 'Awaiting Sync', trend: '--' },
+    bloodOxygen: { value: 0, unit: '%', status: 'Awaiting Sync', trend: '--' },
+    vo2Max: { value: 0, unit: 'mL/kg/min', status: 'Awaiting Sync', trend: '--' },
+    steps: { value: '0', unit: 'steps', status: 'Awaiting Sync', trend: '0 km' },
+    respiratoryRate: { value: 0, unit: 'brpm', status: 'Awaiting Sync', trend: '--' },
+    wristTemperature: { value: '--', unit: 'deviation', status: 'Awaiting Sync', trend: '--' },
+    cardioRecovery: { value: '--', unit: 'drop in 1m', status: 'Awaiting Sync', trend: '--' }
   },
   sleepStages: {
-    score: 95,
-    totalHours: '8h 22m',
-    efficiency: '97%',
-    deep: { time: '2h 15m', percentage: 27, color: '#3B82F6' },
-    rem: { time: '1h 55m', percentage: 23, color: '#8B5CF6' },
-    core: { time: '3h 56m', percentage: 47, color: '#06B6D4' },
-    awake: { time: '16m', percentage: 3, color: '#64748B' }
+    score: 0,
+    totalHours: '0h 0m',
+    efficiency: '--',
+    deep: { time: '0h 0m', percentage: 0, color: '#3B82F6' },
+    rem: { time: '0h 0m', percentage: 0, color: '#8B5CF6' },
+    core: { time: '0h 0m', percentage: 0, color: '#06B6D4' },
+    awake: { time: '0m', percentage: 0, color: '#64748B' }
   }
 };
 

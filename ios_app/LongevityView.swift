@@ -148,6 +148,7 @@ public struct LongevityView: View {
                     HStack(spacing: 10) {
                         Button {
                             Haptics.tap()
+                            health.isAgeManuallySet = true
                             health.chronologicalAge = max(16, health.chronologicalAge - 1)
                         } label: {
                             Image(systemName: "minus.circle.fill")
@@ -161,6 +162,7 @@ public struct LongevityView: View {
                             .frame(minWidth: 28)
                         Button {
                             Haptics.tap()
+                            health.isAgeManuallySet = true
                             health.chronologicalAge = min(95, health.chronologicalAge + 1)
                         } label: {
                             Image(systemName: "plus.circle.fill")

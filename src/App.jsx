@@ -312,16 +312,18 @@ export default function App() {
       const saved = localStorage.getItem('apex_user_profile');
       if (saved) return JSON.parse(saved);
     } catch {}
-    const defaultName = (typeof window !== 'undefined' && window.__macDeviceTelemetry?.userName) || 'Anupam Mahato';
-    const defaultLogin = (typeof window !== 'undefined' && window.__macDeviceTelemetry?.userLogin) || 'anupam';
+    const macTele = typeof window !== 'undefined' ? window.__macDeviceTelemetry : null;
+    const defaultName = macTele?.userName || 'Mac User';
+    const defaultLogin = macTele?.userLogin || 'user';
+    const defaultDevice = macTele ? `${macTele.modelName} · ${macTele.ramString}` : 'Apple Silicon Mac';
     return {
       name: defaultName,
       handle: `@${defaultLogin}`,
       tier: 'SOVEREIGN FOUNDER (LIFETIME ACCESS)',
-      badge: '👑 VERIFIED MAC USER',
+      badge: '✓ VERIFIED MAC USER',
       appleId: `${defaultLogin}@icloud.com`,
       status: 'VERIFIED LOCAL HOST',
-      device: 'MacBook Air (Apple M5 · 16 GB)',
+      device: defaultDevice,
     };
   });
 

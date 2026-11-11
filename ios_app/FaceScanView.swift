@@ -939,6 +939,80 @@ private final class TrueDepthCoordinator: NSObject, ObservableObject, ARSessionD
     @Published var interPupillaryMm: Double? = nil
     @Published var bizygomaticMm: Double? = nil
     private var lastSymmetry: Double = 95.0
+    private var lastTiltDegrees: Double? = nil
+    private var lastMidfaceRatio: Double? = nil
+    private var lastFwhrRatio: Double? = nil
+    private var lastFacialThirds: String? = nil
+    private var lastForwardProjection: Double? = nil
+    private var lastVisionTimestamp: CFAbsoluteTime = 0
+
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastVisionTimestamp > 0.35 else { return }
+        lastVisionTimestamp = now
+
+        let pb = frame.capturedImage
+        let req = VNDetectFaceLandmarksRequest()
+        let handler = VNImageRequestHandler(cvPixelBuffer: pb, orientation: .leftMirrored, options: [:])
+        try? handler.perform([req])
+
+        guard let obs = req.results?.first, let lm = obs.landmarks else { return }
+        let bbox = obs.boundingBox
+        let leftEye = lm.leftEye?.normalizedPoints ?? []
+        let rightEye = lm.rightEye?.normalizedPoints ?? []
+        let outerLips = lm.outerLips?.normalizedPoints ?? []
+        let lPupil = lm.leftPupil?.normalizedPoints.first
+        let rPupil = lm.rightPupil?.normalizedPoints.first
+        let leftBrow = lm.leftEyebrow?.normalizedPoints ?? []
+        let noseCrest = lm.noseCrest?.normalizedPoints ?? []
+        let contour = lm.faceContour?.normalizedPoints ?? []
+
+        var tiltSum = 0.0, tiltCount = 0.0
+        if leftEye.count >= 4 {
+            let outer = leftEye.min(by: { $0.x < $1.x }) ?? leftEye[0]
+            let inner = leftEye.max(by: { $0.x < $1.x }) ?? leftEye[0]
+            tiltSum += atan2(inner.y - outer.y, inner.x - outer.x) * 180.0 / .pi
+            tiltCount += 1.0
+        }
+        if rightEye.count >= 4 {
+            let inner = rightEye.min(by: { $0.x < $1.x }) ?? rightEye[0]
+            let outer = rightEye.max(by: { $0.x < $1.x }) ?? rightEye[0]
+            tiltSum += atan2(inner.y - outer.y, outer.x - inner.x) * 180.0 / .pi
+            tiltCount += 1.0
+        }
+        let tilt = tiltCount > 0 ? max(-10.0, min(12.0, tiltSum / tiltCount)) : nil
+
+        var midface: Double? = nil
+        if let lp = lPupil, let rp = rPupil, let upperLip = outerLips.min(by: { $0.y < $1.y }) {
+            let ipd = hypot(rp.x - lp.x, rp.y - lp.y)
+            let verticalMid = abs(upperLip.y - ((lp.y + rp.y) / 2.0))
+            if ipd > 0.01 {
+                midface = max(0.75, min(1.25, ((Double(verticalMid / ipd)) * 100).rounded() / 100))
+            }
+        }
+        let fwhr = bbox.height > 0
+            ? max(1.55, min(2.15, ((Double(bbox.width / (bbox.height * 0.54))) * 100).rounded() / 100))
+            : nil
+
+        var thirdsLabel: String? = nil
+        if let browY = (leftBrow.isEmpty ? nil : leftBrow.map(\.y).reduce(0, +) / CGFloat(leftBrow.count)),
+           let noseBaseY = noseCrest.min(by: { $0.y < $1.y })?.y,
+           let chinY = contour.min(by: { $0.y < $1.y })?.y {
+            let midThird = abs(browY - noseBaseY)
+            let lowerThird = abs(noseBaseY - chinY)
+            if midThird > 0.02 && lowerThird > 0.02 {
+                let ratio = midThird / lowerThird
+                thirdsLabel = ratio < 0.88 ? "Strong Lower Third" : (ratio > 1.14 ? "Longer Midface" : "Balanced")
+            }
+        }
+
+        DispatchQueue.main.async {
+            if let t = tilt { self.lastTiltDegrees = t }
+            if let m = midface { self.lastMidfaceRatio = m }
+            if let f = fwhr { self.lastFwhrRatio = f }
+            if let th = thirdsLabel { self.lastFacialThirds = th }
+        }
+    }
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         guard let face = anchors.compactMap({ $0 as? ARFaceAnchor }).first else {
@@ -954,45 +1028,93 @@ private final class TrueDepthCoordinator: NSObject, ObservableObject, ARSessionD
         let ipdMeters = hypot(Double(lPos.x - rPos.x), Double(lPos.y - rPos.y))
         let ipdMm = ipdMeters * 1000.0
 
-        // Sample min/max X of 3D mesh for bizygomatic width
-        var minX: Float = 0
-        var maxX: Float = 0
-        var asymAccum: Double = 0
-        var pairSamples = 0
+        // Sample bizygomatic width + left-vs-right horizontal-slice 3D mirror symmetry + maxillary projection
+        var minX: Float = .greatestFiniteMagnitude
+        var maxX: Float = -.greatestFiniteMagnitude
+        var leftSliceX = [Double](repeating: 0, count: 14)
+        var leftSliceZ = [Double](repeating: 0, count: 14)
+        var leftSliceN = [Int](repeating: 0, count: 14)
+        var rightSliceX = [Double](repeating: 0, count: 14)
+        var rightSliceZ = [Double](repeating: 0, count: 14)
+        var rightSliceN = [Int](repeating: 0, count: 14)
+        var maxillaZSum = 0.0, maxillaN = 0
+        var lateralZSum = 0.0, lateralN = 0
+
         for v in vertices {
-            if v.x < minX { minX = v.x }
-            if v.x > maxX { maxX = v.x }
+            if v.y >= -0.045 && v.y <= 0.045 {
+                if v.x < minX { minX = v.x }
+                if v.x > maxX { maxX = v.x }
+            }
+            if abs(v.x) >= 0.012 && abs(v.x) <= 0.042 && v.y >= -0.025 && v.y <= 0.015 {
+                maxillaZSum += Double(v.z * 1000.0)
+                maxillaN += 1
+            } else if abs(v.x) >= 0.055 && v.y >= -0.04 && v.y <= 0.03 {
+                lateralZSum += Double(v.z * 1000.0)
+                lateralN += 1
+            }
+            let bin = Int(((v.y + 0.075) / 0.14) * 14.0)
+            if (0..<14).contains(bin) {
+                if v.x < -0.010 {
+                    leftSliceX[bin] += Double(abs(v.x) * 1000.0)
+                    leftSliceZ[bin] += Double(v.z * 1000.0)
+                    leftSliceN[bin] += 1
+                } else if v.x > 0.010 {
+                    rightSliceX[bin] += Double(abs(v.x) * 1000.0)
+                    rightSliceZ[bin] += Double(v.z * 1000.0)
+                    rightSliceN[bin] += 1
+                }
+            }
         }
-        for i in stride(from: 0, to: min(vertices.count - 1, 200), by: 2) {
-            let v = vertices[i]
-            asymAccum += Double(abs(v.z)) * 0.2
-            pairSamples += 1
+
+        var symErrMm = 0.0
+        var symSlices = 0
+        for b in 0..<14 where leftSliceN[b] >= 3 && rightSliceN[b] >= 3 {
+            let lmx = leftSliceX[b] / Double(leftSliceN[b])
+            let rmx = rightSliceX[b] / Double(rightSliceN[b])
+            let lmz = leftSliceZ[b] / Double(leftSliceN[b])
+            let rmz = rightSliceZ[b] / Double(rightSliceN[b])
+            symErrMm += hypot(lmx - rmx, lmz - rmz)
+            symSlices += 1
         }
-        let widthMm = Double(maxX - minX) * 1000.0
-        let symScore = max(86.0, min(99.4, 98.2 - (asymAccum / Double(max(1, pairSamples)))))
+
+        let avgErrMm = symSlices > 0 ? symErrMm / Double(symSlices) : 2.8
+        let widthMm = (maxX > minX) ? Double(maxX - minX) * 1000.0 : 132.0
+        let symScore = max(84.0, min(99.5, 99.4 - avgErrMm * 1.45))
+        let maxZ = maxillaN > 0 ? maxillaZSum / Double(maxillaN) : 34.0
+        let latZ = lateralN > 0 ? lateralZSum / Double(lateralN) : -4.0
+        let projScore = min(98.0, max(65.0, (48.0 + (maxZ - latZ) * 0.95).rounded()))
 
         DispatchQueue.main.async {
             self.faceDetected = true
             self.interPupillaryMm = (ipdMm * 10).rounded() / 10
             self.bizygomaticMm = (widthMm * 10).rounded() / 10
             self.lastSymmetry = (symScore * 10).rounded() / 10
+            self.lastForwardProjection = projScore
         }
     }
 
     func snapshotRecord() -> FaceScanRecord? {
         guard faceDetected else { return nil }
+        let ipd = interPupillaryMm ?? 63.0
+        let zyg = bizygomaticMm ?? 134.0
+        let derivedFwhr = lastFwhrRatio ?? max(1.55, min(2.15, ((zyg / (ipd * 1.15)) * 100).rounded() / 100))
+        let tilt = lastTiltDegrees ?? 2.4
+        let tiltStr = tilt >= 0 ? String(format: "+%.1f°", tilt) : String(format: "%.1f°", tilt)
+        let tiltAssess = tilt >= 2.0 ? "Positive Tilt" : (tilt >= -1.0 ? "Neutral Tilt" : "Negative Tilt")
+        let midface = lastMidfaceRatio ?? max(0.85, min(1.15, (((ipd / (zyg * 0.48)) * 100).rounded() / 100)))
+
         return FaceScanRecord(
             id: UUID(),
             date: Date(),
-            canthalTilt: "+3.4°",
-            canthalAssessment: "3D Mapped",
+            canthalTilt: tiltStr,
+            canthalAssessment: tiltAssess,
             symmetryPercent: lastSymmetry,
-            midfaceRatio: 0.99,
-            fwhrRatio: 1.88,
-            facialThirds: "Balanced",
+            midfaceRatio: midface,
+            fwhrRatio: derivedFwhr,
+            facialThirds: lastFacialThirds ?? "Proportion Pending",
             scanAngle: FaceScanAngleMode.front.rawValue,
             gonialAngleDeg: nil,
-            forwardProjectionScore: 86,
+            forwardProjectionScore: lastForwardProjection,
             captureQuality: 1.0,
             depthEngine: "TrueDepth 3D"
         )
@@ -1346,6 +1468,26 @@ private class FaceVisionController: NSObject, ObservableObject, AVCaptureVideoDa
             isAligned: aligned
         )
 
+        // Facial Thirds Ratio (Brow -> Nose Base vs Nose Base -> Chin Menton)
+        var facialThirdsLabel = "Proportion Pending"
+        if !leftEyebrow.isEmpty && !noseCrest.isEmpty && !contour.isEmpty {
+            let browY = leftEyebrow.map(\.y).reduce(0, +) / CGFloat(leftEyebrow.count)
+            let noseBaseY = noseCrest.min(by: { $0.y < $1.y })?.y ?? browY
+            let chinY = contour.min(by: { $0.y < $1.y })?.y ?? noseBaseY
+            let midThird = abs(browY - noseBaseY)
+            let lowerThird = abs(noseBaseY - chinY)
+            if midThird > 0.02 && lowerThird > 0.02 {
+                let ratio = midThird / lowerThird
+                if ratio < 0.88 {
+                    facialThirdsLabel = "Strong Lower Third"
+                } else if ratio > 1.14 {
+                    facialThirdsLabel = "Longer Midface"
+                } else {
+                    facialThirdsLabel = "Balanced"
+                }
+            }
+        }
+
         let record = FaceScanRecord(
             id: UUID(),
             date: Date(),
@@ -1354,7 +1496,7 @@ private class FaceVisionController: NSObject, ObservableObject, AVCaptureVideoDa
             symmetryPercent: symmetry,
             midfaceRatio: midface,
             fwhrRatio: fwhr,
-            facialThirds: "Balanced",
+            facialThirds: facialThirdsLabel,
             scanAngle: mode.rawValue,
             gonialAngleDeg: gonialAngle,
             forwardProjectionScore: forwardProj,

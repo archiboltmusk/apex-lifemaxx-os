@@ -129,7 +129,7 @@ public final class ExperimentLabStore: ObservableObject {
         let sleepByDay = Dictionary(uniqueKeysWithValues: health.sleepHistory.map { (Self.dayKey(for: $0.date), $0.value) })
 
         let onHRV = onKeys.compactMap { hrvByDay[$0] }
-        let offHRV = offKeys.isEmpty ? health.hrvHistory.filter { !onKeys.contains(Self.dayKey(for: $0.date)) }.map(\.value) : offKeys.compactMap { hrvByDay[$0] }
+        let offHRV = offKeys.compactMap { hrvByDay[$0] }
 
         let hrvDeltaPct: Double? = {
             guard !onHRV.isEmpty, !offHRV.isEmpty else { return nil }
@@ -140,14 +140,14 @@ public final class ExperimentLabStore: ObservableObject {
         }()
 
         let onRHR = onKeys.compactMap { rhrByDay[$0] }
-        let offRHR = offKeys.isEmpty ? health.rhrHistory.filter { !onKeys.contains(Self.dayKey(for: $0.date)) }.map(\.value) : offKeys.compactMap { rhrByDay[$0] }
+        let offRHR = offKeys.compactMap { rhrByDay[$0] }
         let rhrDeltaBpm: Double? = {
             guard !onRHR.isEmpty, !offRHR.isEmpty else { return nil }
             return (onRHR.reduce(0, +) / Double(onRHR.count)) - (offRHR.reduce(0, +) / Double(offRHR.count))
         }()
 
         let onSleep = onKeys.compactMap { sleepByDay[$0] }
-        let offSleep = offKeys.isEmpty ? health.sleepHistory.filter { !onKeys.contains(Self.dayKey(for: $0.date)) }.map(\.value) : offKeys.compactMap { sleepByDay[$0] }
+        let offSleep = offKeys.compactMap { sleepByDay[$0] }
         let sleepDeltaMin: Double? = {
             guard !onSleep.isEmpty, !offSleep.isEmpty else { return nil }
             return ((onSleep.reduce(0, +) / Double(onSleep.count)) - (offSleep.reduce(0, +) / Double(offSleep.count))) * 60.0
@@ -155,14 +155,20 @@ public final class ExperimentLabStore: ObservableObject {
 
         let totalDays = onKeys.count + offKeys.count
         let verdict: String
-        if totalDays < 3 {
-            verdict = "Log \(max(0, 3 - totalDays)) more day(s) to pair HealthKit outcomes."
+        if onKeys.isEmpty && offKeys.isEmpty {
+            verdict = "Log both Protocol On and Control Off days across 14 days to pair HealthKit outcomes."
+        } else if offKeys.isEmpty {
+            verdict = "Logged \(onKeys.count) On day(s). Log at least 1 Control (Off) day to isolate baseline delta."
+        } else if onKeys.isEmpty {
+            verdict = "Logged \(offKeys.count) Control day(s). Log at least 1 Protocol On day to compute delta."
+        } else if totalDays < 3 {
+            verdict = "Log \(max(0, 3 - totalDays)) more day(s) across On & Off states for statistical confidence."
         } else if let hrvD = hrvDeltaPct, hrvD >= 5 {
             verdict = "Positive signal: HRV averages +\(Int(hrvD.rounded()))% higher on protocol days."
         } else if let rhrD = rhrDeltaBpm, rhrD <= -1.5 {
             verdict = "Positive signal: Resting HR drops \(String(format: "%.1f", abs(rhrD))) bpm on protocol days."
         } else {
-            verdict = "Neutral delta so far across \(totalDays) logged days — keep testing through Day 14."
+            verdict = "Neutral delta across \(totalDays) logged days — continue logging On/Off days through Day 14."
         }
 
         return ExperimentCorrelationSummary(

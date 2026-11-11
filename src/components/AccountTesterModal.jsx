@@ -27,9 +27,9 @@ export default function AccountTesterModal({
   setStreakDays,
   onCompleteAllProtocols,
 }) {
-  const [nameInput, setNameInput] = useState(userProfile.name || 'Anupam Mahato');
-  const [handleInput, setHandleInput] = useState(userProfile.handle || '@anupam');
-  const [appleIdInput, setAppleIdInput] = useState(userProfile.appleId || 'anupam@icloud.com');
+  const [nameInput, setNameInput] = useState(userProfile.name || 'Mac User');
+  const [handleInput, setHandleInput] = useState(userProfile.handle || '@user');
+  const [appleIdInput, setAppleIdInput] = useState(userProfile.appleId || 'user@icloud.com');
 
   if (!isOpen) return null;
 
@@ -138,7 +138,12 @@ export default function AccountTesterModal({
               <Laptop className="w-4 h-4 text-[#00F0FF]" />
               <span className="text-[#8A8A8A]">HOST HARDWARE:</span>
             </div>
-            <span className="text-white font-bold">MacBook Air (Apple M5 · 16 GB)</span>
+            <span className="text-white font-bold">
+              {userProfile.device ||
+                (typeof window !== 'undefined' && window.__macDeviceTelemetry
+                  ? `${window.__macDeviceTelemetry.modelName} · ${window.__macDeviceTelemetry.ramString}`
+                  : 'Local Mac Host')}
+            </span>
           </div>
 
           <button

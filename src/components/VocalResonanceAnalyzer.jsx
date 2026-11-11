@@ -15,13 +15,32 @@ import { playPlunk, playCoinChime, playHaptic } from '../utils/audioSynth';
 import confetti from 'canvas-confetti';
 
 export default function VocalResonanceAnalyzer() {
+  const savedVocal = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('apex_vocal_biomarker') || 'null');
+    } catch {
+      return null;
+    }
+  })();
+
   const [isRecording, setIsRecording] = useState(false);
-  const [pitchHz, setPitchHz] = useState(112); // Measured real-time pitch
-  const [chestResonance, setChestResonance] = useState(88); // Measured chest resonance %
-  const [pacingWpm, setPacingWpm] = useState(124); // Estimated speech cadence
+  const [pitchHz, setPitchHz] = useState(savedVocal?.pitchHz || null);
+  const [chestResonance, setChestResonance] = useState(savedVocal?.chestResonance || null);
+  const [jitterPct, setJitterPct] = useState(savedVocal?.jitterPct ?? null);
   const [volumeRms, setVolumeRms] = useState(0);
   const [micError, setMicError] = useState('');
   const [speechSummary, setSpeechSummary] = useState(null);
+
+  useEffect(() => {
+    const onSync = (e) => {
+      if (e?.detail?.vocalPitchHz > 0) {
+        setPitchHz(Math.round(e.detail.vocalPitchHz));
+        if (e.detail.vocalJitterPct !== undefined) setJitterPct(Number(e.detail.vocalJitterPct));
+      }
+    };
+    window.addEventListener('appleHealthSync', onSync);
+    return () => window.removeEventListener('appleHealthSync', onSync);
+  }, []);
 
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -249,14 +268,30 @@ export default function VocalResonanceAnalyzer() {
       audioCtxRef.current = null;
     }
 
-    // Compute average metrics from real audio captured
+    // Compute average metrics & acoustic jitter from real audio captured
     const samples = samplesCollectedRef.current;
     if (samples.length > 5) {
       const avgPitch = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+      let diffSum = 0;
+      for (let i = 1; i < samples.length; i++) {
+        diffSum += Math.abs(samples[i] - samples[i - 1]);
+      }
+      const computedJitter = +((diffSum / (samples.length - 1) / Math.max(1, avgPitch)) * 100).toFixed(2);
       setPitchHz(avgPitch);
+      setJitterPct(computedJitter);
+      try {
+        localStorage.setItem('apex_vocal_biomarker', JSON.stringify({
+          pitchHz: avgPitch,
+          chestResonance,
+          jitterPct: computedJitter,
+          source: 'Mac Microphone DSP',
+          updatedAt: new Date().toISOString(),
+        }));
+      } catch {}
       setSpeechSummary({
         avgPitch,
         sampleCount: samples.length,
+        jitterPct: computedJitter,
         tier: avgPitch < 115 ? 'Deep Baritone (Sovereign)' : avgPitch < 135 ? 'Commanding Mid-Tone' : 'Tenor Resonance',
       });
       try {
@@ -266,6 +301,8 @@ export default function VocalResonanceAnalyzer() {
           colors: ['#00F0FF', '#E5FE40', '#10B981'],
         });
       } catch {}
+    } else {
+      setMicError('Not enough voiced frames detected — speak steadily close to the microphone.');
     }
   };
 
@@ -354,14 +391,20 @@ export default function VocalResonanceAnalyzer() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="p-4 rounded-[18px] bg-black/40 border border-white/10 space-y-1">
             <span className="text-[10px] font-mono text-[#8A8A8A] uppercase block">
-              FUNDAMENTAL PITCH ($F_0$)
+              FUNDAMENTAL PITCH (F0)
             </span>
             <div className="flex items-baseline space-x-1.5">
-              <span className="text-3xl font-mono font-black text-white">{pitchHz}</span>
+              <span className="text-3xl font-mono font-black text-white">{pitchHz ?? '--'}</span>
               <span className="text-xs font-mono text-[#00F0FF] font-bold">Hz</span>
             </div>
             <span className="text-[10px] font-mono text-[#10B981] font-bold block">
-              {pitchHz <= 118 ? '✓ Optimal Baritone (100–120 Hz)' : pitchHz <= 140 ? 'Tenor Baseline' : 'Elevated Frequency'}
+              {pitchHz == null
+                ? 'Press Start Live Voice Test to measure'
+                : pitchHz <= 118
+                  ? '✓ Optimal Baritone (100–120 Hz)'
+                  : pitchHz <= 140
+                    ? 'Tenor Baseline'
+                    : 'Elevated Frequency'}
             </span>
           </div>
 
@@ -370,7 +413,7 @@ export default function VocalResonanceAnalyzer() {
               CHEST HARMONIC RESONANCE
             </span>
             <div className="flex items-baseline space-x-1.5">
-              <span className="text-3xl font-mono font-black text-white">{chestResonance}</span>
+              <span className="text-3xl font-mono font-black text-white">{chestResonance ?? '--'}</span>
               <span className="text-xs font-mono text-[#E5FE40] font-bold">%</span>
             </div>
             <span className="text-[10px] font-mono text-[#E5FE40] font-bold block">
@@ -380,14 +423,14 @@ export default function VocalResonanceAnalyzer() {
 
           <div className="p-4 rounded-[18px] bg-black/40 border border-white/10 space-y-1">
             <span className="text-[10px] font-mono text-[#8A8A8A] uppercase block">
-              SPEECH TEMPO & PACING
+              VOCAL FOLD JITTER
             </span>
             <div className="flex items-baseline space-x-1.5">
-              <span className="text-3xl font-mono font-black text-white">{pacingWpm}</span>
-              <span className="text-xs font-mono text-[#10B981] font-bold">WPM</span>
+              <span className="text-3xl font-mono font-black text-white">{jitterPct !== null ? jitterPct.toFixed(2) : '--'}</span>
+              <span className="text-xs font-mono text-[#10B981] font-bold">%</span>
             </div>
             <span className="text-[10px] font-mono text-[#A1A1AA] font-bold block">
-              Unhurried High-Status Cadence
+              {jitterPct === null ? 'Awaiting Mic / iPhone Sync' : jitterPct <= 1.2 ? 'Steady CNS Vagal Tone' : 'Elevated Vocal Fatigue'}
             </span>
           </div>
         </div>

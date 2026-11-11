@@ -35,11 +35,17 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
   const [activeModalTab, setActiveModalTab] = useState('stream');
 
   // Stream & Gateway State
-  const [localPort, setLocalPort] = useState(window.location.port || '5174');
-  const [localIP, setLocalIP] = useState('192.168.1.5');
-  const [lastSyncTime, setLastSyncTime] = useState(new Date().toLocaleTimeString());
-  const [packetCount, setPacketCount] = useState(52);
-  const [isSendingPacket, setIsSendingPacket] = useState(false);
+  const [localPort, setLocalPort] = useState(window.location.port || '60159');
+  const [localIP, setLocalIP] = useState(
+    (typeof window !== 'undefined' && window.__macDeviceTelemetry?.localIP) || '127.0.0.1'
+  );
+  const [syncToken, setSyncToken] = useState(
+    (typeof window !== 'undefined' && window.__apexSyncToken) || ''
+  );
+  const [gatewayStatus, setGatewayStatus] = useState('');
+  const [lastSyncTime, setLastSyncTime] = useState(healthData?.lastSynced || 'Awaiting iPhone Sync');
+  const [packetCount, setPacketCount] = useState(0);
+  const [isCheckingGateway, setIsCheckingGateway] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
   // Calibration / Absolute Values State (Initialized from current healthData)
@@ -73,7 +79,23 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
     if (typeof window !== 'undefined' && window.__macDeviceTelemetry?.localIP) {
       setLocalIP(window.__macDeviceTelemetry.localIP);
     }
+    if (typeof window !== 'undefined' && window.__apexSyncToken) {
+      setSyncToken(window.__apexSyncToken);
+    }
   }, [healthData]);
+
+  // Fetch verified pairing token + endpoint info from native Mac server
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch(`http://127.0.0.1:${localPort}/api/pairing-info`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info) => {
+        if (info?.syncToken) setSyncToken(info.syncToken);
+        if (info?.localIP) setLocalIP(info.localIP);
+        if (info?.port) setLocalPort(String(info.port));
+      })
+      .catch(() => {});
+  }, [isOpen, localPort]);
 
   // Listen for Real-Time Incoming HealthKit Webhook Packets
   useEffect(() => {
@@ -107,46 +129,25 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
 
   if (!isOpen) return null;
 
-  // Trigger Real-Time Test Packet to Swift Local Server
-  const handleSendLivePacket = async () => {
+  // Verify Real Local Continuity Gateway (No Synthetic Telemetry)
+  const handleVerifyGateway = async () => {
     playPlunk();
-    setIsSendingPacket(true);
-
-    const payload = {
-      move: Math.round(50 + Math.random() * 40),
-      exercise: Math.round(5 + Math.random() * 5),
-      stand: 1,
-      hr: Math.round(48 + Math.random() * 6),
-      hrv: Math.round(92 + Math.random() * 8),
-      vo2: +(58.2 + Math.random() * 0.4).toFixed(1),
-      source: 'Apple Watch Ultra 2 (Real-Time HKObserverQuery)',
-      timestamp: new Date().toISOString(),
-    };
-
+    setIsCheckingGateway(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${localPort}/api/healthkit-sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(`http://127.0.0.1:${localPort}/api/pairing-info`);
       if (res.ok) {
-        setLastSyncTime(new Date().toLocaleTimeString());
-        setPacketCount((c) => c + 1);
+        const info = await res.json();
+        if (info.syncToken) setSyncToken(info.syncToken);
+        if (info.localIP) setLocalIP(info.localIP);
+        setGatewayStatus(`Verified Bonjour & HTTP Gateway on ${info.localIP || localIP}:${info.port || localPort}`);
         playHealthSyncChime();
+      } else {
+        setGatewayStatus(`Gateway responded HTTP ${res.status}`);
       }
     } catch {
-      // Local fallback event
-      window.dispatchEvent(new CustomEvent('appleHealthSync', { detail: payload }));
+      setGatewayStatus('Running in standalone browser preview — start native APEX OS Mac app for LAN sync.');
     }
-
-    setIsSendingPacket(false);
-    try {
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        colors: ['#FA114F', '#00D6E6', '#10B981'],
-      });
-    } catch {}
+    setIsCheckingGateway(false);
   };
 
   // Commit Calibrated Absolute Biometrics
@@ -208,7 +209,7 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
   const handleLoadSampleXml = () => {
     playPlunk();
     setIsParsingXML(true);
-    setXmlFileName('export.xml (Anupam’s Apple Watch Ultra 2)');
+    setXmlFileName('export.xml (Sample Apple Health Archive)');
     setTimeout(() => {
       const parsed = parseAppleHealthXML(SAMPLE_APPLE_HEALTH_EXPORT_XML);
       setIsParsingXML(false);
@@ -251,7 +252,8 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
 
   // Copy cURL Terminal Ingestion Command
   const copyCurlCommand = () => {
-    const cmd = `curl -X POST http://127.0.0.1:${localPort}/api/healthkit-sync -H "Content-Type: application/json" -d '{"move":${calibMove},"exercise":${calibExercise},"stand":${calibStand},"hr":${calibRHR},"hrv":${calibHRV},"vo2":${calibVo2Max},"source":"Terminal HKStream"}'`;
+    const tokenHeader = syncToken ? ` -H "X-APEX-Sync-Token: ${syncToken}"` : '';
+    const cmd = `curl -X POST http://127.0.0.1:${localPort}/api/healthkit-sync -H "Content-Type: application/json"${tokenHeader} -d '{"move":${calibMove},"exercise":${calibExercise},"stand":${calibStand},"hr":${calibRHR},"hrv":${calibHRV},"vo2":${calibVo2Max},"source":"Terminal HKStream"}'`;
     navigator.clipboard.writeText(cmd);
     setCopiedCurl(true);
     playHaptic(1000, 'sine', 0.05);
@@ -401,7 +403,7 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
 
                 <div className="flex items-center justify-between">
                   <span className="text-[#8A8A8A]">CONNECTED SENSOR:</span>
-                  <span className="text-white font-bold">{healthData?.deviceSource || 'Apple Watch Ultra 2 (HKObserverQuery)'}</span>
+                  <span className="text-white font-bold">{healthData?.deviceSource || 'Awaiting iPhone / HealthKit Sync'}</span>
                 </div>
               </div>
 
@@ -447,14 +449,20 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
                 </div>
               </div>
 
+              {gatewayStatus && (
+                <div className="p-3 rounded-[14px] bg-[#10B981]/10 border border-[#10B981]/30 text-[11px] font-mono text-[#10B981]">
+                  {gatewayStatus}
+                </div>
+              )}
+
               {/* Action Button */}
               <button
-                onClick={handleSendLivePacket}
-                disabled={isSendingPacket}
+                onClick={handleVerifyGateway}
+                disabled={isCheckingGateway}
                 className="w-full py-3.5 rounded-[14px] bg-gradient-to-r from-[#FA114F] to-[#FF5E7E] text-white font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 border border-white/20 shadow-[0_0_20px_rgba(250,17,79,0.5)] transition hover:opacity-95"
               >
                 <Zap className="w-4 h-4" />
-                <span>TEST LIVE STREAM INGESTION PACKET</span>
+                <span>{isCheckingGateway ? 'CHECKING GATEWAY...' : 'VERIFY CONTINUITY GATEWAY'}</span>
               </button>
             </div>
           )}
@@ -681,7 +689,7 @@ export default function AppleHealthModal({ isOpen, onClose, onSyncComplete, heal
                   </button>
                 </div>
                 <div className="p-2 rounded-[8px] bg-black/80 border border-white/10 text-[9px] text-[#8A8A8A] font-mono break-all select-all">
-                  curl -X POST http://127.0.0.1:{localPort}/api/healthkit-sync -H "Content-Type: application/json" -d '{`"move":${calibMove},"hr":${calibRHR},"hrv":${calibHRV}`}'
+                  curl -X POST http://127.0.0.1:{localPort}/api/healthkit-sync -H &quot;Content-Type: application/json&quot;{syncToken ? ` -H "X-APEX-Sync-Token: ${syncToken}"` : ''} -d '{`"move":${calibMove},"hr":${calibRHR},"hrv":${calibHRV}`}'
                 </div>
               </div>
             </div>

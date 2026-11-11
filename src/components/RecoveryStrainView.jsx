@@ -6,17 +6,33 @@ import { playPlunk } from '../utils/audioSynth';
 export default function RecoveryStrainView({ healthData }) {
   const currentHealth = healthData || APPLE_HEALTH_DATA;
   const sleepStages = currentHealth.sleepStages || APPLE_HEALTH_DATA.sleepStages;
-  const hrvValue = currentHealth.metrics?.hrv?.value || 94;
-  const rhrValue = currentHealth.metrics?.restingHeartRate?.value || 48;
+  const hrvValue = currentHealth.metrics?.hrv?.value || 0;
+  const rhrValue = currentHealth.metrics?.restingHeartRate?.value || 0;
+  const hasRealVitals = hrvValue > 0 && rhrValue > 0;
 
   // Real biological recovery calculation from HRV & Resting HR
-  const recoveryScore = Math.min(99, Math.max(35, Math.round(50 + (hrvValue - 50) * 0.5 - (rhrValue - 55) * 0.6)));
-  const recoveryStatus = recoveryScore >= 80 ? 'PEAK RECOVERY' : recoveryScore >= 60 ? 'BALANCED' : 'RECOVERY REQUIRED';
-  const recoveryMessage = recoveryScore >= 80
-    ? `High parasympathetic dominance detected (HRV ${hrvValue}ms, Resting HR ${rhrValue}bpm). Your autonomic nervous system is fully primed for high strain.`
-    : `Elevated physiological load. HRV at ${hrvValue}ms. Prioritize restorative sleep and hydration.`;
+  const recoveryScore = hasRealVitals
+    ? Math.min(99, Math.max(35, Math.round(50 + (hrvValue - 50) * 0.5 - (rhrValue - 55) * 0.6)))
+    : 0;
+  const recoveryStatus = !hasRealVitals
+    ? 'AWAITING HEALTHKIT'
+    : recoveryScore >= 80
+      ? 'PEAK RECOVERY'
+      : recoveryScore >= 60
+        ? 'BALANCED'
+        : 'RECOVERY REQUIRED';
+  const recoveryMessage = !hasRealVitals
+    ? 'Connect your iPhone APEX OS app or import Apple Health export.xml to compute real autonomic recovery from HRV and resting heart rate.'
+    : recoveryScore >= 80
+      ? `High parasympathetic dominance detected (HRV ${hrvValue}ms, Resting HR ${rhrValue}bpm). Your autonomic nervous system is primed for strain.`
+      : `Elevated physiological load (HRV ${hrvValue}ms, RHR ${rhrValue}bpm). Prioritize restorative sleep and hydration.`;
 
-  const { strainCurrent, strainTarget, zones } = RECOVERY_STRAIN_DATA;
+  const moveCalories = currentHealth.activityRings?.move?.current || 0;
+  const moveTarget = currentHealth.activityRings?.move?.target || 750;
+  const strainRatio = Math.min(1.0, moveCalories / Math.max(100, moveTarget));
+  const strainCurrent = moveCalories > 0 ? +(strainRatio * 18.0).toFixed(1) : 0;
+  const strainTarget = RECOVERY_STRAIN_DATA.strainTarget;
+  const zones = RECOVERY_STRAIN_DATA.zones;
 
   return (
     <div className="space-y-6">
@@ -67,16 +83,18 @@ export default function RecoveryStrainView({ healthData }) {
                 />
               </svg>
               <div className="absolute flex flex-col items-center">
-                <span className="text-2xl font-mono font-black text-white">{recoveryScore}%</span>
-                <span className="text-[9px] font-mono text-[#10B981] font-bold">OPTIMAL</span>
+                <span className="text-2xl font-mono font-black text-white">{hasRealVitals ? `${recoveryScore}%` : '--'}</span>
+                <span className="text-[9px] font-mono text-[#10B981] font-bold">
+                  {hasRealVitals ? (recoveryScore >= 80 ? 'OPTIMAL' : recoveryScore >= 60 ? 'MODERATE' : 'RECOVER') : 'PENDING'}
+                </span>
               </div>
             </div>
 
             <div className="space-y-1.5 text-xs">
               <p className="text-[#C4C4C4] leading-relaxed">{recoveryMessage}</p>
               <div className="flex items-center space-x-3 pt-1 font-mono text-[11px]">
-                <span className="text-white">HRV: <strong className="text-[#00F0FF]">94 ms</strong></span>
-                <span className="text-white">RHR: <strong className="text-[#10B981]">48 bpm</strong></span>
+                <span className="text-white">HRV: <strong className="text-[#00F0FF]">{hrvValue > 0 ? `${hrvValue} ms` : '--'}</strong></span>
+                <span className="text-white">RHR: <strong className="text-[#10B981]">{rhrValue > 0 ? `${rhrValue} bpm` : '--'}</strong></span>
               </div>
             </div>
           </div>
@@ -115,8 +133,8 @@ export default function RecoveryStrainView({ healthData }) {
           </div>
 
           <div className="flex items-center justify-between text-[11px] font-mono text-[#A1A1AA]">
-            <span>2,940 Total Calories Burned</span>
-            <span className="text-[#FA114F] font-bold">88% of Optimal Strain</span>
+            <span>{moveCalories > 0 ? `${moveCalories} Active Calories Burned` : 'Awaiting active workout / HealthKit sync'}</span>
+            <span className="text-[#FA114F] font-bold">{Math.round((strainCurrent / strainTarget) * 100)}% of Target Strain</span>
           </div>
         </div>
       </div>

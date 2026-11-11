@@ -75,6 +75,10 @@ public final class BLEHeartRateMonitor: NSObject, ObservableObject {
     }
 
     public func disconnect() {
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveryTimerRemaining = 0
+        recoveryStartBPM = nil
         if let peripheral = activePeripheral {
             centralManager?.cancelPeripheralConnection(peripheral)
         }
@@ -106,10 +110,17 @@ public final class BLEHeartRateMonitor: NSObject, ObservableObject {
                         let drop = max(0, baseline - endBPM)
                         self.hrr60DropBpm = drop
                         Haptics.success()
+                        let rhrRMSSD = self.liveRMSSD
+                        Task {
+                            await HealthKitManager.shared.saveHeartRateToHealth(
+                                bpm: Double(endBPM),
+                                hrvMs: rhrRMSSD
+                            )
+                        }
                         HealthKitManager.shared.syncEventToMac(extraPayload: [
                             "hrr60DropBpm": drop,
                             "liveChestBPM": endBPM,
-                            "liveChestRMSSD": self.liveRMSSD ?? 0
+                            "liveChestRMSSD": rhrRMSSD ?? 0
                         ])
                     }
                 }
@@ -275,31 +286,45 @@ public final class WatchWorkoutScheduler: ObservableObject {
         statusMessage = nil
         Haptics.tap()
 
-        let goal = WorkoutGoal.time(Double(durationMinutes), .minutes)
-        let workout = SingleGoalWorkout(activity: activity, location: .indoor, goal: goal)
-        let plan = WorkoutPlan(.goal(workout))
+        let workMinutes = max(10, durationMinutes - 8)
+        let warmupStep = WorkoutStep(goal: .time(5, .minutes))
+        let workBlock = IntervalBlock(
+            steps: [
+                IntervalStep(.work, goal: .time(Double(workMinutes), .minutes)),
+                IntervalStep(.recovery, goal: .time(2, .minutes))
+            ],
+            iterations: 1
+        )
+        let cooldownStep = WorkoutStep(goal: .time(3, .minutes))
+        let customWorkout = CustomWorkout(
+            activity: activity,
+            location: .indoor,
+            displayName: title,
+            warmup: warmupStep,
+            blocks: [workBlock],
+            cooldown: cooldownStep
+        )
+        let plan = WorkoutPlan(.custom(customWorkout))
 
-        do {
-            let auth = await WorkoutScheduler.shared.requestAuthorization()
-            guard auth == .authorized else {
-                isScheduling = false
-                statusMessage = "WorkoutKit permission not authorized on this device."
-                return
-            }
-
-            let calendar = Calendar.current
-            let targetDate = calendar.date(byAdding: .minute, value: 2, to: Date()) ?? Date()
-            var comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: targetDate)
-            comps.calendar = calendar
-
-            await WorkoutScheduler.shared.schedule(plan, at: comps)
-            if !scheduledTitles.contains(title) {
-                scheduledTitles.insert(title, at: 0)
-            }
+        let auth = await WorkoutScheduler.shared.requestAuthorization()
+        guard auth == .authorized else {
             isScheduling = false
-            statusMessage = "Pushed \"\(title)\" (\(durationMinutes) min) to Apple Watch Workout app."
-            Haptics.success()
+            statusMessage = "WorkoutKit permission not authorized on this device."
+            return
         }
+
+        let calendar = Calendar.current
+        let targetDate = calendar.date(byAdding: .minute, value: 2, to: Date()) ?? Date()
+        var comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: targetDate)
+        comps.calendar = calendar
+
+        await WorkoutScheduler.shared.schedule(plan, at: comps)
+        if !scheduledTitles.contains(title) {
+            scheduledTitles.insert(title, at: 0)
+        }
+        isScheduling = false
+        statusMessage = "Pushed \"\(title)\" (5m Warmup · \(workMinutes)m Work · 3m Cooldown) to Apple Watch."
+        Haptics.success()
     }
 }
 

@@ -2,18 +2,21 @@ import Cocoa
 import WebKit
 import HealthKit
 import AVFoundation
+import Metal
 
 // MARK: - Mini Local Static Server, Bonjour Discovery & Continuity Webhook Gateway
 class MiniStaticServer: NSObject, NetServiceDelegate {
     private var serverSocket: Int32 = -1
     private(set) var port: UInt16 = 0
     let rootDir: URL
+    let pairingToken: String
     private var isRunning = false
     private var netService: NetService?
     var onSyncPayload: (([String: Any]) -> Void)?
 
     init(rootDir: URL) {
         self.rootDir = rootDir
+        self.pairingToken = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         super.init()
     }
 
@@ -78,6 +81,8 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             guard let self = self else { return }
             let name = Host.current().localizedName ?? "APEX Mac"
             let service = NetService(domain: "local.", type: "_apexos._tcp.", name: name, port: Int32(port))
+            let txt = NetService.data(fromTXTRecord: ["token": Data(self.pairingToken.utf8)])
+            service.setTXTRecord(txt)
             service.delegate = self
             service.publish()
             self.netService = service
@@ -157,9 +162,28 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             path = String(path.dropFirst())
         }
 
+        let headerLines = headerString.components(separatedBy: "\r\n")
+        var originHeader: String? = nil
+        var syncTokenHeader: String? = nil
+        for line in headerLines {
+            let lower = line.lowercased()
+            if lower.hasPrefix("origin:") {
+                originHeader = line.dropFirst("origin:".count).trimmingCharacters(in: .whitespaces)
+            } else if lower.hasPrefix("x-apex-sync-token:") {
+                syncTokenHeader = line.dropFirst("x-apex-sync-token:".count).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        let allowedOrigin: String = {
+            if let orig = originHeader,
+               orig.hasPrefix("http://127.0.0.1") || orig.hasPrefix("http://localhost") {
+                return orig
+            }
+            return "http://127.0.0.1:\(port)"
+        }()
+
         // Handle CORS Preflight
         if method == "OPTIONS" {
-            let res = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n"
+            let res = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, X-APEX-Sync-Token\r\nConnection: close\r\n\r\n"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
@@ -168,13 +192,21 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
 
         // 1. Unified HealthKit & Mobile Continuity Webhook: POST /api/healthkit-sync | /api/mobile-sync
         if (path == "api/healthkit-sync" || path == "api/mobile-sync") && method == "POST" {
+            if syncTokenHeader != pairingToken {
+                let unauth = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"error\":\"invalid_pairing_token\"}"
+                _ = unauth.utf8CString.withUnsafeBufferPointer {
+                    write(clientSocket, $0.baseAddress, $0.count - 1)
+                }
+                return
+            }
             if !bodyData.isEmpty,
+               bodyData.count <= 262_144,
                let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
                 DispatchQueue.main.async { [weak self] in
                     self?.onSyncPayload?(json)
                 }
             }
-            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"synced\",\"source\":\"Apple Continuity Bridge\"}"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n{\"status\":\"synced\",\"source\":\"Apple Continuity Bridge\"}"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
@@ -188,12 +220,13 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
                 "host": tele["computerName"] ?? "APEX Mac",
                 "localIP": tele["localIP"] ?? "127.0.0.1",
                 "port": port,
+                "syncToken": pairingToken,
                 "bonjourService": "_apexos._tcp",
                 "status": "ready"
             ]
             let jsonData = (try? JSONSerialization.data(withJSONObject: pairing)) ?? Data()
             let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(jsonString)"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(jsonString)"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
@@ -208,7 +241,7 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             }
             let status: [String: Any] = [
                 "available": isAvailable,
-                "framework": "Apple HealthKit v18.2",
+                "framework": "Apple HealthKit",
                 "os": "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
                 "icloudSyncReady": true,
                 "supportedIdentifiers": [
@@ -224,7 +257,7 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             ]
             let jsonData = (try? JSONSerialization.data(withJSONObject: status)) ?? Data()
             let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(jsonString)"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(jsonString)"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
@@ -258,7 +291,7 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             ]
             let jsonData = (try? JSONSerialization.data(withJSONObject: resObj)) ?? Data()
             let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(jsonString)"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(jsonString)"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
@@ -270,19 +303,29 @@ class MiniStaticServer: NSObject, NetServiceDelegate {
             let telemetry = AppDelegate.gatherDeviceTelemetry()
             let jsonData = (try? JSONSerialization.data(withJSONObject: telemetry)) ?? Data()
             let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
-            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(jsonString)"
+            let res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: \(allowedOrigin)\r\nConnection: close\r\n\r\n\(jsonString)"
             _ = res.utf8CString.withUnsafeBufferPointer {
                 write(clientSocket, $0.baseAddress, $0.count - 1)
             }
             return
         }
 
-        // 5. Static Assets Server
+        // 5. Static Assets Server (Strictly sandboxed within rootDir)
         if path == "" || path == "/" {
             path = "index.html"
         }
 
-        let fileURL = rootDir.appendingPathComponent(path)
+        let canonicalRoot = rootDir.standardizedFileURL.path
+        let resolvedURL = rootDir.appendingPathComponent(path).standardizedFileURL
+        guard resolvedURL.path == canonicalRoot || resolvedURL.path.hasPrefix(canonicalRoot + "/") else {
+            let forbidden = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            _ = forbidden.utf8CString.withUnsafeBufferPointer {
+                write(clientSocket, $0.baseAddress, $0.count - 1)
+            }
+            return
+        }
+
+        let fileURL = resolvedURL
         var fileData: Data? = nil
         var mimeType = "application/octet-stream"
 
@@ -435,14 +478,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
                 cameras.append(dev.localizedName)
             }
         }
-        let primaryCamera = cameras.first ?? "MacBook Air Camera"
+        let primaryCamera = cameras.first ?? "Built-in Camera"
 
         // Audio discovery
-        let micName = AVCaptureDevice.default(for: .audio)?.localizedName ?? "MacBook Air Microphone"
+        let micName = AVCaptureDevice.default(for: .audio)?.localizedName ?? "Built-in Microphone"
+
+        // Hardware model, CPU & Metal GPU discovery
+        func sysctlString(_ key: String) -> String? {
+            var size = 0
+            sysctlbyname(key, nil, &size, nil, 0)
+            guard size > 0 else { return nil }
+            var buf = [CChar](repeating: 0, count: size)
+            sysctlbyname(key, &buf, &size, nil, 0)
+            let val = String(cString: buf).trimmingCharacters(in: .whitespacesAndNewlines)
+            return val.isEmpty ? nil : val
+        }
+        let hwModel = sysctlString("hw.model") ?? (Host.current().localizedName ?? "Apple Silicon Mac")
+        let cpuBrand = sysctlString("machdep.cpu.brand_string") ?? "Apple Silicon"
+        let metalDevice = MTLCreateSystemDefaultDevice()
+        let gpuName = metalDevice?.name ?? "Apple Metal GPU"
 
         // Battery level parsing via pmset
-        var battPercent = 79
-        var battState = "79% (Discharging)"
+        var battPercent = 100
+        var battState = "AC Power"
         let pipe = Pipe()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
@@ -454,14 +512,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
             if let output = String(data: data, encoding: .utf8) {
                 if let match = output.range(of: "\\d+%", options: .regularExpression) {
                     let numStr = output[match].replacingOccurrences(of: "%", with: "")
-                    battPercent = Int(numStr) ?? 79
+                    battPercent = Int(numStr) ?? 100
+                    battState = output.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+                } else {
+                    let trimmed = output.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty { battState = trimmed }
                 }
-                battState = output.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
             }
         }
 
         // Wi-Fi Local IP Discovery
-        var localIP = "192.168.1.5"
+        var localIP = "127.0.0.1"
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         if getifaddrs(&ifaddr) == 0 {
             var ptr = ifaddr
@@ -484,11 +545,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
         }
 
         return [
-            "userName": fullName.isEmpty ? "Anupam Mahato" : fullName,
-            "userLogin": shortName.isEmpty ? "anupam" : shortName,
-            "computerName": Host.current().localizedName ?? "MacBook Air",
-            "modelName": "MacBook Air (Apple M5)",
-            "chip": "Apple M5 (10-Core CPU & Neural Engine)",
+            "userName": fullName.isEmpty ? (shortName.isEmpty ? "Mac User" : shortName) : fullName,
+            "userLogin": shortName.isEmpty ? "user" : shortName,
+            "computerName": Host.current().localizedName ?? hwModel,
+            "modelName": hwModel,
+            "chip": "\(cpuBrand) (\(cores)-Core)",
             "cores": cores,
             "ramGB": memGB,
             "ramString": "\(memGB) GB Unified Memory",
@@ -498,9 +559,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
             "microphone": micName,
             "batteryPercent": battPercent,
             "batteryStatus": battState,
-            "os": "macOS \(osVer) (arm64)",
-            "neuralEngine": "Apple Neural Engine 16-Core Active (ANE)",
-            "metalGPU": "Apple M5 Metal 3 High Performance GPU"
+            "os": "macOS \(osVer)",
+            "neuralEngine": metalDevice != nil ? "Apple Silicon ANE & Metal Active" : "CoreML CPU/GPU Compute",
+            "metalGPU": "\(gpuName) (Metal)"
         ]
     }
 
@@ -525,7 +586,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
                 "available": available,
                 "os": "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
                 "serverPort": staticServer?.port ?? 0,
-                "healthKitVersion": "18.2 (Apple Silicon SDK)"
+                "syncToken": staticServer?.pairingToken ?? "",
+                "healthKitVersion": "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
             ]
             if let data = try? JSONSerialization.data(withJSONObject: status),
                let str = String(data: data, encoding: .utf8) {
@@ -675,6 +737,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUIDelega
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
 
         NSApp.mainMenu = mainMenu
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let url = webView.url,
+              let host = url.host,
+              host == "127.0.0.1" || host == "localhost",
+              let token = staticServer?.pairingToken, !token.isEmpty else {
+            return
+        }
+        let port = staticServer?.port ?? 0
+        let js = "window.__apexSyncToken = \"\(token)\"; window.__apexServerPort = \(port); window.dispatchEvent(new CustomEvent('apexPairingReady', { detail: { syncToken: \"\(token)\", port: \(port) } }));"
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     @objc func reloadWebView() {
