@@ -175,6 +175,20 @@ public final class ApexIntelligenceEngine: ObservableObject {
                 lines.append("- Extended Lab Markers: \(extended.joined(separator: ", "))")
             }
         }
+        if let acwr = health.acwrResult {
+            lines.append("- ACWR Workload Ratio: \(String(format: "%.2f", acwr.ratio)) (\(acwr.zone.rawValue))")
+        }
+        if let cardio = health.cardiovascularAgeResult {
+            lines.append("- Cardiovascular Age: \(String(format: "%.1f", cardio.cardiovascularAge))y (\(cardio.elasticityStatus))")
+        }
+        if let circ = health.circadianProfile {
+            lines.append("- Chronotype: \(circ.chronotype.rawValue), Optimal Bedtime: \(circ.optimalBedtimeFormatted), Regularity: \(circ.regularityScore)%")
+        }
+        let tdeeRes = nutrition.adaptiveTDEEResult(health: health)
+        lines.append("- Adaptive TDEE: \(Int(tdeeRes.calculatedTDEE)) kcal/day (Deficit: \(Int(tdeeRes.fatLossTargetKcal)), Surplus: \(Int(tdeeRes.leanBulkTargetKcal)))")
+        if let sc = health.organScorecard {
+            lines.append("- Organ Longevity Composite: \(String(format: "%.1f", sc.compositeAge))y across 6 pillars")
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -184,6 +198,40 @@ public final class ApexIntelligenceEngine: ObservableObject {
         let strength = StrengthBuilderStore.shared
         let brain = ThermalBrainStore.shared
         let labPanel = LabPanelStore.load()
+
+        if lower.contains("acwr") || lower.contains("workload") || lower.contains("overtrain") || lower.contains("injury") {
+            if let acwr = health.acwrResult {
+                return "ACWR Workload Ratio is \(String(format: "%.2f", acwr.ratio)) (\(acwr.zone.rawValue)). Acute 7d load: \(String(format: "%.1f", acwr.acuteLoad7d)), Chronic 28d load: \(String(format: "%.1f", acwr.chronicLoad28d)). \(acwr.recommendation)"
+            }
+            return "Acute:Chronic Workload Ratio requires at least 2 days of movement data in Apple Health to compute 7d vs 28d strain loads."
+        }
+
+        if lower.contains("cardio age") || lower.contains("vascular") || lower.contains("artery") || lower.contains("arterial") {
+            if let cardio = health.cardiovascularAgeResult {
+                let deltaText = cardio.ageDelta <= 0 ? String(format: "%.1fy younger than chronological age", abs(cardio.ageDelta)) : String(format: "+%.1fy above baseline", cardio.ageDelta)
+                return "Cardiovascular Age is \(String(format: "%.1f", cardio.cardiovascularAge)) years (\(deltaText)). Status: \(cardio.elasticityStatus). \(cardio.recommendation)"
+            }
+            return "Cardiovascular Age model combines your VO2 Max, Resting HR, and HRV vagal tone. Connect Apple Health or record a workout to calibrate."
+        }
+
+        if lower.contains("chronotype") || lower.contains("circadian") || lower.contains("bedtime") || lower.contains("melatonin") {
+            if let circ = health.circadianProfile {
+                return "Your biological chronotype is \(circ.chronotype.rawValue) (Sleep Midpoint: \(circ.sleepMidpointFormatted), Regularity: \(circ.regularityScore)%). Optimal bedtime window is \(circ.optimalBedtimeFormatted), with melatonin onset around \(circ.melatoninWindowStartFormatted) and natural wake around \(circ.optimalWakeFormatted)."
+            }
+            return "Circadian alignment analyzes your rolling sleep midpoint regularity. Connect sleep history in Apple Health to pinpoint your optimal bedtime."
+        }
+
+        if lower.contains("tdee") || lower.contains("expenditure") || lower.contains("deficit") || lower.contains("bulk") || lower.contains("cut") {
+            let tdee = nutrition.adaptiveTDEEResult(health: health)
+            return "Adaptive Dynamic TDEE: \(Int(tdee.calculatedTDEE)) kcal/day. Automated Targets: Fat Loss Deficit (-20%) is \(Int(tdee.fatLossTargetKcal)) kcal with \(Int(tdee.recommendedProteinG))g protein; Lean Mass (+10%) is \(Int(tdee.leanBulkTargetKcal)) kcal. Tap TDEE in Fuel to apply with one tap."
+        }
+
+        if lower.contains("organ") || lower.contains("blueprint") || lower.contains("pillars") {
+            if let sc = health.organScorecard {
+                return "Organ Age Scorecard: Composite age is \(String(format: "%.1f", sc.compositeAge))y across 6 biological pillars. Cardiovascular: \(String(format: "%.1fy", sc.pillars[0].age)), Metabolic: \(String(format: "%.1fy", sc.pillars[1].age)), Autonomic: \(String(format: "%.1fy", sc.pillars[2].age)), Musculoskeletal: \(String(format: "%.1fy", sc.pillars[3].age)), Immune: \(String(format: "%.1fy", sc.pillars[4].age)), Epigenetic: \(String(format: "%.1fy", sc.pillars[5].age))."
+            }
+            return "Organ Age Scorecard requires baseline vitals and bloodwork. Open Biology to inspect your 6 longevity pillars."
+        }
 
         if lower.contains("sleep") || lower.contains("deep") || lower.contains("rem") || lower.contains("debt") {
             guard let sleep = health.sleepTotalHours else {

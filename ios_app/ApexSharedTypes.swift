@@ -34,6 +34,166 @@ public struct HourlyMetricPoint: Codable, Identifiable, Equatable {
     }
 }
 
+// MARK: - Elite Biometric Intelligence Models (Whoop, Bevel, Oura, MacroFactor & Blueprint Parity)
+public enum TrainingZone: String, Codable {
+    case underTraining = "Under-training"
+    case optimal = "Optimal Sweet Spot"
+    case overreaching = "Overreaching"
+    case injuryRisk = "High Injury Risk"
+}
+
+public struct ACWRResult: Codable, Equatable {
+    public let acuteLoad7d: Double
+    public let chronicLoad28d: Double
+    public let ratio: Double
+    public let zone: TrainingZone
+    public let recommendation: String
+
+    public init(acuteLoad7d: Double, chronicLoad28d: Double, ratio: Double, zone: TrainingZone, recommendation: String) {
+        self.acuteLoad7d = acuteLoad7d
+        self.chronicLoad28d = chronicLoad28d
+        self.ratio = ratio
+        self.zone = zone
+        self.recommendation = recommendation
+    }
+}
+
+public struct CardiovascularAgeResult: Codable, Equatable {
+    public let cardiovascularAge: Double
+    public let chronologicalAge: Double
+    public let ageDelta: Double
+    public let elasticityStatus: String
+    public let vo2MaxPercentile: Int
+    public let recommendation: String
+
+    public init(cardiovascularAge: Double, chronologicalAge: Double, ageDelta: Double, elasticityStatus: String, vo2MaxPercentile: Int, recommendation: String) {
+        self.cardiovascularAge = cardiovascularAge
+        self.chronologicalAge = chronologicalAge
+        self.ageDelta = ageDelta
+        self.elasticityStatus = elasticityStatus
+        self.vo2MaxPercentile = vo2MaxPercentile
+        self.recommendation = recommendation
+    }
+}
+
+public enum Chronotype: String, Codable {
+    case earlyLark = "Early Lark"
+    case morningType = "Morning Active"
+    case intermediate = "Balanced Type"
+    case eveningType = "Evening Active"
+    case nightOwl = "Night Owl"
+}
+
+public struct CircadianProfile: Codable, Equatable {
+    public let chronotype: Chronotype
+    public let sleepMidpointHours: Double
+    public let sleepMidpointFormatted: String
+    public let regularityScore: Int
+    public let optimalBedtimeFormatted: String
+    public let optimalWakeFormatted: String
+    public let melatoninWindowStartFormatted: String
+    public let cortisolAwakeningFormatted: String
+
+    public init(chronotype: Chronotype, sleepMidpointHours: Double, sleepMidpointFormatted: String, regularityScore: Int, optimalBedtimeFormatted: String, optimalWakeFormatted: String, melatoninWindowStartFormatted: String, cortisolAwakeningFormatted: String) {
+        self.chronotype = chronotype
+        self.sleepMidpointHours = sleepMidpointHours
+        self.sleepMidpointFormatted = sleepMidpointFormatted
+        self.regularityScore = regularityScore
+        self.optimalBedtimeFormatted = optimalBedtimeFormatted
+        self.optimalWakeFormatted = optimalWakeFormatted
+        self.melatoninWindowStartFormatted = melatoninWindowStartFormatted
+        self.cortisolAwakeningFormatted = cortisolAwakeningFormatted
+    }
+}
+
+public struct AdaptiveTDEEResult: Codable, Equatable {
+    public let calculatedTDEE: Double
+    public let weightTrendKgPerWeek: Double
+    public let energyBalanceKcal: Double
+    public let fatLossTargetKcal: Double
+    public let maintenanceTargetKcal: Double
+    public let leanBulkTargetKcal: Double
+    public let recommendedProteinG: Double
+    public let metabolicAdaptationDelta: Double
+
+    public init(calculatedTDEE: Double, weightTrendKgPerWeek: Double, energyBalanceKcal: Double, fatLossTargetKcal: Double, maintenanceTargetKcal: Double, leanBulkTargetKcal: Double, recommendedProteinG: Double, metabolicAdaptationDelta: Double) {
+        self.calculatedTDEE = calculatedTDEE
+        self.weightTrendKgPerWeek = weightTrendKgPerWeek
+        self.energyBalanceKcal = energyBalanceKcal
+        self.fatLossTargetKcal = fatLossTargetKcal
+        self.maintenanceTargetKcal = maintenanceTargetKcal
+        self.leanBulkTargetKcal = leanBulkTargetKcal
+        self.recommendedProteinG = recommendedProteinG
+        self.metabolicAdaptationDelta = metabolicAdaptationDelta
+    }
+}
+
+public enum OrganPillar: String, Codable, CaseIterable {
+    case cardiovascular
+    case metabolic
+    case autonomic
+    case musculoskeletal
+    case immune
+    case epigenetic
+}
+
+public struct OrganPillarScore: Codable, Identifiable, Equatable {
+    public var id: String { pillar.rawValue }
+    public let pillar: OrganPillar
+    public let name: String
+    public let icon: String
+    public let age: Double
+    public let status: String
+    public let keyMetric: String
+    public let recommendation: String
+
+    public init(pillar: OrganPillar, name: String, icon: String, age: Double, status: String, keyMetric: String, recommendation: String) {
+        self.pillar = pillar
+        self.name = name
+        self.icon = icon
+        self.age = age
+        self.status = status
+        self.keyMetric = keyMetric
+        self.recommendation = recommendation
+    }
+}
+
+public struct OrganScorecard: Codable, Equatable {
+    public let pillars: [OrganPillarScore]
+    public let compositeAge: Double
+
+    public init(pillars: [OrganPillarScore], compositeAge: Double) {
+        self.pillars = pillars
+        self.compositeAge = compositeAge
+    }
+}
+
+public struct WeeklyPerformanceReport: Codable, Equatable {
+    public let sleepPerformancePct: Int
+    public let sleepConsistencyPct: Int
+    public let optimalStrainDays: Int
+    public let acwrAverage: Double
+    public let strainRecoveryAlignment: String
+    public let topPositiveHabit: String?
+    public let topNegativeHabit: String?
+    public let avgHrv: Double?
+    public let avgRhr: Double?
+    public let totalMoveKcal: Double
+
+    public init(sleepPerformancePct: Int, sleepConsistencyPct: Int, optimalStrainDays: Int, acwrAverage: Double, strainRecoveryAlignment: String, topPositiveHabit: String?, topNegativeHabit: String?, avgHrv: Double?, avgRhr: Double?, totalMoveKcal: Double) {
+        self.sleepPerformancePct = sleepPerformancePct
+        self.sleepConsistencyPct = sleepConsistencyPct
+        self.optimalStrainDays = optimalStrainDays
+        self.acwrAverage = acwrAverage
+        self.strainRecoveryAlignment = strainRecoveryAlignment
+        self.topPositiveHabit = topPositiveHabit
+        self.topNegativeHabit = topNegativeHabit
+        self.avgHrv = avgHrv
+        self.avgRhr = avgRhr
+        self.totalMoveKcal = totalMoveKcal
+    }
+}
+
 // MARK: - Shared WidgetKit Snapshot (Written by Main App, Read by Home & Lock Screen Widgets)
 public struct ApexWidgetSnapshot: Codable {
     public var moveCalories: Double
@@ -430,6 +590,333 @@ public enum ApexBiometricMath {
         let mOn = onValues.reduce(0, +) / Double(onValues.count)
         let mOff = offValues.reduce(0, +) / Double(offValues.count)
         return (mOn - mOff) * scale
+    }
+
+    // MARK: - Acute:Chronic Workload Ratio (ACWR / Gabbett 2016 Model)
+    public static func acwr(acute7dLoad: Double, chronic28dLoad: Double) -> ACWRResult {
+        let safeChronic = max(0.5, chronic28dLoad)
+        let ratio = (acute7dLoad / safeChronic * 100.0).rounded() / 100.0
+        let zone: TrainingZone
+        let recommendation: String
+
+        if ratio < 0.80 {
+            zone = .underTraining
+            recommendation = "Workload below chronic adaptation. Low acute stimulus; ideal for active recovery or deload."
+        } else if ratio <= 1.30 {
+            zone = .optimal
+            recommendation = "Optimal training sweet spot. Builds cardiovascular & muscular fitness with minimal injury hazard."
+        } else if ratio <= 1.50 {
+            zone = .overreaching
+            recommendation = "Functional overreaching. Workload spike detected; prioritize 8+ hours sleep and recovery protocols."
+        } else {
+            zone = .injuryRisk
+            recommendation = "High injury hazard (ACWR > 1.50). Acute strain spike exceeds chronic tolerance. Rest or down-regulate today."
+        }
+
+        return ACWRResult(
+            acuteLoad7d: (acute7dLoad * 10.0).rounded() / 10.0,
+            chronicLoad28d: (chronic28dLoad * 10.0).rounded() / 10.0,
+            ratio: ratio,
+            zone: zone,
+            recommendation: recommendation
+        )
+    }
+
+    // MARK: - Cardiovascular Age & Arterial Compliance Model
+    public static func cardiovascularAge(
+        chronologicalAge: Double,
+        vo2Max: Double?,
+        rhr: Double?,
+        hrv: Double?,
+        sex: String? = nil
+    ) -> CardiovascularAgeResult {
+        var delta = 0.0
+        let baseVO2 = (sex?.lowercased() == "female") ? 36.0 : 42.0
+        var vo2Percentile = 50
+        if let vo2 = vo2Max {
+            let vo2Delta = vo2 - baseVO2
+            delta -= vo2Delta * 0.55
+            if vo2 >= baseVO2 + 12 { vo2Percentile = 95 }
+            else if vo2 >= baseVO2 + 6 { vo2Percentile = 80 }
+            else if vo2 >= baseVO2 { vo2Percentile = 60 }
+            else if vo2 >= baseVO2 - 6 { vo2Percentile = 35 }
+            else { vo2Percentile = 15 }
+        }
+
+        if let r = rhr {
+            delta += (r - 60.0) * 0.28
+        }
+
+        if let h = hrv {
+            delta -= (h - 50.0) * 0.12
+        }
+
+        let cardioAge = max(18.0, min(95.0, ((chronologicalAge + delta) * 10.0).rounded() / 10.0))
+        let ageDelta = ((cardioAge - chronologicalAge) * 10.0).rounded() / 10.0
+
+        let status: String
+        let rec: String
+        if ageDelta <= -4.0 {
+            status = "Youthful / Athletic Elasticity"
+            rec = "Arterial compliance and aerobic capacity match elite longevity benchmarks. Maintain current Zone 2 volume."
+        } else if ageDelta <= 1.0 {
+            status = "Healthy Age-Matched Compliance"
+            rec = "Cardiovascular biomarkers align with chronological baseline. Add 1 weekly VO2 max 4x4 interval session."
+        } else {
+            status = "Elevated Vascular Stiffness"
+            rec = "Vascular age exceeds chronological age. Prioritize 150 min/wk Zone 2 cardio, nitric oxide foods, and RHR lowering."
+        }
+
+        return CardiovascularAgeResult(
+            cardiovascularAge: cardioAge,
+            chronologicalAge: chronologicalAge,
+            ageDelta: ageDelta,
+            elasticityStatus: status,
+            vo2MaxPercentile: vo2Percentile,
+            recommendation: rec
+        )
+    }
+
+    // MARK: - Circadian Chronotype & Optimal Sleep Alignment (Roenneberg / MCTQ Model)
+    public static func circadianProfile(
+        sleepMidpointHours: Double,
+        regularityScore: Int = 85
+    ) -> CircadianProfile {
+        let chronotype: Chronotype
+        let optimalBedHour: Double
+        let optimalWakeHour: Double
+
+        if sleepMidpointHours < 2.75 {
+            chronotype = .earlyLark
+            optimalBedHour = 21.75
+            optimalWakeHour = 5.75
+        } else if sleepMidpointHours < 3.50 {
+            chronotype = .morningType
+            optimalBedHour = 22.50
+            optimalWakeHour = 6.50
+        } else if sleepMidpointHours < 4.50 {
+            chronotype = .intermediate
+            optimalBedHour = 23.25
+            optimalWakeHour = 7.25
+        } else if sleepMidpointHours < 5.25 {
+            chronotype = .eveningType
+            optimalBedHour = 24.00
+            optimalWakeHour = 8.00
+        } else {
+            chronotype = .nightOwl
+            optimalBedHour = 24.75
+            optimalWakeHour = 8.75
+        }
+
+        func formatClock(decimalHours: Double) -> String {
+            var h = Int(decimalHours.truncatingRemainder(dividingBy: 24.0))
+            if h < 0 { h += 24 }
+            let m = Int(((decimalHours - floor(decimalHours)) * 60.0).rounded())
+            let period = (h >= 12 && h < 24) ? "PM" : "AM"
+            let h12 = (h == 0) ? 12 : (h > 12 ? h - 12 : h)
+            return String(format: "%d:%02d %@", h12, m, period)
+        }
+
+        let bedtimeStr = formatClock(decimalHours: optimalBedHour)
+        let wakeStr = formatClock(decimalHours: optimalWakeHour)
+        let melatoninStr = formatClock(decimalHours: optimalBedHour - 2.0)
+        let cortisolStr = formatClock(decimalHours: optimalWakeHour + 0.5)
+
+        return CircadianProfile(
+            chronotype: chronotype,
+            sleepMidpointHours: (sleepMidpointHours * 100.0).rounded() / 100.0,
+            sleepMidpointFormatted: formatClock(decimalHours: sleepMidpointHours),
+            regularityScore: min(100, max(10, regularityScore)),
+            optimalBedtimeFormatted: bedtimeStr,
+            optimalWakeFormatted: wakeStr,
+            melatoninWindowStartFormatted: melatoninStr,
+            cortisolAwakeningFormatted: cortisolStr
+        )
+    }
+
+    // MARK: - Adaptive Dynamic TDEE & Macro Coach (MacroFactor / Hall et al. Model)
+    public static func adaptiveTDEE(
+        weightHistory: [DailyMetricPoint],
+        calorieHistory: [DailyMetricPoint],
+        fallbackBasalKcal: Double,
+        fallbackActiveKcal: Double,
+        bodyWeightKg: Double = 75.0
+    ) -> AdaptiveTDEEResult {
+        let baselineExpenditure = max(1400.0, fallbackBasalKcal + fallbackActiveKcal)
+        var calculatedExpenditure = baselineExpenditure
+        var weightDeltaKgPerWeek = 0.0
+        var energyBalance = 0.0
+
+        if weightHistory.count >= 3 && calorieHistory.count >= 3 {
+            let recentCalories = calorieHistory.suffix(14)
+            let avgCalories = recentCalories.reduce(0.0) { $0 + $1.value } / Double(recentCalories.count)
+            let firstWeight = weightHistory.prefix(3).reduce(0.0) { $0 + $1.value } / Double(min(3, weightHistory.count))
+            let lastWeight = weightHistory.suffix(3).reduce(0.0) { $0 + $1.value } / Double(min(3, weightHistory.count))
+            let daysBetween = max(3.0, Double(min(14, weightHistory.count)))
+            let dailyWeightDelta = (lastWeight - firstWeight) / daysBetween
+            weightDeltaKgPerWeek = dailyWeightDelta * 7.0
+            energyBalance = dailyWeightDelta * 7700.0
+            let empiricalTDEE = avgCalories - energyBalance
+            calculatedExpenditure = empiricalTDEE * 0.75 + baselineExpenditure * 0.25
+        }
+
+        let tdee = max(1300.0, min(4800.0, (calculatedExpenditure / 10.0).rounded() * 10.0))
+        let fatLoss = ((tdee * 0.80) / 10.0).rounded() * 10.0
+        let maintenance = tdee
+        let leanBulk = ((tdee * 1.10) / 10.0).rounded() * 10.0
+        let targetProtein = (bodyWeightKg * 2.0).rounded()
+        let adaptation = (tdee - (fallbackBasalKcal + fallbackActiveKcal)).rounded()
+
+        return AdaptiveTDEEResult(
+            calculatedTDEE: tdee,
+            weightTrendKgPerWeek: (weightDeltaKgPerWeek * 100.0).rounded() / 100.0,
+            energyBalanceKcal: (energyBalance * 10.0).rounded() / 10.0,
+            fatLossTargetKcal: fatLoss,
+            maintenanceTargetKcal: maintenance,
+            leanBulkTargetKcal: leanBulk,
+            recommendedProteinG: targetProtein,
+            metabolicAdaptationDelta: adaptation
+        )
+    }
+
+    // MARK: - Organ-by-Organ Longevity Scorecard (Bryan Johnson / Levine 6-Pillar Model)
+    public static func organScorecard(
+        chronologicalAge: Double,
+        vo2Max: Double?,
+        rhr: Double?,
+        hrv: Double?,
+        fastingGlucoseMgDL: Double?,
+        hba1cPct: Double?,
+        activeKcal: Double,
+        bodyFatPct: Double?,
+        deadHangSec: Int,
+        spatialPostureScore: Int?,
+        crpMgL: Double?,
+        albuminGDL: Double?,
+        paceOfAging: Double?,
+        clinicalPhenoAge: Double?
+    ) -> OrganScorecard {
+        var cvDelta = 0.0
+        if let vo2 = vo2Max { cvDelta -= (vo2 - 42.0) * 0.45 }
+        if let r = rhr { cvDelta += (r - 60.0) * 0.25 }
+        let cvAge = max(18.0, min(95.0, ((chronologicalAge + cvDelta) * 10.0).rounded() / 10.0))
+        let cvStatus = cvAge <= chronologicalAge - 2 ? "Optimal" : (cvAge <= chronologicalAge + 1 ? "Good" : "Needs Attention")
+        let cvPillar = OrganPillarScore(
+            pillar: .cardiovascular,
+            name: "Cardiovascular System",
+            icon: "heart.fill",
+            age: cvAge,
+            status: cvStatus,
+            keyMetric: vo2Max.map { String(format: "VO2 Max %.1f ml/kg", $0) } ?? (rhr.map { "RHR \(Int($0)) bpm" } ?? "Aerobic Base"),
+            recommendation: cvStatus == "Optimal" ? "Superior aerobic capacity. Maintain Zone 2 volume." : "Increase weekly Zone 2 cardio and add 4x4 intervals."
+        )
+
+        var metaDelta = 0.0
+        if let glu = fastingGlucoseMgDL {
+            if glu < 85 { metaDelta -= 1.8 }
+            else if glu > 100 { metaDelta += 2.8 }
+        }
+        if let a1c = hba1cPct {
+            if a1c < 5.3 { metaDelta -= 1.5 }
+            else if a1c > 5.7 { metaDelta += 3.0 }
+        }
+        if let bf = bodyFatPct {
+            if bf <= 16 { metaDelta -= 1.2 }
+            else if bf > 24 { metaDelta += 2.4 }
+        }
+        if activeKcal >= 600 { metaDelta -= 1.0 }
+        let metaAge = max(18.0, min(95.0, ((chronologicalAge + metaDelta) * 10.0).rounded() / 10.0))
+        let metaStatus = metaAge <= chronologicalAge - 1 ? "Optimal" : (metaAge <= chronologicalAge + 2 ? "Good" : "Needs Attention")
+        let metaPillar = OrganPillarScore(
+            pillar: .metabolic,
+            name: "Metabolic & Insulin Health",
+            icon: "flame.fill",
+            age: metaAge,
+            status: metaStatus,
+            keyMetric: hba1cPct.map { String(format: "HbA1c %.1f%%", $0) } ?? (fastingGlucoseMgDL.map { "Fasting Glu \(Int($0)) mg/dL" } ?? "\(Int(activeKcal)) kcal burn"),
+            recommendation: metaStatus == "Optimal" ? "High insulin sensitivity and whole-food fuel partition." : "Time carbs around resistance training; add post-meal 10m walks."
+        )
+
+        var autoDelta = 0.0
+        if let h = hrv {
+            if h >= 65 { autoDelta -= 2.5 }
+            else if h < 38 { autoDelta += 3.0 }
+        }
+        let autoAge = max(18.0, min(95.0, ((chronologicalAge + autoDelta) * 10.0).rounded() / 10.0))
+        let autoStatus = autoAge <= chronologicalAge - 1 ? "Optimal" : (autoAge <= chronologicalAge + 1 ? "Good" : "Needs Attention")
+        let autoPillar = OrganPillarScore(
+            pillar: .autonomic,
+            name: "Autonomic Nervous System",
+            icon: "brain.head.profile",
+            age: autoAge,
+            status: autoStatus,
+            keyMetric: hrv.map { "\(Int($0)) ms HRV" } ?? "Stress/Sleep Base",
+            recommendation: autoStatus == "Optimal" ? "High parasympathetic vagal tone and stress resilience." : "Practice coherent resonance breathwork (5.5s inhale / 5.5s exhale)."
+        )
+
+        var muskDelta = 0.0
+        if deadHangSec >= 90 { muskDelta -= 2.2 }
+        else if deadHangSec >= 60 { muskDelta -= 1.0 }
+        else if deadHangSec > 0 && deadHangSec < 35 { muskDelta += 1.8 }
+        if let post = spatialPostureScore {
+            if post >= 85 { muskDelta -= 1.0 }
+            else if post < 65 { muskDelta += 1.5 }
+        }
+        let muskAge = max(18.0, min(95.0, ((chronologicalAge + muskDelta) * 10.0).rounded() / 10.0))
+        let muskStatus = muskAge <= chronologicalAge - 1 ? "Optimal" : (muskAge <= chronologicalAge + 1 ? "Good" : "Needs Attention")
+        let muskPillar = OrganPillarScore(
+            pillar: .musculoskeletal,
+            name: "Musculoskeletal & Grip",
+            icon: "figure.strengthtraining.traditional",
+            age: muskAge,
+            status: muskStatus,
+            keyMetric: "\(deadHangSec)s Dead Hang" + (spatialPostureScore.map { " · \($0)% posture" } ?? ""),
+            recommendation: muskStatus == "Optimal" ? "Grip strength and spinal alignment in longevity top tier." : "Progressive overload on dead hangs (target 90s) & spatial posture."
+        )
+
+        var immDelta = 0.0
+        if let crp = crpMgL {
+            if crp < 0.6 { immDelta -= 2.0 }
+            else if crp > 1.5 { immDelta += 2.5 }
+        }
+        if let alb = albuminGDL {
+            if alb >= 4.5 { immDelta -= 1.2 }
+            else if alb < 4.0 { immDelta += 1.8 }
+        }
+        let immAge = max(18.0, min(95.0, ((chronologicalAge + immDelta) * 10.0).rounded() / 10.0))
+        let immStatus = immAge <= chronologicalAge - 1 ? "Optimal" : (immAge <= chronologicalAge + 1 ? "Good" : "Needs Attention")
+        let immPillar = OrganPillarScore(
+            pillar: .immune,
+            name: "Immune & Systemic Inflammation",
+            icon: "shield.lefthalf.filled",
+            age: immAge,
+            status: immStatus,
+            keyMetric: crpMgL.map { String(format: "hs-CRP %.2f mg/L", $0) } ?? (albuminGDL.map { String(format: "Albumin %.1f g/dL", $0) } ?? "Lab Panel"),
+            recommendation: immStatus == "Optimal" ? "Minimal systemic baseline inflammation." : "Increase omega-3 index (wild salmon/EPA) and polyphenol density."
+        )
+
+        var epiDelta = 0.0
+        if let pace = paceOfAging {
+            epiDelta += (pace - 1.0) * 8.0
+        } else if let pheno = clinicalPhenoAge {
+            epiDelta += (pheno - chronologicalAge) * 0.6
+        }
+        let epiAge = max(18.0, min(95.0, ((chronologicalAge + epiDelta) * 10.0).rounded() / 10.0))
+        let epiStatus = epiAge <= chronologicalAge - 1 ? "Optimal" : (epiAge <= chronologicalAge + 1 ? "Good" : "Needs Attention")
+        let epiPillar = OrganPillarScore(
+            pillar: .epigenetic,
+            name: "Epigenetic & Aging Velocity",
+            icon: "hourglass",
+            age: epiAge,
+            status: epiStatus,
+            keyMetric: paceOfAging.map { String(format: "%.2f yr/yr pace", $0) } ?? (clinicalPhenoAge.map { String(format: "PhenoAge %.1f", $0) } ?? "Epigenetic Baseline"),
+            recommendation: epiStatus == "Optimal" ? "Biological aging rate significantly decelerated." : "Prioritize sleep consistency, cold/heat hormesis, and caloric moderation."
+        )
+
+        let pillars = [cvPillar, metaPillar, autoPillar, muskPillar, immPillar, epiPillar]
+        let composite = (pillars.reduce(0.0) { $0 + $1.age } / Double(pillars.count) * 10.0).rounded() / 10.0
+
+        return OrganScorecard(pillars: pillars, compositeAge: composite)
     }
 }
 

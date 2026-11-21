@@ -469,3 +469,624 @@ public struct MorningEveningBriefingSheet: View {
         }
     }
 }
+
+// MARK: - Whoop-Style Weekly Performance Assessment (WPA) Sheet
+public struct WeeklyPerformanceSheet: View {
+    @ObservedObject var health: HealthKitManager
+    @Environment(\.dismiss) private var dismiss
+
+    public init(health: HealthKitManager) {
+        self.health = health
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let report = health.weeklyPerformanceReport {
+                        heroSummaryCard(report)
+                        sleepPerformanceSection(report)
+                        strainRecoverySection(report)
+                        habitsImpactSection(report)
+                        vitalTrendsSection(report)
+                    } else {
+                        emptyStateCard
+                    }
+                }
+                .padding(16)
+            }
+            .background(ApexTheme.background)
+            .navigationTitle("Weekly Assessment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func heroSummaryCard(_ report: WeeklyPerformanceReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Weekly Performance Assessment", systemImage: "chart.bar.doc.horizontal.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(ApexTheme.accentVolt)
+
+            Text("7-Day Autonomic Recovery, Sleep Quality & Training Workload Synthesis.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+
+            Divider().background(Color.white.opacity(0.08))
+
+            HStack(spacing: 12) {
+                metricMiniTile(
+                    label: "Sleep Perf",
+                    val: "\(report.sleepPerformancePct)%",
+                    color: report.sleepPerformancePct >= 85 ? ApexTheme.accentEmerald : ApexTheme.accentAmber
+                )
+                metricMiniTile(
+                    label: "Consistency",
+                    val: "\(report.sleepConsistencyPct)%",
+                    color: ApexTheme.accentIndigo
+                )
+                metricMiniTile(
+                    label: "Target Days",
+                    val: "\(report.optimalStrainDays)/7d",
+                    color: ApexTheme.exerciseLime
+                )
+                metricMiniTile(
+                    label: "ACWR Load",
+                    val: String(format: "%.2f", report.acwrAverage),
+                    color: ApexTheme.standCyan
+                )
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func metricMiniTile(label: String, val: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(val)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(ApexTheme.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func sleepPerformanceSection(_ report: WeeklyPerformanceReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Sleep Quality & Regularity", systemImage: "bed.double.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(report.sleepPerformancePct)% Need Met")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(report.sleepPerformancePct >= 85 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+            }
+
+            Text("Your 7-day sleep consistency score is \(report.sleepConsistencyPct)%. Consistent circadian bedtimes stabilize REM & Slow Wave Sleep.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+
+            ProgressView(value: Double(report.sleepPerformancePct), total: 100.0)
+                .tint(report.sleepPerformancePct >= 85 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func strainRecoverySection(_ report: WeeklyPerformanceReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Strain vs. Recovery Alignment", systemImage: "bolt.heart.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+
+            Text(report.strainRecoveryAlignment)
+                .font(.system(size: 13))
+                .foregroundStyle(.white)
+
+            HStack {
+                Text("Total Movement Burn")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(report.totalMoveKcal)) kcal")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(ApexTheme.moveCrimson)
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func habitsImpactSection(_ report: WeeklyPerformanceReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Habit Impact Leaderboard", systemImage: "sparkles")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(ApexTheme.accentVolt)
+
+            if let pos = report.topPositiveHabit {
+                HStack {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .foregroundStyle(ApexTheme.accentEmerald)
+                    Text(pos)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("Top Positive")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(ApexTheme.accentEmerald)
+                }
+            }
+
+            if let neg = report.topNegativeHabit {
+                HStack {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(ApexTheme.moveCrimson)
+                    Text(neg)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("Avoid")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(ApexTheme.moveCrimson)
+                }
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func vitalTrendsSection(_ report: WeeklyPerformanceReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("7-Day Baselines")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+
+            HStack {
+                Text("Average HRV")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(report.avgHrv.map { "\(Int($0.rounded())) ms" } ?? "—")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(ApexTheme.standCyan)
+            }
+
+            HStack {
+                Text("Average Resting HR")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(report.avgRhr.map { "\(Int($0.rounded())) bpm" } ?? "—")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(ApexTheme.moveCrimson)
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private var emptyStateCard: some View {
+        VStack(alignment: .center, spacing: 14) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("Connect Apple Health or log workouts to compile your Weekly Performance Assessment.")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity)
+        .appleCard(padding: 24, cornerRadius: 20)
+    }
+}
+
+// MARK: - Athlytic-Style ACWR Training Load & Injury Hazard Sheet
+public struct ACWRTrainingLoadDetailSheet: View {
+    @ObservedObject var health: HealthKitManager
+    @Environment(\.dismiss) private var dismiss
+
+    public init(health: HealthKitManager) {
+        self.health = health
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let res = health.acwrResult {
+                        gaugeCard(res)
+                        zonesLegendCard
+                        breakdownCard(res)
+                    } else {
+                        emptyStateCard
+                    }
+                }
+                .padding(16)
+            }
+            .background(ApexTheme.background)
+            .navigationTitle("Training Load & ACWR")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func gaugeCard(_ res: ACWRResult) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Acute-to-Chronic Workload Ratio")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("7-Day Acute Strain ÷ 28-Day Chronic Baseline")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(String(format: "%.2f", res.ratio))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(zoneColor(res.zone))
+            }
+
+            HStack {
+                Text(res.zone.rawValue)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(zoneColor(res.zone))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(zoneColor(res.zone).opacity(0.18))
+                    .clipShape(Capsule())
+                Spacer()
+            }
+
+            Text(res.recommendation)
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineSpacing(3)
+        }
+        .appleCard(padding: 18, cornerRadius: 22)
+    }
+
+    private var zonesLegendCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Workload Zones (Gabbett 2016 Model)")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+
+            zoneRow("Under-training (< 0.80)", "Low acute stimulus; fitness may decay.", ApexTheme.standCyan)
+            Divider().background(Color.white.opacity(0.06))
+            zoneRow("Optimal Sweet Spot (0.80 – 1.30)", "Progressive fitness adaptations with lowest injury hazard.", ApexTheme.accentEmerald)
+            Divider().background(Color.white.opacity(0.06))
+            zoneRow("Overreaching (1.31 – 1.50)", "High fatigue accumulation; requires recovery buffer.", ApexTheme.accentAmber)
+            Divider().background(Color.white.opacity(0.06))
+            zoneRow("High Injury Risk (> 1.50)", "Acute strain spike; significantly elevated risk.", ApexTheme.moveCrimson)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func zoneRow(_ title: String, _ desc: String, _ color: Color) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .padding(.top, 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(color)
+                Text(desc)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func breakdownCard(_ res: ACWRResult) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Acute Load (7d)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(String(format: "%.1f", res.acuteLoad7d))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(ApexTheme.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Chronic Load (28d)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(String(format: "%.1f", res.chronicLoad28d))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(ApexTheme.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+
+    private func zoneColor(_ zone: TrainingZone) -> Color {
+        switch zone {
+        case .underTraining: return ApexTheme.standCyan
+        case .optimal: return ApexTheme.accentEmerald
+        case .overreaching: return ApexTheme.accentAmber
+        case .injuryRisk: return ApexTheme.moveCrimson
+        }
+    }
+
+    private var emptyStateCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "gauge.with.needle")
+                .font(.system(size: 38))
+                .foregroundStyle(.secondary)
+            Text("Log workouts or connect Apple Health to compute your Acute-to-Chronic Workload Ratio.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .appleCard(padding: 20, cornerRadius: 20)
+    }
+}
+
+// MARK: - Oura-Style Circadian Alignment & Chronotype Sheet
+public struct CircadianChronotypeDetailSheet: View {
+    @ObservedObject var health: HealthKitManager
+    @Environment(\.dismiss) private var dismiss
+
+    public init(health: HealthKitManager) {
+        self.health = health
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let prof = health.circadianProfile {
+                        chronotypeHeroCard(prof)
+                        circadianScheduleCard(prof)
+                        circadianScienceCard
+                    } else {
+                        emptyStateCard
+                    }
+                }
+                .padding(16)
+            }
+            .background(ApexTheme.background)
+            .navigationTitle("Circadian Alignment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func chronotypeHeroCard(_ prof: CircadianProfile) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Chronotype Classification", systemImage: "sun.haze.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(ApexTheme.accentVolt)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(prof.chronotype.rawValue)
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Sleep Midpoint: \(prof.sleepMidpointFormatted)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(prof.regularityScore)% Regular")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(ApexTheme.accentEmerald)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(ApexTheme.accentEmerald.opacity(0.18), in: Capsule())
+            }
+        }
+        .appleCard(padding: 18, cornerRadius: 22)
+    }
+
+    private func circadianScheduleCard(_ prof: CircadianProfile) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Optimal Circadian Timing Window")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+
+            circadianRow("Melatonin Window Begins", prof.melatoninWindowStartFormatted, "moon.stars", ApexTheme.accentIndigo)
+            Divider().background(Color.white.opacity(0.06))
+            circadianRow("Optimal Bedtime Target", prof.optimalBedtimeFormatted, "bed.double.fill", ApexTheme.accentVolt)
+            Divider().background(Color.white.opacity(0.06))
+            circadianRow("Natural Awakening Target", prof.optimalWakeFormatted, "sun.horizon.fill", ApexTheme.accentAmber)
+            Divider().background(Color.white.opacity(0.06))
+            circadianRow("Cortisol Peak & Morning Light", prof.cortisolAwakeningFormatted, "sunrise.fill", ApexTheme.standCyan)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func circadianRow(_ label: String, _ time: String, _ icon: String, _ color: Color) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(color)
+                .frame(width: 22)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(time)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private var circadianScienceCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Why Circadian Regularity Matters")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("Keeping bedtime within 30 minutes of your chronotype window maximizes Slow-Wave Sleep (growth hormone release) and stabilizes morning cortisol awakening response.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineSpacing(2)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private var emptyStateCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 38))
+                .foregroundStyle(.secondary)
+            Text("Record sleep in Apple Health to determine your biological chronotype and optimal sleep window.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .appleCard(padding: 20, cornerRadius: 20)
+    }
+}
+
+// MARK: - Oura & Blueprint Cardiovascular Age & Arterial Compliance Detail Sheet
+public struct CardiovascularAgeDetailSheet: View {
+    @ObservedObject var health: HealthKitManager
+    @Environment(\.dismiss) private var dismiss
+
+    public init(health: HealthKitManager) {
+        self.health = health
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let res = health.cardiovascularAgeResult {
+                        heroCard(res)
+                        biomarkersBreakdown(res)
+                        recommendationCard(res)
+                    } else {
+                        emptyStateCard
+                    }
+                }
+                .padding(16)
+            }
+            .background(ApexTheme.background)
+            .navigationTitle("Cardiovascular Age")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func heroCard(_ res: CardiovascularAgeResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Vascular Elasticity & Capacity", systemImage: "heart.text.square.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(ApexTheme.moveCrimson)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "%.1f yrs", res.cardiovascularAge))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(res.ageDelta <= 0
+                         ? String(format: "%.1f years younger than chronological age (%d)", abs(res.ageDelta), Int(res.chronologicalAge))
+                         : String(format: "%.1f years above chronological baseline (%d)", res.ageDelta, Int(res.chronologicalAge)))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(res.ageDelta <= 0 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                }
+                Spacer()
+                Text("Top \(100 - res.vo2MaxPercentile)%")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(ApexTheme.standCyan)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(ApexTheme.standCyan.opacity(0.16), in: Capsule())
+            }
+
+            Text(res.elasticityStatus)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(ApexTheme.accentVolt)
+        }
+        .appleCard(padding: 18, cornerRadius: 22)
+    }
+
+    private func biomarkersBreakdown(_ res: CardiovascularAgeResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Vascular Contributors")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+
+            contributorRow("Cardio Capacity (VO2 Max)", health.vo2Max.map { String(format: "%.1f ml/kg/min", $0) } ?? "Needs Watch Workout", ApexTheme.exerciseLime)
+            Divider().background(Color.white.opacity(0.06))
+            contributorRow("Resting Heart Rate", health.restingHeartRate.map { "\(Int($0)) bpm" } ?? "Needs Vitals", ApexTheme.moveCrimson)
+            Divider().background(Color.white.opacity(0.06))
+            contributorRow("Overnight HRV Elasticity", health.heartRateVariability.map { "\(Int($0)) ms" } ?? "Needs Sleep Vitals", ApexTheme.standCyan)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func contributorRow(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+        }
+    }
+
+    private func recommendationCard(_ res: CardiovascularAgeResult) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Vascular Longevity Protocol")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(res.recommendation)
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineSpacing(3)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private var emptyStateCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "heart.circle")
+                .font(.system(size: 38))
+                .foregroundStyle(.secondary)
+            Text("Connect Apple Health or record a workout to estimate your Cardiovascular Age.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .appleCard(padding: 20, cornerRadius: 20)
+    }
+}

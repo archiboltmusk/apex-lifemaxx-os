@@ -16,6 +16,10 @@ public struct SummaryView: View {
     @State private var showCoachSheet: Bool = false
     @State private var bevelDetail: BevelDetailFocus? = nil
     @State private var showBriefingSheet: Bool = false
+    @State private var showWeeklyAssessmentSheet: Bool = false
+    @State private var showACWRSheet: Bool = false
+    @State private var showCircadianSheet: Bool = false
+    @State private var showCardioAgeSheet: Bool = false
 
     public init(selectedTab: Binding<Int>) {
         self._selectedTab = selectedTab
@@ -41,6 +45,8 @@ public struct SummaryView: View {
                     }
 
                     bevelBriefingLauncher
+
+                    weeklyAndAcwrQuickStrip
 
                     bevelTrioSection
 
@@ -132,6 +138,127 @@ public struct SummaryView: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showWeeklyAssessmentSheet) {
+                WeeklyPerformanceSheet(health: health)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showACWRSheet) {
+                ACWRTrainingLoadDetailSheet(health: health)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showCircadianSheet) {
+                CircadianChronotypeDetailSheet(health: health)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showCardioAgeSheet) {
+                CardiovascularAgeDetailSheet(health: health)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    // MARK: - Elite Pro Quick Strip (Weekly WPA, ACWR Workload & Circadian Alignment)
+    private var weeklyAndAcwrQuickStrip: some View {
+        HStack(spacing: 10) {
+            Button {
+                Haptics.tap()
+                showWeeklyAssessmentSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chart.bar.doc.horizontal.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ApexTheme.accentVolt)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Weekly Assessment")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(health.weeklyPerformanceReport.map { "\($0.sleepPerformancePct)% sleep · \($0.optimalStrainDays)/7d" } ?? "7-Day Review")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(ApexTheme.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                Haptics.tap()
+                showACWRSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "gauge.with.needle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(health.acwrResult.map { acwrTint($0.zone) } ?? ApexTheme.standCyan)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(health.acwrResult.map { String(format: "ACWR %.2f", $0.ratio) } ?? "Training Load")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(health.acwrResult?.zone.rawValue ?? "ACWR Ratio")
+                            .font(.system(size: 9))
+                            .foregroundStyle(health.acwrResult.map { acwrTint($0.zone) } ?? .secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(ApexTheme.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                Haptics.tap()
+                showCircadianSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "bed.double.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ApexTheme.accentIndigo)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Circadian Window")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(health.circadianProfile.map { $0.optimalBedtimeFormatted } ?? "Bedtime Target")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(ApexTheme.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(ApexTheme.subtleBorder, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func acwrTint(_ zone: TrainingZone) -> Color {
+        switch zone {
+        case .underTraining: return ApexTheme.standCyan
+        case .optimal: return ApexTheme.accentEmerald
+        case .overreaching: return ApexTheme.accentAmber
+        case .injuryRisk: return ApexTheme.moveCrimson
         }
     }
 

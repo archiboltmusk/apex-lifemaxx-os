@@ -210,6 +210,144 @@ public class HealthKitManager: ObservableObject {
         )
     }
 
+    // MARK: - Acute:Chronic Workload Ratio (ACWR / Training Load)
+    public var acwrResult: ACWRResult? {
+        guard !moveHistory.isEmpty || moveCalories > 0 else { return nil }
+        var dailyStrains: [Double] = moveHistory.compactMap { pt in
+            ApexBiometricMath.dailyStrain(moveKcal: pt.value, exerciseMinutes: pt.value / 24.0)
+        }
+        if let today = todayStrainScore {
+            dailyStrains.append(today)
+        }
+        guard !dailyStrains.isEmpty else { return nil }
+
+        let acuteSlice = dailyStrains.suffix(7)
+        let acuteAvg = acuteSlice.reduce(0.0, +) / Double(acuteSlice.count)
+
+        let chronicSlice = dailyStrains.suffix(28)
+        let chronicAvg = chronicSlice.reduce(0.0, +) / Double(chronicSlice.count)
+
+        return ApexBiometricMath.acwr(acute7dLoad: acuteAvg, chronic28dLoad: chronicAvg)
+    }
+
+    // MARK: - Cardiovascular Age & Arterial Compliance
+    public var cardiovascularAgeResult: CardiovascularAgeResult? {
+        guard vo2Max != nil || restingHeartRate != nil || heartRateVariability != nil else { return nil }
+        return ApexBiometricMath.cardiovascularAge(
+            chronologicalAge: chronologicalAge,
+            vo2Max: vo2Max,
+            rhr: restingHeartRate,
+            hrv: heartRateVariability
+        )
+    }
+
+    // MARK: - Circadian Chronotype & Optimal Bedtime Window
+    public var circadianProfile: CircadianProfile? {
+        let wakeMin = UserDefaults.standard.object(forKey: "apex_wake_minutes") as? Int ?? 390
+        let targetSleepHours = baselineSleepGoalHours
+        let defaultMidpoint = (Double(wakeMin) / 60.0) - (targetSleepHours / 2.0)
+        let safeMidpoint = defaultMidpoint < 0 ? defaultMidpoint + 24.0 : defaultMidpoint
+
+        var regScore = 85
+        if sleepHistory.count >= 3 {
+            let sleepVals = sleepHistory.suffix(7).map { $0.value }
+            let mean = sleepVals.reduce(0.0, +) / Double(sleepVals.count)
+            let variance = sleepVals.map { pow($0 - mean, 2) }.reduce(0.0, +) / Double(sleepVals.count)
+            let stdDev = sqrt(variance)
+            regScore = max(30, min(98, Int(100.0 - stdDev * 20.0)))
+        }
+
+        return ApexBiometricMath.circadianProfile(
+            sleepMidpointHours: safeMidpoint,
+            regularityScore: regScore
+        )
+    }
+
+    // MARK: - Organ-by-Organ Longevity Scorecard (6 Pillars)
+    public var organScorecard: OrganScorecard? {
+        guard restingHeartRate != nil || heartRateVariability != nil || moveCalories > 0 || clinicalPhenoAge != nil else {
+            return nil
+        }
+        let lab = LabPanelStore.load()
+        let hangSec = UserDefaults.standard.integer(forKey: "apex_best_deadhang_sec")
+        let postureScore: Int? = {
+            if let last = SpatialPostureHapticsEngine.shared.sessionHistory.last {
+                return max(20, min(100, 100 - last.slouchEvents * 10))
+            }
+            return nil
+        }()
+
+        return ApexBiometricMath.organScorecard(
+            chronologicalAge: chronologicalAge,
+            vo2Max: vo2Max,
+            rhr: restingHeartRate,
+            hrv: heartRateVariability,
+            fastingGlucoseMgDL: lab?.glucoseMgDL,
+            hba1cPct: lab?.hba1cPct,
+            activeKcal: moveCalories,
+            bodyFatPct: bodyFatPercent,
+            deadHangSec: hangSec,
+            spatialPostureScore: postureScore,
+            crpMgL: lab?.crpMgL,
+            albuminGDL: lab?.albuminGdL,
+            paceOfAging: paceOfAging,
+            clinicalPhenoAge: clinicalPhenoAge
+        )
+    }
+
+    // MARK: - Weekly Performance Assessment (WPA / Whoop Benchmark)
+    public var weeklyPerformanceReport: WeeklyPerformanceReport? {
+        guard !sleepHistory.isEmpty || !moveHistory.isEmpty || readinessScore != nil else { return nil }
+
+        let recentSleep = Array(sleepHistory.suffix(7))
+        let avgSleep = !recentSleep.isEmpty ? recentSleep.map { $0.value }.reduce(0.0, +) / Double(recentSleep.count) : (sleepTotalHours ?? baselineSleepGoalHours)
+        let sleepPerf = min(100, max(20, Int((avgSleep / max(6.0, baselineSleepGoalHours)) * 100.0)))
+
+        let sleepConsistency = circadianProfile?.regularityScore ?? 85
+
+        let recentMoves = Array(moveHistory.suffix(7))
+        var optimalDays = 0
+        for pt in recentMoves {
+            if let strain = ApexBiometricMath.dailyStrain(moveKcal: pt.value, exerciseMinutes: pt.value / 25.0) {
+                if strain >= 8.0 && strain <= 18.0 {
+                    optimalDays += 1
+                }
+            }
+        }
+        if let today = todayStrainScore, today >= 8.0 && today <= 18.0 {
+            optimalDays = min(7, optimalDays + 1)
+        }
+
+        let acwrVal = acwrResult?.ratio ?? 1.05
+        let alignment = (readinessScore ?? 75) >= 70
+            ? "Optimal Autonomic Alignment: Cardiovascular strain peaked on high-readiness recovery days."
+            : "Adaptive Recovery Alignment: Workload balanced to allow parasympathetic rebound."
+
+        let topPos = ExperimentLabStore.shared.activeProtocol.title
+        let topNeg = "Late Meals (< 2h before bed)"
+
+        let recentHrv = Array(hrvHistory.suffix(7))
+        let meanHrv = !recentHrv.isEmpty ? recentHrv.map { $0.value }.reduce(0.0, +) / Double(recentHrv.count) : heartRateVariability
+
+        let recentRhr = Array(rhrHistory.suffix(7))
+        let meanRhr = !recentRhr.isEmpty ? recentRhr.map { $0.value }.reduce(0.0, +) / Double(recentRhr.count) : restingHeartRate
+
+        let totalMove = recentMoves.map { $0.value }.reduce(0.0, +) + moveCalories
+
+        return WeeklyPerformanceReport(
+            sleepPerformancePct: sleepPerf,
+            sleepConsistencyPct: sleepConsistency,
+            optimalStrainDays: max(1, optimalDays),
+            acwrAverage: acwrVal,
+            strainRecoveryAlignment: alignment,
+            topPositiveHabit: topPos,
+            topNegativeHabit: topNeg,
+            avgHrv: meanHrv,
+            avgRhr: meanRhr,
+            totalMoveKcal: (totalMove * 10.0).rounded() / 10.0
+        )
+    }
+
     public static func currentDayKey() -> String {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)

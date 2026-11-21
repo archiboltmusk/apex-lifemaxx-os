@@ -205,6 +205,31 @@ public final class NutritionLogStore: ObservableObject {
         )
     }
 
+    public func adaptiveTDEEResult(health: HealthKitManager) -> AdaptiveTDEEResult {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        var dailyCals: [String: Double] = [:]
+        for m in meals {
+            let key = df.string(from: m.date)
+            dailyCals[key, default: 0.0] += m.calories
+        }
+        let calorieHistory: [DailyMetricPoint] = dailyCals.compactMap { (k, v) in
+            guard let d = df.date(from: k) else { return nil }
+            return DailyMetricPoint(date: d, value: v)
+        }.sorted { $0.date < $1.date }
+
+        let basal = (health.bodyWeightKg ?? 75.0) * 22.0
+        let active = health.moveCalories > 0 ? health.moveCalories : 500.0
+
+        return ApexBiometricMath.adaptiveTDEE(
+            weightHistory: health.weightHistory,
+            calorieHistory: calorieHistory,
+            fallbackBasalKcal: basal,
+            fallbackActiveKcal: active,
+            bodyWeightKg: health.bodyWeightKg ?? 75.0
+        )
+    }
+
     public func startPostprandialGlut4Walk() {
         glut4SecondsRemaining = 15 * 60
         isGlut4TimerRunning = true
@@ -665,6 +690,7 @@ public struct NutritionCGMView: View {
     @State private var showLabelSourceDialog = false
     @State private var showLabelPhotosPicker = false
     @State private var showGoalsSheet = false
+    @State private var showAdaptiveTDEESheet = false
     @State private var showAddSupplementSheet = false
     @State private var showSevenDayMeals = false
     @State private var selectedLabelPhoto: PhotosPickerItem? = nil
@@ -776,6 +802,11 @@ public struct NutritionCGMView: View {
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showAdaptiveTDEESheet) {
+                AdaptiveTDEECoachSheet()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
             .sheet(isPresented: $showAddSupplementSheet) {
                 AddSupplementSheet()
                     .presentationDetents([.medium])
@@ -806,21 +837,38 @@ public struct NutritionCGMView: View {
                         .foregroundStyle(.white)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text("\(Int(store.todayCalories)) kcal")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(ApexTheme.accentVolt)
-                    Button {
-                        Haptics.tap()
-                        showGoalsSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("/ \(Int(store.calorieTarget)) goal")
-                            Image(systemName: "slider.horizontal.3")
+                    HStack(spacing: 6) {
+                        Button {
+                            Haptics.tap()
+                            showAdaptiveTDEESheet = true
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "flame.fill")
+                                Text("TDEE")
+                            }
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(ApexTheme.accentVolt)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(ApexTheme.accentVolt.opacity(0.16), in: Capsule())
                         }
-                        .font(.system(size: 12))
-                        .foregroundStyle(ApexTheme.standCyan)
+
+                        Button {
+                            Haptics.tap()
+                            showGoalsSheet = true
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text("/ \(Int(store.calorieTarget))")
+                                Image(systemName: "slider.horizontal.3")
+                            }
+                            .font(.system(size: 11))
+                            .foregroundStyle(ApexTheme.standCyan)
+                        }
                     }
                 }
             }
@@ -1843,5 +1891,169 @@ private struct PlateCameraCaptureSheet: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+// MARK: - MacroFactor-Style Adaptive Dynamic TDEE & Macro Coach Sheet
+public struct AdaptiveTDEECoachSheet: View {
+    @ObservedObject var store = NutritionLogStore.shared
+    @ObservedObject var health = HealthKitManager.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var appliedNotice: String? = nil
+
+    public init() {}
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    let result = store.adaptiveTDEEResult(health: health)
+                    tdeeHeroCard(result)
+                    presetsSection(result)
+                    scienceCard
+                }
+                .padding(16)
+            }
+            .background(ApexTheme.background)
+            .navigationTitle("Adaptive TDEE Coach")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func tdeeHeroCard(_ res: AdaptiveTDEEResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Dynamic Metabolic Expenditure", systemImage: "flame.circle.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(ApexTheme.accentVolt)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(Int(res.calculatedTDEE)) kcal/day")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(res.weightTrendKgPerWeek != 0
+                         ? String(format: "Scale Trend: %+.2f kg/wk (%+d kcal balance)", res.weightTrendKgPerWeek, Int(res.energyBalanceKcal))
+                         : "Baseline from HealthKit active burn & body mass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            if let notice = appliedNotice {
+                Text(notice)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ApexTheme.accentEmerald)
+                    .padding(8)
+                    .frame(maxWidth: .infinity)
+                    .background(ApexTheme.accentEmerald.opacity(0.16))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .appleCard(padding: 18, cornerRadius: 22)
+    }
+
+    private func presetsSection(_ res: AdaptiveTDEEResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Automated Calorie & Macro Presets")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+
+            presetCard(
+                title: "Fat Loss Deficit (-20%)",
+                kcal: res.fatLossTargetKcal,
+                protein: res.recommendedProteinG,
+                icon: "arrow.down.right.circle.fill",
+                color: ApexTheme.accentAmber,
+                desc: "Optimized for maximum fat oxidation while preserving lean muscle mass."
+            ) {
+                applyTargets(kcal: res.fatLossTargetKcal, protein: res.recommendedProteinG, name: "Fat Loss")
+            }
+
+            presetCard(
+                title: "Maintenance & Recomp",
+                kcal: res.maintenanceTargetKcal,
+                protein: res.recommendedProteinG,
+                icon: "equal.circle.fill",
+                color: ApexTheme.exerciseLime,
+                desc: "Matches your true metabolic rate to sustain current body composition."
+            ) {
+                applyTargets(kcal: res.maintenanceTargetKcal, protein: res.recommendedProteinG, name: "Maintenance")
+            }
+
+            presetCard(
+                title: "Lean Mass Gain (+10%)",
+                kcal: res.leanBulkTargetKcal,
+                protein: res.recommendedProteinG,
+                icon: "arrow.up.right.circle.fill",
+                color: ApexTheme.accentVolt,
+                desc: "Hypertrophy caloric surplus to drive progressive muscle protein synthesis."
+            ) {
+                applyTargets(kcal: res.leanBulkTargetKcal, protein: res.recommendedProteinG, name: "Lean Mass")
+            }
+        }
+    }
+
+    private func presetCard(title: String, kcal: Double, protein: Double, icon: String, color: Color, desc: String, onApply: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(color)
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(Int(kcal)) kcal")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+            }
+
+            Text(desc)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Target: \(Int(protein))g Protein")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                Spacer()
+                Button("Apply Target") {
+                    Haptics.tap()
+                    onApply()
+                }
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(color)
+                .clipShape(Capsule())
+            }
+        }
+        .appleCard(padding: 14, cornerRadius: 16)
+    }
+
+    private func applyTargets(kcal: Double, protein: Double, name: String) {
+        store.calorieTarget = kcal
+        store.proteinTargetG = protein
+        appliedNotice = "Applied \(name) targets: \(Int(kcal)) kcal & \(Int(protein))g protein!"
+    }
+
+    private var scienceCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Why Adaptive TDEE Beats Static Formulas")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("Static equations (Mifflin-St Jeor) ignore metabolic adaptation, NEAT fluctuations, and individual thermogenesis. APEX's MacroFactor-inspired algorithm solves for energy balance dynamically from scale weight trend & intake.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineSpacing(2)
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
     }
 }

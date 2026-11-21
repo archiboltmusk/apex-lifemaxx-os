@@ -29,6 +29,7 @@ public struct LongevityView: View {
     @State private var showBackupSheet: Bool = false
     @State private var showPrefsSheet: Bool = false
     @State private var showPaywallSheet: Bool = false
+    @State private var showCardiovascularDetail: Bool = false
     @State private var syncJustCompleted: Bool = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -40,6 +41,10 @@ public struct LongevityView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
                     biologicalAgeCard
+
+                    cardiovascularAgeCard
+
+                    organScorecardCard
 
                     biologyBaselinesCard
 
@@ -121,6 +126,9 @@ public struct LongevityView: View {
             }
             .sheet(isPresented: $showPaywallSheet) {
                 ApexProPaywallSheet()
+            }
+            .sheet(isPresented: $showCardiovascularDetail) {
+                CardiovascularAgeDetailSheet(health: health)
             }
             .modifier(LongevityToolRouterModifier())
         }
@@ -245,7 +253,158 @@ public struct LongevityView: View {
         .appleCard(padding: 18, cornerRadius: 22)
     }
 
-    // MARK: - 1B. 60-Day Biology Baselines & Body Composition
+    // MARK: - 1B. Cardiovascular & Arterial Compliance Card (Oura / Framingham Model)
+    private var cardiovascularAgeCard: some View {
+        Button {
+            Haptics.tap()
+            showCardiovascularDetail = true
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(ApexTheme.moveCrimson.opacity(0.16))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "heart.text.square.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(ApexTheme.moveCrimson)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cardiovascular & Arterial Age")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(health.cardiovascularAgeResult.map { $0.elasticityStatus } ?? "Oura / Framingham Vascular Model")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if let res = health.cardiovascularAgeResult {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(String(format: "%.1f", res.cardiovascularAge))
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(res.ageDelta <= 0 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                            Text(res.ageDelta <= 0 ? String(format: "%.1fy younger", abs(res.ageDelta)) : String(format: "+%.1fy", res.ageDelta))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(res.ageDelta <= 0 ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                        }
+                    } else {
+                        Text("Connect Health")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(ApexTheme.accentAmber)
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+
+                if health.cardiovascularAgeResult != nil {
+                    HStack(spacing: 8) {
+                        cardioPill("VO2 Max", health.vo2Max.map { String(format: "%.1f", $0) } ?? "—", ApexTheme.exerciseLime)
+                        cardioPill("Resting HR", health.restingHeartRate.map { "\(Int($0)) bpm" } ?? "—", ApexTheme.moveCrimson)
+                        cardioPill("HRV Vagal", health.heartRateVariability.map { "\(Int($0)) ms" } ?? "—", ApexTheme.standCyan)
+                    }
+                }
+            }
+            .appleCard(padding: 16, cornerRadius: 20)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func cardioPill(_ label: String, _ val: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(val)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(ApexTheme.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - 1C. Organ Age Scorecard (Bryan Johnson Blueprint 6 Pillars)
+    private var organScorecardCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Organ Age Scorecard")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("6-Pillar Bryan Johnson Blueprint Longevity Model")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let sc = health.organScorecard {
+                    Text(String(format: "Composite %.1f", sc.compositeAge))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(sc.compositeAge <= health.chronologicalAge ? ApexTheme.accentEmerald : ApexTheme.accentAmber)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(ApexTheme.elevatedSurface, in: Capsule())
+                }
+            }
+
+            if let scorecard = health.organScorecard {
+                VStack(spacing: 8) {
+                    ForEach(scorecard.pillars) { p in
+                        HStack(spacing: 12) {
+                            Image(systemName: p.icon)
+                                .font(.system(size: 14))
+                                .foregroundStyle(pillarColor(p.status))
+                                .frame(width: 22)
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(p.name)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.white)
+                                Text(p.keyMetric)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(String(format: "%.1f yrs", p.age))
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                Text(p.status)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(pillarColor(p.status))
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        if p.id != scorecard.pillars.last?.id {
+                            Divider().background(Color.white.opacity(0.06))
+                        }
+                    }
+                }
+            } else {
+                Text("Connect Apple Health and log bloodwork to calibrate your 6-pillar organ biological ages.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .appleCard(padding: 16, cornerRadius: 20)
+    }
+
+    private func pillarColor(_ status: String) -> Color {
+        switch status {
+        case "Optimal": return ApexTheme.accentEmerald
+        case "Good": return ApexTheme.standCyan
+        default: return ApexTheme.accentAmber
+        }
+    }
+
+    // MARK: - 1D. 60-Day Biology Baselines & Body Composition
     private var biologyBaselinesCard: some View {
         let avg60Hrv = averageMetric(health.hrvHistory)
         let avg60Rhr = averageMetric(health.rhrHistory)

@@ -376,6 +376,8 @@ public enum ClinicalPDFGenerator {
             drawRow(label: "VO2 Max (Cardiorespiratory)", value: health.vo2Max.map { String(format: "%.1f mL/kg*min", $0) } ?? "Not recorded")
             drawRow(label: "Last Night Sleep Total", value: health.sleepTotalHours.map { String(format: "%.1f hrs (Deep %.1fh / REM %.1fh)", $0, health.sleepDeepHours, health.sleepRemHours) } ?? "Not recorded")
             drawRow(label: "Tonight Sleep Needed / 7d Debt", value: health.sleepNeededHours.map { String(format: "%.1f hrs need / %.1fh debt", $0, health.sleepDebtHours ?? 0) } ?? "Not recorded")
+            drawRow(label: "Acute:Chronic Workload Ratio (ACWR)", value: health.acwrResult.map { String(format: "%.2f (%@)", $0.ratio, $0.zone.rawValue) } ?? "Awaiting 2d strain")
+            drawRow(label: "Circadian Chronotype / Optimal Bedtime", value: health.circadianProfile.map { "\($0.chronotype.rawValue) (\($0.optimalBedtimeFormatted))" } ?? "Awaiting sleep history")
             drawRow(label: "Activity Today", value: "\(Int(health.moveCalories)) kcal · \(Int(health.exerciseMinutes))m exercise · \(health.dailySteps) steps")
 
             // 2. Overnight 5-Vital Health Monitor
@@ -397,6 +399,8 @@ public enum ClinicalPDFGenerator {
             drawRow(label: "Fitness Biological Age", value: health.biologicalAge.map { String(format: "%.1f years", $0) } ?? "Not recorded")
             drawRow(label: "Bloodwork Levine PhenoAge", value: health.clinicalPhenoAge.map { String(format: "%.1f years", $0) } ?? "Not scanned")
             drawRow(label: "Dunedin Pace of Aging", value: health.paceOfAging.map { String(format: "%.2f yr/yr", $0) } ?? "Awaiting wearable/lab input")
+            drawRow(label: "Cardiovascular & Arterial Age", value: health.cardiovascularAgeResult.map { String(format: "%.1f years (%@)", $0.cardiovascularAge, $0.elasticityStatus) } ?? "Awaiting VO2/RHR/HRV")
+            drawRow(label: "6-Pillar Organ Age Scorecard", value: health.organScorecard.map { String(format: "Composite %.1f yrs (6 pillars calibrated)", $0.compositeAge) } ?? "Awaiting vitals/labs")
 
             if let lab = LabPanelStore.load() {
                 drawText("Latest Saved Lab Biomarkers (Scanned \(lab.scannedAt.formatted(date: .abbreviated, time: .omitted))):", font: .systemFont(ofSize: 9.5, weight: .semibold), color: .darkGray, spacingAfter: 4)
@@ -419,6 +423,8 @@ public enum ClinicalPDFGenerator {
             let activeCaf = nutrition.activeCaffeineRemainingMg
             drawSectionHeader("4. Metabolic Fuel, Hydration, Supplements & CGM")
             drawRow(label: "Nutrition Quality Score Today", value: nutrition.nutritionQualityScore.map { "\($0) / 100 (\(nutrition.todaysMeals.count) meals)" } ?? "0 meals logged")
+            let adaptiveTDEE = nutrition.adaptiveTDEEResult(health: health)
+            drawRow(label: "Adaptive Dynamic TDEE (MacroFactor)", value: "\(Int(adaptiveTDEE.calculatedTDEE)) kcal/day (Deficit: \(Int(adaptiveTDEE.fatLossTargetKcal)), Surplus: \(Int(adaptiveTDEE.leanBulkTargetKcal)))")
             drawRow(label: "Macro Intake Today", value: "\(Int(nutrition.todayCalories)) kcal · \(Int(nutrition.todayProtein))g P · \(Int(nutrition.todayCarbs))g C · \(Int(nutrition.todayFat))g F")
             drawRow(label: "Fiber & Sodium", value: "\(Int(nutrition.todayFiber))g fiber · \(Int(nutrition.todaySodiumMg)) mg Na")
             drawRow(label: "Hydration & Caffeine", value: "\(ApexUnitPreferences.formatVolume(ml: nutrition.waterMlToday)) · \(Int(nutrition.caffeineMgToday)) mg (active ~\(Int(activeCaf)) mg)")

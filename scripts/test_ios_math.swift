@@ -133,6 +133,79 @@ struct ApexMathTestRunner {
         let absDelta = ApexBiometricMath.meanAbsoluteDelta(onValues: [50.0, 52.0], offValues: [55.0, 57.0])!
         assertTrue(abs(absDelta - (-5.0)) < 0.01, "Expected -5.0 bpm RHR delta, got \(absDelta)")
 
+        // 10. Acute:Chronic Workload Ratio (ACWR / Gabbett 2016 Model)
+        let underAcwr = ApexBiometricMath.acwr(acute7dLoad: 7.0, chronic28dLoad: 12.0)
+        assertTrue(underAcwr.ratio < 0.80 && underAcwr.zone == .underTraining, "ACWR < 0.8 must be .underTraining (got \(underAcwr.ratio))")
+        let optimalAcwr = ApexBiometricMath.acwr(acute7dLoad: 11.5, chronic28dLoad: 11.0)
+        assertTrue(optimalAcwr.ratio >= 0.80 && optimalAcwr.ratio <= 1.30 && optimalAcwr.zone == .optimal, "ACWR 0.8..1.3 must be .optimal (got \(optimalAcwr.ratio))")
+        let overreachingAcwr = ApexBiometricMath.acwr(acute7dLoad: 15.0, chronic28dLoad: 10.5)
+        assertTrue(overreachingAcwr.ratio > 1.30 && overreachingAcwr.ratio <= 1.50 && overreachingAcwr.zone == .overreaching, "ACWR 1.3..1.5 must be .overreaching (got \(overreachingAcwr.ratio))")
+        let injuryAcwr = ApexBiometricMath.acwr(acute7dLoad: 18.0, chronic28dLoad: 10.0)
+        assertTrue(injuryAcwr.ratio > 1.50 && injuryAcwr.zone == .injuryRisk, "ACWR > 1.50 must be .injuryRisk (got \(injuryAcwr.ratio))")
+
+        // 11. Cardiovascular Age & Arterial Compliance Model
+        let youthfulCardio = ApexBiometricMath.cardiovascularAge(chronologicalAge: 38, vo2Max: 54, rhr: 47, hrv: 82)
+        assertTrue(youthfulCardio.cardiovascularAge < 38.0 && youthfulCardio.ageDelta <= -4.0 && youthfulCardio.elasticityStatus.contains("Youthful"), "Elite cardio markers must yield younger cardiovascular age (got \(youthfulCardio.cardiovascularAge))")
+        let agedCardio = ApexBiometricMath.cardiovascularAge(chronologicalAge: 38, vo2Max: 32, rhr: 76, hrv: 28)
+        assertTrue(agedCardio.cardiovascularAge > 38.0 && agedCardio.ageDelta > 1.0 && agedCardio.elasticityStatus.contains("Stiffness"), "Compromised cardio markers must yield older cardiovascular age (got \(agedCardio.cardiovascularAge))")
+
+        // 12. Circadian Chronotype & Optimal Sleep Window
+        let lark = ApexBiometricMath.circadianProfile(sleepMidpointHours: 2.5, regularityScore: 92)
+        assertTrue(lark.chronotype == .earlyLark && lark.optimalBedtimeFormatted.contains("PM"), "Midpoint 2.5h should be Early Lark")
+        let morning = ApexBiometricMath.circadianProfile(sleepMidpointHours: 3.25, regularityScore: 88)
+        assertTrue(morning.chronotype == .morningType, "Midpoint 3.25h should be Morning Type")
+        let owl = ApexBiometricMath.circadianProfile(sleepMidpointHours: 5.5, regularityScore: 75)
+        assertTrue(owl.chronotype == .nightOwl && owl.optimalBedtimeFormatted.contains("AM"), "Midpoint 5.5h should be Night Owl")
+
+        // 13. Adaptive Dynamic TDEE & Macro Coach (MacroFactor Model)
+        let weightPts: [DailyMetricPoint] = [
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 7), value: 80.0),
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 6), value: 79.9),
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 5), value: 79.7),
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 1), value: 79.2),
+            DailyMetricPoint(date: Date(), value: 79.0)
+        ]
+        let caloriePts: [DailyMetricPoint] = [
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 7), value: 2100),
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 6), value: 2050),
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 5), value: 2150),
+            DailyMetricPoint(date: Date().addingTimeInterval(-86400 * 1), value: 2000),
+            DailyMetricPoint(date: Date(), value: 2100)
+        ]
+        let adaptive = ApexBiometricMath.adaptiveTDEE(
+            weightHistory: weightPts,
+            calorieHistory: caloriePts,
+            fallbackBasalKcal: 1750,
+            fallbackActiveKcal: 650,
+            bodyWeightKg: 79.0
+        )
+        assertTrue(adaptive.calculatedTDEE >= 2400 && adaptive.calculatedTDEE <= 3600, "Adaptive TDEE with weight loss on 2100 kcal must detect deficit expenditure (got \(adaptive.calculatedTDEE))")
+        assertTrue(adaptive.fatLossTargetKcal < adaptive.calculatedTDEE && adaptive.leanBulkTargetKcal > adaptive.calculatedTDEE, "Targets must scale around TDEE")
+        assertTrue(adaptive.recommendedProteinG >= 150, "Protein recommendation must scale with body weight")
+
+        // 14. Organ-by-Organ Longevity Scorecard (6 Pillars)
+        let scorecard = ApexBiometricMath.organScorecard(
+            chronologicalAge: 35,
+            vo2Max: 52,
+            rhr: 49,
+            hrv: 76,
+            fastingGlucoseMgDL: 82,
+            hba1cPct: 5.1,
+            activeKcal: 720,
+            bodyFatPct: 14.5,
+            deadHangSec: 105,
+            spatialPostureScore: 92,
+            crpMgL: 0.35,
+            albuminGDL: 4.8,
+            paceOfAging: 0.78,
+            clinicalPhenoAge: 27.5
+        )
+        assertTrue(scorecard.pillars.count == 6, "Must compute all 6 organ longevity pillars")
+        assertTrue(scorecard.compositeAge < 35.0, "Rejuvenated biometrics must yield composite age below chronological age (got \(scorecard.compositeAge))")
+        for pillar in scorecard.pillars {
+            assertTrue(!pillar.recommendation.isEmpty, "Every pillar must contain actionable recommendation")
+        }
+
         print("ALL_SWIFT_BIOMETRIC_MATH_TESTS_PASSED")
     }
 }
